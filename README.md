@@ -112,7 +112,7 @@ If enough people find this project interesting I'll get the training program and
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.
 
-## CorridoKey Licensing and Permissions
+## CorridorKey Licensing and Permissions
 
 Use this tool for whatever you'd like. You may not repackage this tool and sell it, and any variations or improvements of this tool that are released must remain free and open source as well. You may not offer inference with this model as a paid API service. If you run a commercial software package or inference service and wish to incoporate this tool into your software, feel free to shoot us an email to work out an agreement. I promise we're easy to work with! contact@corridordigital.com. Outside of any commercial agreements, this license is effectively a [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
