@@ -51,7 +51,7 @@ Model weights (~300MB) are not in the repo. Most tests don't need them.
 
 ## Code Conventions
 
-- Python 3.10+, `from __future__ import annotations` in all CorridorKey-authored files
+- Python 3.11+, `from __future__ import annotations` in all CorridorKey-authored files
 - Modern typing: `str | None` not `Optional[str]`, `list[str]` not `List[str]`
 - Google-style docstrings with `Args:` and `Returns:` sections
 - Ruff: `select = ["E", "F", "W", "I", "B"]`, line length 120
