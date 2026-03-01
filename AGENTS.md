@@ -64,7 +64,7 @@ Model weights (~300MB) are not in the repo. Most tests don't need them.
 
 ## Landmines
 
-- **Never modify `gvm_core/` or `VideoMaMaInferenceModule/`** unless fixing a crash or guarding platform-specific calls (e.g., `torch.cuda.empty_cache()`). These are upstream-derived. See `.claude/rules/third-party-code.md`.
+- **Never modify `gvm_core/` or `VideoMaMaInferenceModule/`** unless fixing a crash or guarding platform-specific calls (e.g., `torch.cuda.empty_cache()`). These are upstream-derived. See the `AGENTS.md` in each directory for details.
 - **Three functions named `run_inference`**: (1) `clip_manager.run_inference()` — library, processes clips; (2) `VideoMaMaInferenceModule.inference.run_inference` — locally imported inside `run_videomama()`; (3) CLI subcommand in `corridorkey_cli.py`. The CLI function must use a different name (e.g., `run_inference_cmd`).
 - **`run_inference()` contains `input()` calls** for user settings (gamma, despill, despeckle, refiner). For non-interactive use, pass an `InferenceSettings` dataclass. The `input()` calls should live in the CLI layer, not the library.
 - **Hardcoded path mapping**: `clip_manager.py` maps `V:\` to `/mnt/ssd-storage` (Corridor Digital's studio setup). Don't remove it, but don't assume it's universal.

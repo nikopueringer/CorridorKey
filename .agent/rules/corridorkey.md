@@ -1,6 +1,6 @@
 # CorridorKey Project Context
 
-Read @/AGENTS.md for full project instructions covering architecture, critical dataflow rules, dev workflow, code conventions, landmines, and hardware requirements.
+Read @../../AGENTS.md for full project instructions covering architecture, critical dataflow rules, dev workflow, code conventions, landmines, and hardware requirements.
 
 Key points:
 

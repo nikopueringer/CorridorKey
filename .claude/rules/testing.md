@@ -1,7 +1,7 @@
 ---
 paths:
   - "tests/**"
-  - "conftest.py"
+  - "tests/conftest.py"
 ---
 
 # Testing Conventions
@@ -18,7 +18,7 @@ uv run pytest -m "not gpu" # skip GPU tests explicitly
 
 - `@pytest.mark.gpu` — requires CUDA or MPS. Auto-skipped when no GPU is detected.
 - `@pytest.mark.slow` — long-running tests.
-- `strict-markers = true` — all custom markers must be registered in `conftest.py`.
+- `strict-markers = true` — all custom markers must be registered in `tests/conftest.py`.
 
 ## Fixtures (in `tests/conftest.py`)
 
