@@ -55,7 +55,7 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     ```bash
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
-3.  Install all dependencies (uv will download Python 3.10+ automatically if needed):
+3.  Install all dependencies (uv will download Python 3.11+ automatically if needed):
     ```bash
     uv sync
     ```
