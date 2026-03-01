@@ -25,7 +25,6 @@ uv run pytest -m "not gpu" # skip GPU tests explicitly
 - `sample_frame_rgb` — 64x64 float32 RGB frame in [0, 1]
 - `sample_mask` — matching 64x64 binary float32 mask
 - `tmp_clip_dir` — temp directory with expected clip structure (Input/, AlphaHint/, Output/)
-- `mock_corridor_key_engine` — mock returning known outputs for `process_frame()`
 
 ## Patterns
 

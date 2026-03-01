@@ -18,7 +18,6 @@ CorridorKey is an AI green screen keyer for professional VFX pipelines. It takes
 | `CorridorKeyModule/core/color_utils.py` | Compositing math: sRGB transfer, premultiply, despill, matte cleanup |
 | `clip_manager.py` | Library: clip scanning, GVM/VideoMaMa orchestration, frame-by-frame inference |
 | `corridorkey_cli.py` | CLI entry point: argparse commands, interactive wizard, user prompts |
-| `device_utils.py` | Device selection: CUDA > MPS > CPU auto-detect, `--device` flag, `CORRIDORKEY_DEVICE` env var |
 
 **Three modules:**
 - `CorridorKeyModule/` — project-authored, the core keying engine
