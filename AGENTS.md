@@ -32,8 +32,10 @@ These are the rules that, when violated, produce subtle compositing bugs (crushe
 - Model input is sRGB-normalized float `[0, 1]`. Model output: FG is sRGB (straight/unpremultiplied), alpha is linear.
 - EXR output (`Processed/`) is **linear float, premultiplied**. The pipeline is: sRGB FG -> `srgb_to_linear()` -> `premultiply()` -> write EXR half-float.
 - **Always use piecewise sRGB transfer** (`color_utils.linear_to_srgb` / `srgb_to_linear`), never the gamma 2.2 approximation (`x ** (1/2.2)`). Known inconsistency: `clip_manager.py` and `gvm_core/utils/inference_utils.py` still use gamma 2.2 for VideoMaMa/GVM preprocessing — documented in `tests/test_gamma_consistency.py`.
-- Inference resolution is fixed at 2048x2048. `process_frame()` resizes input down, runs the model, resizes predictions back with Lanczos4.
+- Inference resolution is fixed at 2048x2048. `process_frame()` resizes input down, runs the model, resizes predictions back with Lanczos4. Frame data is passed as `[H, W, 3]` numpy arrays.
 - `os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"` must be set before any `cv2` import.
+- **Output directories per clip:** `FG/` (half-float EXR, sRGB straight), `Matte/` (half-float EXR, grayscale linear), `Processed/` (half-float EXR, RGBA linear premultiplied), `Comp/` (8-bit PNG, sRGB over checkerboard).
+- **Debugging "crushed shadows" or "dark fringes":** almost certainly an sRGB-to-linear conversion happening in the wrong order. Check the call sequence in `color_utils.py` and `inference_engine.py`.
 
 ## Dev Workflow
 
@@ -59,6 +61,7 @@ Model weights (~300MB) are not in the repo. Most tests don't need them.
 - No `sys.exit()` in library code — raise exceptions instead
 - `os.path` throughout (not `pathlib`) — this is the established convention
 - Diagrams: Mermaid only, no ASCII art
+- **Performance-sensitive code:** The inference loop processes every frame at 2048x2048. Avoid unnecessary `.numpy()` transfers, redundant `cv2.resize` calls, or device round-trips in hot loops.
 
 ## Landmines
 
@@ -68,6 +71,8 @@ Model weights (~300MB) are not in the repo. Most tests don't need them.
 - **Hardcoded path mapping**: `clip_manager.py` maps `V:\` to `/mnt/ssd-storage` (Corridor Digital's studio setup). Don't remove it, but don't assume it's universal.
 - **`tqdm` stays** — used by `gvm_core/`. New CLI-layer progress should use `rich.progress`.
 - **Known gamma inconsistency**: `clip_manager.py` and `gvm_core/utils/inference_utils.py` use gamma 2.2 approximation for VideoMaMa/GVM preprocessing, while `color_utils.py` uses correct piecewise sRGB. Documented in `tests/test_gamma_consistency.py`.
+- **"PointRend" in old commits:** entirely replaced by the CNN Refiner. No PointRend code remains.
+- **`model_transformer.py` is inference-only.** Training logic (coarse logits, `.detach()`, gradient checkpointing) was deliberately stripped. Do not add training hooks back into this file.
 
 ## Hardware
 
