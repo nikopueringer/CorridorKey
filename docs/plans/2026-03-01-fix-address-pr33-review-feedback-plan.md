@@ -66,7 +66,7 @@ def interactive_wizard(win_path, device=None):
 
 Reviewer asks: has `torch.autocast(device_type="mps", dtype=torch.float16)` at `inference_engine.py:160` been tested with actual model weights on Apple Silicon?
 
-**Action:** Answer in PR comment. If not tested, note it as known limitation. `PYTORCH_ENABLE_MPS_FALLBACK=1` env var (already documented in README) should handle unsupported ops, but worth calling out explicitly.
+**Action:** Answer in PR comment. ~~If not tested, note it as known limitation.~~ **Tested successfully on M3 Max.** `PYTORCH_ENABLE_MPS_FALLBACK=1` env var (already documented in README) handles unsupported ops. Two bugs found and fixed during testing (float16 resize crash, alpha video-in-directory not detected).
 
 ## Acceptance Criteria
 
@@ -82,5 +82,5 @@ Reviewer asks: has `torch.autocast(device_type="mps", dtype=torch.float16)` at `
 
 ## Unresolved Questions
 
-- Wire `clear_device_cache()` into owned code or remove as dead code? Need to check if any CorridorKey-owned code (not third-party) calls `torch.cuda.empty_cache()` directly.
-- Has anyone tested on Apple Silicon with real weights? If not, flag as known gap.
+- ~~Wire `clear_device_cache()` into owned code or remove as dead code?~~ **Resolved:** No owned code calls `empty_cache()`. Only third-party (`VideoMaMaInferenceModule/inference.py:156`, `gvm_core/pipelines/pipeline_gvm.py:227`). Kept as public API util.
+- ~~Has anyone tested on Apple Silicon with real weights? If not, flag as known gap.~~ **Resolved:** Tested successfully on M3 Max MacBook. Required two fixes: `float16->float32` cast before `cv2.resize` in `inference_engine.py`, and alpha video-in-directory fallback in `clip_manager.py`.
