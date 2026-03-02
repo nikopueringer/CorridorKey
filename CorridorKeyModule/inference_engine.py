@@ -161,8 +161,11 @@ class CorridorKeyEngine:
 
             handle = self.model.refiner.register_forward_hook(scale_hook)
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+        if self.device.type == "cpu":
             out = self.model(inp_t)
+        else:
+            with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+                out = self.model(inp_t)
 
         if handle:
             handle.remove()

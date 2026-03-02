@@ -25,6 +25,8 @@ from clip_manager import (
     LINUX_MOUNT_ROOT,
     ClipEntry,
     generate_alphas,
+    generate_alphas_chroma,
+    generate_alphas_rvm,
     is_video_file,
     map_path,
     organize_target,
@@ -222,8 +224,10 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
         print("\nACTIONS:")
         if missing_alpha:
-            print(f"  [v] Run VideoMaMa (Found {len(masked)} ready with masks)")
-            print(f"  [g] Run GVM (Auto-Matte on {len(raw)} clips without Mask Hint)")
+            print(f"  [m] Run RVM (person matting, {len(missing_alpha)} clips) [lightweight, Apple Silicon OK]")
+            print(f"  [c] Run Chroma Key (green screen, {len(missing_alpha)} clips) [no GPU needed]")
+            print(f"  [v] Run VideoMaMa (Found {len(masked)} ready with masks) [requires high VRAM]")
+            print(f"  [g] Run GVM (Auto-Matte on {len(raw)} clips without Mask Hint) [requires high VRAM]")
 
         if ready:
             print(f"  [i] Run Inference (on {len(ready)} ready clips)")
@@ -233,7 +237,25 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
         choice = input("\nSelect Action: ").strip().lower()
 
-        if choice == "v":
+        if choice == "m":
+            # RVM
+            print("\n--- RVM (Robust Video Matting) ---")
+            print("Best for: shots with people (semantic person detection)")
+            print("Limitation: non-human subjects get near-zero detection")
+            generate_alphas_rvm(missing_alpha, device=device)
+            input("RVM batch complete. Press Enter to Re-Scan...")
+            continue
+
+        elif choice == "c":
+            # Chroma
+            print("\n--- Adaptive Chroma Key ---")
+            print("Best for: green screen footage with any subject")
+            print("Limitation: requires actual green screen coverage")
+            generate_alphas_chroma(missing_alpha)
+            input("Chroma batch complete. Press Enter to Re-Scan...")
+            continue
+
+        elif choice == "v":
             # VideoMaMa
             print("\n--- VideoMaMa ---")
             print("Scanning for VideoMamaMaskHints...")

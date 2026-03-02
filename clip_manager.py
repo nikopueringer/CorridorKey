@@ -206,7 +206,13 @@ def get_corridor_key_engine(device: str = "cpu") -> CorridorKeyEngine:
         ckpt_path = ckpt_files[0]
         logger.info(f"Using checkpoint: {os.path.basename(ckpt_path)}")
 
-        return CorridorKeyEngine(checkpoint_path=ckpt_path, device=device, img_size=2048)
+        # MPS (Apple Silicon) produces noisy alpha at 2048 due to float16 precision.
+        # 1024 gives clean results and is well within MPS memory limits.
+        img_size = 1024 if device == "mps" else 2048
+        if img_size == 1024:
+            logger.info(f"Apple Silicon detected — using {img_size}x{img_size} inference (optimized for MPS)")
+
+        return CorridorKeyEngine(checkpoint_path=ckpt_path, device=device, img_size=img_size)
     except Exception as e:
         raise RuntimeError(f"Failed to initialize CorridorKey Engine: {e}") from e
 
@@ -284,6 +290,127 @@ def generate_alphas(clips: list[ClipEntry], device: str | None = None) -> None:
 
         except Exception as e:
             logger.error(f"Error generating alpha for {clip.name}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+
+def generate_alphas_rvm(clips: list[ClipEntry], device: str | None = None) -> None:
+    """Generate alpha hints using RVM (Robust Video Matting).
+
+    Lightweight person-matting model (~14.5MB) that runs on MPS/CUDA/CPU.
+    Best for shots with people. Non-human subjects get near-zero detection.
+    """
+    clips_to_process = [c for c in clips if c.alpha_asset is None]
+
+    if not clips_to_process:
+        logger.info("All clips have valid Alpha assets. No generation needed.")
+        return
+
+    logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
+
+    if device is None:
+        device = resolve_device()
+
+    from CorridorKeyModule.core.rvm_hint_generator import RVMHintGenerator
+
+    rvm = RVMHintGenerator(device=device)
+
+    for clip in clips_to_process:
+        logger.info(f"Generating RVM Alpha for: {clip.name}")
+
+        alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
+        if os.path.exists(alpha_output_dir):
+            shutil.rmtree(alpha_output_dir)
+        os.makedirs(alpha_output_dir, exist_ok=True)
+
+        try:
+            rvm.reset()
+
+            if clip.input_asset.type == "video":
+                count, _fps = rvm.generate_hints_for_video(
+                    clip.input_asset.path, alpha_output_dir,
+                )
+                logger.info(f"RVM Complete: {count} frames -> {alpha_output_dir}")
+            else:
+                files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+                for i, fname in enumerate(files):
+                    frame = cv2.imread(os.path.join(clip.input_asset.path, fname))
+                    if frame is None:
+                        continue
+                    mask = rvm.generate_hint(frame)
+                    cv2.imwrite(os.path.join(alpha_output_dir, f"{i:05d}.png"), mask)
+                    if (i + 1) % 10 == 0 or i == 0:
+                        print(f"  RVM hints: {i + 1}/{len(files)}")
+                logger.info(f"RVM Complete: {len(files)} frames -> {alpha_output_dir}")
+
+            clip.alpha_asset = ClipAsset(alpha_output_dir, "sequence")
+
+        except Exception as e:
+            logger.error(f"Error generating RVM alpha for {clip.name}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+
+def generate_alphas_chroma(clips: list[ClipEntry]) -> None:
+    """Generate alpha hints using adaptive chroma keying.
+
+    HSV-based green screen detection — no model, no GPU needed.
+    Works on any subject type. Requires actual green screen coverage.
+    """
+    clips_to_process = [c for c in clips if c.alpha_asset is None]
+
+    if not clips_to_process:
+        logger.info("All clips have valid Alpha assets. No generation needed.")
+        return
+
+    logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
+
+    from CorridorKeyModule.core.chroma_hint_generator import (
+        generate_hints_for_video,
+        sample_screen_color,
+        generate_hint,
+    )
+
+    for clip in clips_to_process:
+        logger.info(f"Generating Chroma Alpha for: {clip.name}")
+
+        alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
+        if os.path.exists(alpha_output_dir):
+            shutil.rmtree(alpha_output_dir)
+        os.makedirs(alpha_output_dir, exist_ok=True)
+
+        try:
+            if clip.input_asset.type == "video":
+                count, _fps = generate_hints_for_video(
+                    clip.input_asset.path, alpha_output_dir,
+                )
+                logger.info(f"Chroma Complete: {count} frames -> {alpha_output_dir}")
+            else:
+                files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+                color_profile = None
+                for i, fname in enumerate(files):
+                    frame = cv2.imread(os.path.join(clip.input_asset.path, fname))
+                    if frame is None:
+                        continue
+                    if i == 0:
+                        color_profile = sample_screen_color(frame)
+                        if color_profile:
+                            print(f"  Screen color: H={color_profile['h_median']:.0f} "
+                                  f"S={color_profile['s_median']:.0f} V={color_profile['v_median']:.0f}")
+                        else:
+                            print("  No green detected — using default broad range")
+                    mask = generate_hint(frame, color_profile=color_profile)
+                    cv2.imwrite(os.path.join(alpha_output_dir, f"{i:05d}.png"), mask)
+                    if (i + 1) % 100 == 0 or i == 0:
+                        print(f"  Chroma hints: {i + 1}/{len(files)}")
+                logger.info(f"Chroma Complete: {len(files)} frames -> {alpha_output_dir}")
+
+            clip.alpha_asset = ClipAsset(alpha_output_dir, "sequence")
+
+        except Exception as e:
+            logger.error(f"Error generating chroma alpha for {clip.name}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -591,6 +718,19 @@ def run_inference(clips: list[ClipEntry], device: str | None = None) -> None:
             refiner_scale = 1.0
     logger.info(f"User selected: Refiner Strength {refiner_scale}")
 
+    # 5. ProRes 4444 Output Prompt
+    output_prores = False
+    prores_fps = 24.0
+    format_choice = input("Also output ProRes 4444 with alpha (.mov)? [y/N]: ").strip().lower()
+    if format_choice == "y":
+        output_prores = True
+        fps_val = input("Enter frame rate for ProRes output [default 24]: ").strip()
+        try:
+            prores_fps = float(fps_val) if fps_val else 24.0
+        except ValueError:
+            prores_fps = 24.0
+        logger.info(f"User selected: ProRes 4444 output at {prores_fps} fps")
+
     print("--------------------------\n")
 
     # Ensure Output Directory exists
@@ -615,6 +755,9 @@ def run_inference(clips: list[ClipEntry], device: str | None = None) -> None:
 
         for d in [fg_dir, matte_dir, comp_dir, proc_dir]:
             os.makedirs(d, exist_ok=True)
+
+        # ProRes writer (initialized lazily on first frame to get dimensions)
+        prores_writer = None
 
         num_frames = min(clip.input_asset.frame_count, clip.alpha_asset.frame_count)
         logger.info(
@@ -764,7 +907,26 @@ def run_inference(clips: list[ClipEntry], device: str | None = None) -> None:
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
                 cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, exr_flags)
 
+                # 7. Write ProRes 4444 frame (if enabled)
+                if output_prores:
+                    from CorridorKeyModule.core.color_utils import linear_to_srgb
+
+                    if prores_writer is None:
+                        from CorridorKeyModule.core.prores_writer import ProResWriter
+
+                        h_out, w_out = proc_rgba.shape[:2]
+                        prores_path = os.path.join(clip_out_root, f"{clip.name}_processed.mov")
+                        prores_writer = ProResWriter(prores_path, w_out, h_out, frame_rate=prores_fps)
+                        logger.info(f"Writing ProRes 4444: {prores_path}")
+                    # Convert linear premul RGB to sRGB for display-referred ProRes, keep alpha linear
+                    prores_rgba = proc_rgba.copy()
+                    prores_rgba[:, :, :3] = linear_to_srgb(prores_rgba[:, :, :3])
+                    prores_writer.write_frame(prores_rgba)
+
         print("")
+        if prores_writer:
+            prores_writer.close()
+            logger.info(f"ProRes 4444 output saved for {clip.name}.")
         if input_cap:
             input_cap.release()
         if alpha_cap:
