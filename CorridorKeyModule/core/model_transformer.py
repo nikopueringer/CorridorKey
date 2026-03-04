@@ -20,6 +20,11 @@ class MLP(nn.Module):
 
 
 class DecoderHead(nn.Module):
+    """
+    SegFormer-style multi-scale decoder. Unifies 4 encoder feature maps (1/4 to 1/32 scale)
+    to a common dimensionality, upsamples to the finest scale, and fuses into a single prediction.
+    """
+
     def __init__(
         self, feature_channels: list[int] | None = None, embedding_dim: int = 256, output_dim: int = 1
     ) -> None:
@@ -96,7 +101,7 @@ class RefinerBlock(nn.Module):
 
 class CNNRefinerModule(nn.Module):
     """
-    Dilated Residual Refiner (Receptive Field ~65px).
+    Dilated Residual Refiner (Receptive Field ~63px).
     designed to solve Macroblocking artifacts from Hiera.
     Structure: Stem -> Res(d1) -> Res(d2) -> Res(d4) -> Res(d8) -> Projection.
     """
@@ -141,6 +146,12 @@ class CNNRefinerModule(nn.Module):
 
 
 class GreenFormer(nn.Module):
+    """
+    Hiera vision-transformer backbone + dual SegFormer decoders + CNN refiner.
+    4-channel input (RGB + mask hint) → {"alpha": [B,1,H,W], "fg": [B,3,H,W]}.
+    See docs/PROCESS_OVERVIEW.md Steps 5A–5E for the full pipeline narrative.
+    """
+
     def __init__(
         self,
         encoder_name: str = "hiera_base_plus_224.mae_in1k_ft_in1k",
@@ -242,7 +253,7 @@ class GreenFormer(nn.Module):
         input_size = x.shape[2:]
 
         # Encode
-        features = self.encoder(x)  # Returns list of features
+        features = self.encoder(x)  # Returns list of features, 4 feature maps at 1/4, 1/8, 1/16, 1/32
 
         # Decode Streams
         alpha_logits = self.alpha_decoder(features)  # [B, 1, H/4, W/4]

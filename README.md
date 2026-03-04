@@ -136,6 +136,8 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.
 
+For a step-by-step walkthrough of every operation the engine performs on a single frame, see the [Process Overview](docs/PROCESS_OVERVIEW.md).
+
 ### Running Tests
 
 The project includes unit tests for the color math and compositing pipeline. No GPU or model weights required — tests run in a few seconds on any machine.

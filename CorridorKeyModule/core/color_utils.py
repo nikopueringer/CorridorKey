@@ -89,7 +89,7 @@ def composite_straight(
     fg: np.ndarray | torch.Tensor, bg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor
 ) -> np.ndarray | torch.Tensor:
     """
-    Composites Straight FG over BG.
+    Composites Straight (unpremultiplied) FG over BG.
     Formula: FG * Alpha + BG * (1 - Alpha)
     """
     return fg * alpha + bg * (1.0 - alpha)
@@ -299,7 +299,7 @@ def create_checkerboard(
     width: int, height: int, checker_size: int = 64, color1: float = 0.2, color2: float = 0.4
 ) -> np.ndarray:
     """
-    Creates a linear grayscale checkerboard pattern.
+    Creates a linear grayscale checkerboard pattern (sRGB values).
     Returns: Numpy array [H, W, 3] float (0.0-1.0)
     """
     # Create coordinate grids
