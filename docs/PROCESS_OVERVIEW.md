@@ -51,7 +51,7 @@ The 3-channel RGB image and 1-channel mask are stacked side-by-side into a singl
 
 The Vision Transformer (Hiera) breaks the image into small patches and processes them through hierarchical attention — patches attend locally first, then regions merge and widen at each stage, building understanding from fine detail up to scene-level context. It outputs 4 feature maps at progressively coarser scales (1/4, 1/8, 1/16, 1/32 of input size), capturing everything from fine edge detail to big-picture scene understanding.
 
-`model_transformer.py` · Stage A
+`model_transformer.py` · `GreenFormer.forward()`, encoder
 
 ### Step 5B — Dual Decoding
 > *Two independent heads read the same features, predict different things*
@@ -62,28 +62,28 @@ Two decoder heads process the encoder's multi-scale features:
 
 Each decoder takes features from all 4 scales, projects them to a common dimension, upscales them to the same size, and merges them — like combining a microscope view, a normal lens, a wide-angle, and a satellite view into one coherent prediction. Each decoder outputs at 1/4 resolution in "logit" space (raw scores, not yet constrained to 0–1). Bilinear interpolation then scales these logits back to the full 2048×2048 grid — upsampling before sigmoid rather than after keeps the math smoother and avoids clipping near 0 and 1.
 
-`model_transformer.py` · Stages B–C
+`model_transformer.py` · `DecoderHead`
 
 ### Step 5C — Sigmoid Activation (Coarse Prediction)
 > *Squash raw scores into probabilities*
 
 Sigmoid converts the raw logit scores into the 0–1 range: large negative values become near-0 (transparent/black), large positive values become near-1 (opaque/bright). This produces the transformer's "coarse" prediction — accurate in broad strokes but with visible grid-line artifacts at patch boundaries.
 
-`model_transformer.py` · Stage D
+`model_transformer.py` · `GreenFormer.forward()`, coarse sigmoid
 
 ### Step 5D — CNN Refinement
 > *Fine brush over broad strokes — clean up patch boundary artifacts*
 
 A small CNN (the "Refiner") looks at the original image alongside the transformer's coarse prediction and outputs pixel-level corrections. It uses dilated convolutions with increasing dilation rates (1→2→4→8) to see across a ~63px receptive field — wide enough to look across patch boundaries and smooth the blocky artifacts. The corrections are added in **logit space** (before sigmoid), which means even very confident predictions can be adjusted without hitting mathematical ceilings. Initialized to near-zero so it starts as a no-op and learns what to fix during training.
 
-`model_transformer.py` · Stage E, `CNNRefinerModule`
+`model_transformer.py` · `CNNRefinerModule`
 
 ### Step 5E — Final Activation
 > *Merge corrections and produce the final prediction*
 
 The refiner's delta corrections are added to the original logits, then sigmoid is applied to produce the final 0–1 predictions. Alpha becomes the transparency matte; foreground becomes the "clean" subject color.
 
-`model_transformer.py` · Stage F
+`model_transformer.py` · `GreenFormer.forward()`, final sigmoid
 
 ---
 
@@ -133,7 +133,7 @@ The 3 processed color channels and 1 alpha channel are combined into a single 4-
 
 The keyed subject is layered over a checkerboard pattern so you can visually verify the quality — like holding a cutout up against a patterned background to check for holes, halos, or green fringing. The checkerboard is generated in sRGB, converted to linear for physically-correct blending, then the result is converted back to sRGB for PNG output.
 
-`inference_engine.py` · Step 8
+`inference_engine.py` · Step 7 (composite)
 
 ### Written Outputs
 
