@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from typing import TYPE_CHECKING
 
 # Enable OpenEXR support in OpenCV — needed for EXR I/O throughout the pipeline.
@@ -185,7 +186,7 @@ def get_gvm_processor(device: str = "cpu") -> GVMProcessor:
         raise RuntimeError(f"Failed to initialize GVM Processor: {e}") from e
 
 
-def generate_alphas(clips, device=None):
+def generate_alphas(clips, device=None, **kwargs):
     clips_to_process = [c for c in clips if c.alpha_asset is None]
 
     if not clips_to_process:
@@ -194,7 +195,7 @@ def generate_alphas(clips, device=None):
 
     logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
 
-    if device is None:
+    if device is None or device == 'auto':
         device = resolve_device()
 
     try:
@@ -225,6 +226,7 @@ def generate_alphas(clips, device=None):
                 mode="matte",
                 write_video=False,
                 direct_output_dir=alpha_output_dir,
+                max_frames=kwargs['max_frames']
             )
 
             # Post-Process: Naming Convention
@@ -263,7 +265,7 @@ def generate_alphas(clips, device=None):
             traceback.print_exc()
 
 
-def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | None = None) -> None:
+def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | None = None, **kwargs) -> None:
     """
     Runs VideoMaMa on clips that have VideoMamaMaskHint but NO AlphaHint.
     """
@@ -494,66 +496,80 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def run_inference(clips, backend=None, max_frames=None, **kwargs):
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
+    device = kwargs['device']
 
     if not ready_clips:
         logger.info("No clips found with both Input and Alpha assets. Run generate_coarse_alpha first?")
         return
 
-    logger.info(f"Found {len(ready_clips)} clips ready for inference.")
+    logger.debug(f"Found {len(ready_clips)} clips ready for inference.")
 
     # --- User Prompts ---
-    print("\n--- Inference Settings ---")
+    logger.debug("\n--- Inference Settings ---")
 
     # 1. Gamma Prompt
-    user_input_is_linear = False
-    gamma_choice = input("Is the input sequence Linear (l) or sRGB (s)? [l/s]: ").strip().lower()
-    if gamma_choice == "l":
-        user_input_is_linear = True
-        logger.info("User selected: Linear Input")
+    if kwargs['action'] == 'wizard':
+        user_input_is_linear = False
+        gamma_choice = input("Is the input sequence Linear (l) or sRGB (s)? [l/s]: ").strip().lower()
+        if gamma_choice == "l":
+            user_input_is_linear = True
+            logger.debug("User selected: Linear Input")
+        else:
+            logger.debug("User selected: sRGB Input (or default)")
     else:
-        logger.info("User selected: sRGB Input (or default)")
+        user_input_is_linear = kwargs['gamma_encoding'] == 'linear'
 
     # 2. Despill Prompt
-    despill_val = input("Enter Despill Strength (0-10, 10 is max despill) [default 10]: ").strip()
-    try:
-        despill_int = int(despill_val)
-        despill_int = max(0, min(10, despill_int))
-    except ValueError:
-        despill_int = 10
+    if kwargs['action'] == 'wizard':
+        despill_val = input("Enter Despill Strength (0-10, 10 is max despill) [default 10]: ").strip()
+        try:
+            despill_int = int(despill_val)
+            despill_int = max(0, min(10, despill_int))
+        except ValueError:
+            despill_int = 10
+    else:
+        despill_int = kwargs['despill_strength']
 
     despill_strength = despill_int / 10.0
-    logger.info(f"User selected: Despill Strength {despill_int}/10 ({despill_strength})")
+    logger.debug(f"User selected: Despill Strength {despill_int}/10 ({despill_strength})")
     # 3. Auto-Despeckle Prompt
-    auto_despeckle = True
-    despeckle_size = 400
-    despeckle_choice = input("Enable Auto-Despeckle (removes tracking dots in Processed/Comp)? [Y/n]: ").strip().lower()
-    if despeckle_choice == "n":
-        auto_despeckle = False
-        logger.info("User selected: Auto-Despeckle OFF")
+    if kwargs['action'] == 'wizard':
+        auto_despeckle = True
+        despeckle_size = 400
+        despeckle_choice = input("Enable Auto-Despeckle (removes tracking dots in Processed/Comp)? [Y/n]: ").strip().lower()
+        if despeckle_choice == "n":
+            auto_despeckle = False
+            logger.info("User selected: Auto-Despeckle OFF")
+        else:
+            logger.info("User selected: Auto-Despeckle ON (default)")
+            size_val = input("Enter Auto-Despeckle Size (min pixels for a spot) [default 400]: ").strip()
+            try:
+                val_int = int(size_val)
+                despeckle_size = max(0, val_int)
+            except ValueError:
+                despeckle_size = 400
+            logger.info(f"User selected: Auto-Despeckle Size {despeckle_size}px")
     else:
-        logger.info("User selected: Auto-Despeckle ON (default)")
-        size_val = input("Enter Auto-Despeckle Size (min pixels for a spot) [default 400]: ").strip()
-        try:
-            val_int = int(size_val)
-            despeckle_size = max(0, val_int)
-        except ValueError:
-            despeckle_size = 400
-        logger.info(f"User selected: Auto-Despeckle Size {despeckle_size}px")
+        auto_despeckle = kwargs['despeckle']
+        despeckle_size = kwargs['despeckle_size']
 
     # 4. Refiner Strength Prompt
-    refiner_val = input("Enter Refiner Strength (multiplier) [default 1.0] (experimental): ").strip()
-    if refiner_val == "":
-        refiner_scale = 1.0
-    else:
-        try:
-            refiner_scale = float(refiner_val)
-        except ValueError:
+    if kwargs['action'] == 'wizard':
+        refiner_val = input("Enter Refiner Strength (multiplier) [default 1.0] (experimental): ").strip()
+        if refiner_val == "":
             refiner_scale = 1.0
-    logger.info(f"User selected: Refiner Strength {refiner_scale}")
+        else:
+            try:
+                refiner_scale = float(refiner_val)
+            except ValueError:
+                refiner_scale = 1.0
+        logger.info(f"User selected: Refiner Strength {refiner_scale}")
+    else:
+        refiner_scale = kwargs['refiner_strength']
 
-    print("--------------------------\n")
+    logger.debug("--------------------------\n")
 
     # Ensure Output Directory exists
     if not os.path.exists(OUTPUT_DIR):
@@ -561,7 +577,7 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
 
     import numpy as np
 
-    if device is None:
+    if device is None or device == 'auto':
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
@@ -608,10 +624,12 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
             alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
 
         for i in range(num_frames):
-            if i % 10 == 0:
-                print(f"  Frame {i}/{num_frames}...", end="\r")
+            logging.info(f"Frame {i+1}/{num_frames}...")
+            t_start_frame_processing = time.time()
+            t_last_operation = time.time()
 
             # 1. Read Input
+            logging.debug(f"\t1. Read Input")
             img_srgb = None
             input_stem = f"{i:05d}"
 
@@ -645,6 +663,10 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                     img_srgb = img_rgb.astype(np.float32) / 255.0
 
             # 2. Read Alpha (Mask)
+            elapsed = time.time() - t_last_operation
+            t_last_operation = time.time()
+            logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
+            logging.debug(f"\t2. Read Alpha (Mask)")
             mask_linear = None
             if alpha_cap:
                 ret, frame = alpha_cap.read()
@@ -679,6 +701,10 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                 )
 
             # 3. Process
+            elapsed = time.time() - t_last_operation
+            t_last_operation = time.time()
+            logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
+            logging.debug(f"\t3. Process")
             USE_STRAIGHT_MODEL = True
             res = engine.process_frame(
                 img_srgb,
@@ -695,6 +721,10 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
             pred_alpha = res["alpha"]  # Linear
 
             # 4. Save (EXR DWAB Half-Float)
+            elapsed = time.time() - t_last_operation
+            t_last_operation = time.time()
+            logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
+            logging.debug(f"\t4. Save (EXR DWAB Half-Float)")
 
             # Compression Params
             exr_flags = [
@@ -717,20 +747,34 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
             cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, exr_flags)
 
             # 5. Generate Reference Comp
+            elapsed = time.time() - t_last_operation
+            t_last_operation = time.time()
+            logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
+            logging.debug(f"\t5. Generate Reference Comp")
             comp_srgb = res["comp"]
             # Save Comp (PNG 8-bit)
             comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
             cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
+            elapsed = time.time() - t_last_operation
+            t_last_operation = time.time()
+            logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
             # 6. Save Processed (RGBA EXR)
             if "processed" in res:
+                logging.debug(f"\t6. Save Processed (RGBA EXR)")
                 # Result is RGBA
                 proc_rgba = res["processed"]
                 # Convert to BGRA for OpenCV
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
                 cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, exr_flags)
+                elapsed = time.time() - t_last_operation
+                t_last_operation = time.time()
+                logging.debug(f"\t\tElapsed time: {elapsed:.3f} seconds")
+            elapsed = time.time() - t_start_frame_processing
+            t_last_operation = time.time()
+            logging.debug(f"\tFrame elapsed time: {elapsed:.3f} seconds")
 
-        print("")
+        logging.debug("")
         if input_cap:
             input_cap.release()
         if alpha_cap:
@@ -839,88 +883,3 @@ def organize_clips(clips_dir: str) -> None:
         full_path = os.path.join(clips_dir, entry)
         if os.path.isdir(full_path) and entry not in ["IgnoredClips", "Output"]:
             organize_target(full_path)
-
-
-def scan_clips() -> list[ClipEntry]:
-    if not os.path.exists(CLIPS_DIR):
-        os.makedirs(CLIPS_DIR, exist_ok=True)
-        return []
-
-    # Auto-organize first
-    organize_clips(CLIPS_DIR)
-
-    clip_dirs = [d for d in os.listdir(CLIPS_DIR) if os.path.isdir(os.path.join(CLIPS_DIR, d))]
-
-    valid_clips = []
-    invalid_clips = []
-
-    for d in clip_dirs:
-        if d.startswith(".") or d.startswith("_") or d == "IgnoredClips":
-            continue
-
-        full_path = os.path.join(CLIPS_DIR, d)
-
-        try:
-            entry = ClipEntry(d, full_path)
-            entry.find_assets()
-            entry.validate_pair()
-            valid_clips.append(entry)
-        except ValueError as ve:
-            invalid_clips.append((d, str(ve)))
-        except Exception as e:
-            invalid_clips.append((d, f"Unexpected error: {e}"))
-
-    if invalid_clips:
-        print("\n" + "=" * 60)
-        print(" INVALID OR SKIPPED CLIPS")
-        print("=" * 60)
-        for name, reason in invalid_clips:
-            print(f"- {name}: {reason}")
-        print("=" * 60 + "\n")
-    else:
-        print("\nAll clip folders appear valid.\n")
-
-    return valid_clips
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
-    parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
-    parser.add_argument(
-        "--device",
-        choices=["auto", "cuda", "mps", "cpu"],
-        default="auto",
-        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["auto", "torch", "mlx"],
-        default="auto",
-        help="Inference backend (default: auto-detect MLX on Apple Silicon, else Torch)",
-    )
-    parser.add_argument(
-        "--max-frames",
-        type=int,
-        default=None,
-        help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
-    )
-
-    args = parser.parse_args()
-
-    device = resolve_device(args.device)
-    logger.info(f"Using device: {device}")
-
-    if args.action == "list":
-        scan_clips()
-    elif args.action == "generate_alphas":
-        clips = scan_clips()
-        generate_alphas(clips, device=device)
-    elif args.action == "run_inference":
-        clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
-    elif args.action == "wizard":
-        if not args.win_path:
-            print("Error: --win_path required for wizard.")
-        else:
-            raise NotImplementedError("interactive_wizard is not yet implemented")

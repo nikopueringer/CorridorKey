@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+
 """CorridorKey command-line interface and interactive wizard.
 
 This module handles CLI argument parsing, environment setup, and the
@@ -5,10 +7,7 @@ interactive wizard workflow. The pipeline logic lives in clip_manager.py,
 which can be imported independently as a library.
 
 Usage (via launcher scripts):
-    uv run python corridorkey_cli.py --action wizard --win_path "V:\\..."
-    uv run python corridorkey_cli.py --action run_inference
-    uv run python corridorkey_cli.py --action generate_alphas
-    uv run python corridorkey_cli.py --action list
+    uv run python corridorkey_cli.py --help
 """
 
 from __future__ import annotations
@@ -29,37 +28,41 @@ from clip_manager import (
     map_path,
     organize_target,
     run_inference,
-    run_videomama,
-    scan_clips,
+    run_videomama
 )
 from device_utils import resolve_device
 
-logger = logging.getLogger(__name__)
+def wizard_print(action, msg):
+    if action == 'wizard':
+        print(msg)
+    else:
+        logging.debug(msg)
 
-
-def _configure_environment() -> None:
-    """Set up logging and warnings for interactive CLI use.
-
-    This is called once at startup when running from the command line.
-    It is NOT called when importing clip_manager as a library.
-    """
-    warnings.filterwarnings("ignore")
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-
-def interactive_wizard(win_path: str, device: str | None = None) -> None:
-    print("\n" + "=" * 60)
-    print(" CORRIDOR KEY - SMART WIZARD")
-    print("=" * 60)
+def do_process(
+    despill_strength,
+    despeckle,
+    despeckle_size,
+    device,
+    gamma_encoding,
+    max_frames,
+    organize_clips,
+    refiner_strength,
+    action,
+    input_path,
+    **kwargs
+) -> None:
+    wizard_print(action, "\n" + "=" * 60)
+    wizard_print(action, " CORRIDOR KEY - SMART WIZARD")
+    wizard_print(action, "=" * 60)
 
     # 1. Map Path
-    linux_path = map_path(win_path)
-    print(f"Windows Path: {win_path}")
-    print(f"Linux Path:   {linux_path}")
+    linux_path = map_path(input_path)
+    wizard_print(action, f"Windows Path: {input_path}")
+    wizard_print(action, f"Linux Path:   {linux_path}")
 
     if not os.path.exists(linux_path):
-        print("\n[ERROR] Path does not exist on Linux mount!")
-        print(f"Expected: {LINUX_MOUNT_ROOT}")
+        logging.error("\n[ERROR] Path does not exist on Linux mount!")
+        logging.error(f"Expected: {LINUX_MOUNT_ROOT}")
         return
 
     # 2. Analyze
@@ -89,7 +92,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             if os.path.basename(d) not in ["Output", "AlphaHint", "VideoMamaMaskHint", ".ipynb_checkpoints"]
         ]
 
-    print(f"\nFound {len(work_dirs)} potential clip folders.")
+    wizard_print(action, f"\nFound {len(work_dirs)} potential clip folders.")
 
     # Check for loose videos in root
     loose_videos = [
@@ -110,22 +113,26 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
     if loose_videos or dirs_needing_org:
         if loose_videos:
-            print(f"Found {len(loose_videos)} loose video files that need organization:")
+            wizard_print(action, f"Found {len(loose_videos)} loose video files that need organization:")
             for v in loose_videos:
-                print(f"  - {v}")
+                wizard_print(action, f"  - {v}")
 
         if dirs_needing_org:
-            print(f"Found {len(dirs_needing_org)} folders that might need setup (Hints/Input):")
+            wizard_print(action, f"Found {len(dirs_needing_org)} folders that might need setup (Hints/Input):")
             # Limit output if too many
             if len(dirs_needing_org) < 10:
                 for d in dirs_needing_org:
-                    print(f"  - {os.path.basename(d)}")
+                    wizard_print(action, f"  - {os.path.basename(d)}")
             else:
-                print(f"  - ...and {len(dirs_needing_org)} others.")
+                wizard_print(action, f"  - ...and {len(dirs_needing_org)} others.")
 
         # 3. Organize Loop
-        yn = input("\n[1] Organize Clips & Create Hint Folders? [y/N]: ").strip().lower()
-        if yn == "y":
+        if (action == "wizard"):
+            yn = input("\n[1] Organize Clips & Create Hint Folders? [y/N]: ").strip().lower() == 'y'
+        else:
+            yn = organize_clips
+            
+        if yn:
             # Organize loose videos first
             for v in loose_videos:
                 clip_name = os.path.splitext(v)[0]
@@ -133,25 +140,25 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
                 target_folder = os.path.join(linux_path, clip_name)
 
                 if os.path.exists(target_folder):
-                    logger.warning(f"Skipping loose video '{v}': Target folder '{clip_name}' already exists.")
+                    logging.warning(f"Skipping loose video '{v}': Target folder '{clip_name}' already exists.")
                     continue
 
                 try:
                     os.makedirs(target_folder)
                     target_file = os.path.join(target_folder, f"Input{ext}")
                     shutil.move(os.path.join(linux_path, v), target_file)
-                    logger.info(f"Organized: Moved '{v}' to '{clip_name}/Input{ext}'")
+                    logging.info(f"Organized: Moved '{v}' to '{clip_name}/Input{ext}'")
 
                     # Also initialize hints immediately
                     for hint in ["AlphaHint", "VideoMamaMaskHint"]:
                         os.makedirs(os.path.join(target_folder, hint), exist_ok=True)
                 except Exception as e:
-                    logger.error(f"Failed to organize video '{v}': {e}")
+                    logging.error(f"Failed to organize video '{v}': {e}")
 
             # Organize existing folders
             for d in work_dirs:
                 organize_target(d)
-            print("Organization Complete.")
+            wizard_print(action, "Organization Complete.")
 
             # Re-scan in case structure changed
             # If it was a shot, it's still a shot (unless we messed it up)
@@ -202,120 +209,118 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             else:
                 raw.append(entry)
 
-        print("\n" + "-" * 40)
-        print("STATUS REPORT:")
-        print(f"  READY (AlphaHint found): {len(ready)}")
+        wizard_print(action, "\n" + "-" * 40)
+        wizard_print(action, "STATUS REPORT:")
+        wizard_print(action, f"  READY (AlphaHint found): {len(ready)}")
         for c in ready:
-            print(f"    - {c.name}")
+            wizard_print(action, f"    - {c.name}")
 
-        print(f"  MASKED (VideoMamaMaskHint found): {len(masked)}")
+        wizard_print(action, f"  MASKED (VideoMamaMaskHint found): {len(masked)}")
         for c in masked:
-            print(f"    - {c.name}")
+            wizard_print(action, f"    - {c.name}")
 
-        print(f"  RAW (Input only):        {len(raw)}")
+        wizard_print(action, f"  RAW (Input only):        {len(raw)}")
         for c in raw:
-            print(f"    - {c.name}")
-        print("-" * 40 + "\n")
+            wizard_print(action, f"    - {c.name}")
+        wizard_print(action, "-" * 40 + "\n")
 
         # Combine checks for actions
         missing_alpha = masked + raw
 
-        print("\nACTIONS:")
-        if missing_alpha:
-            print(f"  [v] Run VideoMaMa (Found {len(masked)} ready with masks)")
-            print(f"  [g] Run GVM (Auto-Matte on {len(raw)} clips without Mask Hint)")
+        if action == 'wizard':
+            print("\nACTIONS:")
+            if missing_alpha:
+                print(f"  [v] Run VideoMaMa (Found {len(masked)} ready with masks)")
+                print(f"  [g] Run GVM (Auto-Matte on {len(raw)} clips without Mask Hint)")
 
-        if ready:
-            print(f"  [i] Run Inference (on {len(ready)} ready clips)")
+            if ready:
+                print(f"  [i] Run Inference (on {len(ready)} ready clips)")
 
-        print("  [r] Re-Scan Folders")
-        print("  [q] Quit")
+            print("  [r] Re-Scan Folders")
+            print("  [q] Quit")
 
-        choice = input("\nSelect Action: ").strip().lower()
+            choice = input("\nSelect Action: ").strip().lower()
 
-        if choice == "v":
-            # VideoMaMa
-            print("\n--- VideoMaMa ---")
-            print("Scanning for VideoMamaMaskHints...")
-            # We pass ALL missing alpha clips. run_videomama checks for the actual files.
-            run_videomama(missing_alpha, chunk_size=50, device=device)
-            input("VideoMaMa batch complete. Press Enter to Re-Scan...")
-            continue
+            if choice == "v":
+                # VideoMaMa
+                print("\n--- VideoMaMa ---")
+                print("Scanning for VideoMamaMaskHints...")
+                # We pass ALL missing alpha clips. run_videomama checks for the actual files.
+                run_videomama(missing_alpha, chunk_size=50, **locals())
+                input("VideoMaMa batch complete. Press Enter to Re-Scan...")
+                continue
 
-        elif choice == "g":
-            # GVM
-            print("\n--- GVM Auto-Matte ---")
-            print(f"This will generate alphas for {len(raw)} clips that have NO Mask Hint.")
+            elif choice == "g":
+                # GVM
+                print("\n--- GVM Auto-Matte ---")
+                print(f"This will generate alphas for {len(raw)} clips that have NO Mask Hint.")
 
-            yn = input("Proceed with GVM? [y/N]: ").strip().lower()
-            if yn == "y":
-                generate_alphas(raw, device=device)
-                input("GVM batch complete. Press Enter to Re-Scan...")
-            continue
+                yn = input("Proceed with GVM? [y/N]: ").strip().lower()
+                if yn == "y":
+                    generate_alphas(raw, **locals())
+                    input("GVM batch complete. Press Enter to Re-Scan...")
+                continue
 
-        elif choice == "i":
-            # Inference
-            print("\n--- Corridor Key Inference ---")
-            try:
-                run_inference(ready, device=device)
-            except (RuntimeError, FileNotFoundError) as e:
-                logger.error(f"Inference failed: {e}")
-            input("Inference batch complete. Press Enter to Re-Scan...")
-            continue
+            elif choice == "i":
+                # Inference
+                print("\n--- Corridor Key Inference ---")
+                try:
+                    run_inference(ready, **locals())
+                except (RuntimeError, FileNotFoundError) as e:
+                    logging.error(f"Inference failed: {e}")
+                input("Inference batch complete. Press Enter to Re-Scan...")
+                continue
 
-        elif choice == "r":
-            print("\nRe-scanning...")
-            continue
+            elif choice == "r":
+                print("\nRe-scanning...")
+                continue
 
-        elif choice == "q":
+            elif choice == "q":
+                break
+
+            else:
+                print("Invalid selection.")
+                continue
+        elif action == "run_inference":
+            run_inference(ready, **locals())
+            break
+        elif action == "run_gvm":
+            generate_alphas(raw, **locals())
+            break
+        elif action == "run_videomama":
+            run_videomama(missing_alpha, chunk_size=50, **locals())
             break
 
-        else:
-            print("Invalid selection.")
-            continue
-
-    print("\nWizard Complete. Goodbye!")
-
-
 def main() -> None:
-    _configure_environment()
+    warnings.filterwarnings("ignore")
 
-    parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
-    parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
-    parser.add_argument(
-        "--device",
-        choices=["auto", "cuda", "mps", "cpu"],
-        default="auto",
-        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
+    parser = argparse.ArgumentParser(description="CorridorKey")
+    parser.add_argument("--despill-strength", help=r"0-[10]", type=int, default=10)
+    parser.add_argument("--despeckle", help=r"[True]/False Removes tracking dots in Processed/Comp", type=bool, default=True)
+    parser.add_argument("--despeckle-size", help=r"Default: 400 (min pixels for spot)", type=int, default=400)
+    parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto", help="Compute device (default: auto-detect CUDA > MPS > CPU)")
+    parser.add_argument("--gamma-encoding", help=r"Default: srgb", choices=["linear", "srgb"], default="srgb")
+    parser.add_argument("--max-frames", help=r"Number of frames to process", type=int, default=None)
+    parser.add_argument("--organize-clips", help=r"[True]/False Organizes files/folders", type=bool, default=True)
+    parser.add_argument("--refiner-strength", help=r"Default: 1.0 (multiplier) (experimental)", type=float, default=1.0)
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+
+    parser.add_argument("--action", choices=["run_videomama", "run_gvm", "run_inference", "wizard"], required=True)
+    parser.add_argument("input_path", help=r"File/Folder path to scan for shots/projects", default=None)
+    args = parser.parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper()),
+        format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    args = parser.parse_args()
-
     device = resolve_device(args.device)
-    logger.info(f"Using device: {device}")
+    logging.debug(f"Using device: {device}")
 
     try:
-        if args.action == "list":
-            scan_clips()
-        elif args.action == "generate_alphas":
-            clips = scan_clips()
-            generate_alphas(clips, device=device)
-        elif args.action == "run_inference":
-            clips = scan_clips()
-            run_inference(clips, device=device)
-        elif args.action == "wizard":
-            if not args.win_path:
-                print("Error: --win_path required for wizard.")
-            else:
-                interactive_wizard(args.win_path, device=device)
+        do_process(**vars(args))
     except KeyboardInterrupt:
         print("\nInterrupted.")
         sys.exit(130)
-    except Exception as e:
-        logger.error(str(e))
-        sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import os
+import time
+import logging
 
 import cv2
 import numpy as np
@@ -11,6 +13,7 @@ import torch.nn.functional as F
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
 
+logger = logging.getLogger(__name__)
 
 class CorridorKeyEngine:
     def __init__(
@@ -27,7 +30,7 @@ class CorridorKeyEngine:
         self.model = self._load_model()
 
     def _load_model(self) -> GreenFormer:
-        print(f"Loading CorridorKey from {self.checkpoint_path}...")
+        logging.debug(f"Loading CorridorKey from {self.checkpoint_path}...")
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
             encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
@@ -53,7 +56,7 @@ class CorridorKeyEngine:
             # Check for PosEmbed Mismatch
             if "pos_embed" in k and k in model_state:
                 if v.shape != model_state[k].shape:
-                    print(f"Resizing {k} from {v.shape} to {model_state[k].shape}")
+                    logging.info(f"Resizing {k} from {v.shape} to {model_state[k].shape}")
                     # v: [1, N_src, C]
                     # target: [1, N_dst, C]
                     # We assume square grid
@@ -77,9 +80,9 @@ class CorridorKeyEngine:
 
         missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
         if len(missing) > 0:
-            print(f"[Warning] Missing keys: {missing}")
+            logging.warning(f"[Warning] Missing keys: {missing}")
         if len(unexpected) > 0:
-            print(f"[Warning] Unexpected keys: {unexpected}")
+            logging.warning(f"[Warning] Unexpected keys: {unexpected}")
 
         return model
 
@@ -113,7 +116,11 @@ class CorridorKeyEngine:
         Returns:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """
+        logging.debug(f"\t\tengine.process_frame")
+        t_start_frame_processing = time.time()
         # 1. Inputs Check & Normalization
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t1. Inputs Check & Normalization")
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
 
@@ -127,6 +134,10 @@ class CorridorKeyEngine:
             mask_linear = mask_linear[:, :, np.newaxis]
 
         # 2. Resize to Model Size
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t2. Resize to Model Size")
         # If input is linear, we resize in linear to preserve energy/highlights,
         # THEN convert to sRGB for the model.
         if input_is_linear:
@@ -144,14 +155,26 @@ class CorridorKeyEngine:
             mask_resized = mask_resized[:, :, np.newaxis]
 
         # 3. Normalize (ImageNet)
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t3. Normalize (ImageNet)")
         # Model expects sRGB input normalized
         img_norm = (img_resized - self.mean) / self.std
 
         # 4. Prepare Tensor
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t4. Prepare Tensor")
         inp_np = np.concatenate([img_norm, mask_resized], axis=-1)  # [H, W, 4]
         inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).float().unsqueeze(0).to(self.device)
 
         # 5. Inference
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t5. Inference")
         # Hook for Refiner Scaling
         handle = None
         if refiner_scale != 1.0 and self.model.refiner is not None:
@@ -171,6 +194,10 @@ class CorridorKeyEngine:
         pred_fg = out["fg"]  # Output is sRGB (Sigmoid)
 
         # 6. Post-Process (Resize Back to Original Resolution)
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t6. Post-Process (Resize Back to Original Resolution)")
         # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
         res_alpha = pred_alpha[0].permute(1, 2, 0).float().cpu().numpy()
         res_fg = pred_fg[0].permute(1, 2, 0).float().cpu().numpy()
@@ -181,6 +208,10 @@ class CorridorKeyEngine:
             res_alpha = res_alpha[:, :, np.newaxis]
 
         # --- ADVANCED COMPOSITING ---
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\tADVANCED COMPOSITING")
 
         # A. Clean Matte (Auto-Despeckle)
         if auto_despeckle:
@@ -204,6 +235,10 @@ class CorridorKeyEngine:
         # ----------------------------
 
         # 7. Composite (on Checkerboard) for checking
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+        logging.debug(f"\t\t\t7. Composite (on Checkerboard) for checking")
         # Generate Dark/Light Gray Checkerboard (in sRGB, convert to Linear)
         bg_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
         bg_lin = cu.srgb_to_linear(bg_srgb)
@@ -215,6 +250,14 @@ class CorridorKeyEngine:
             comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
 
         comp_srgb = cu.linear_to_srgb(comp_lin)
+
+        elapsed = time.time() - t_last_operation
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\t\tElapsed time: {elapsed:.3f} seconds")
+
+        elapsed = time.time() - t_start_frame_processing
+        t_last_operation = time.time()
+        logging.debug(f"\t\t\tFrame elapsed time: {elapsed:.3f} seconds")
 
         return {
             "alpha": res_alpha,  # Linear, Raw Prediction

@@ -30,6 +30,6 @@ echo "Starting Corridor Key locally..."
 echo "Target: $TARGET_PATH"
 
 # Run the python script via uv (handles the virtual environment automatically)
-uv run python "$LOCAL_SCRIPT" --action wizard --win_path "$TARGET_PATH"
+uv run python "$LOCAL_SCRIPT" --action wizard "$TARGET_PATH"
 
 read -p "Press enter to close..."

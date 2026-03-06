@@ -27,6 +27,6 @@ echo Starting Corridor Key locally...
 echo Target: "%WIN_PATH%"
 
 REM Run the python script via uv (handles the virtual environment automatically)
-uv run python "%LOCAL_SCRIPT%" --action wizard --win_path "%WIN_PATH%"
+uv run python "%LOCAL_SCRIPT%" --action wizard "%WIN_PATH%"
 
 pause

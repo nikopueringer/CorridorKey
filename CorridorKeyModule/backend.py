@@ -50,7 +50,7 @@ def resolve_backend(requested: str | None = None) -> str:
 def _auto_detect_backend() -> str:
     """Try MLX on Apple Silicon, fall back to Torch."""
     if sys.platform != "darwin" or platform.machine() != "arm64":
-        logger.info("Not Apple Silicon — using torch backend")
+        logger.debug("Not Apple Silicon — using torch backend")
         return "torch"
 
     try:

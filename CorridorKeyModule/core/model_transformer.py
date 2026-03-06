@@ -4,7 +4,9 @@ import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
 
+logger = logging.getLogger(__name__)
 
 class MLP(nn.Module):
     """Linear embedding: C_in -> C_out."""
@@ -152,12 +154,12 @@ class GreenFormer(nn.Module):
         # Load Pretrained Hiera
         # 1. Create Target Model (512x512, Random Weights)
         # We use features_only=True, which wraps it in FeatureGetterNet
-        print(f"Initializing {encoder_name} (img_size={img_size})...")
+        logger.debug(f"Initializing {encoder_name} (img_size={img_size})...")
         self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=img_size)
         # We skip downloading/loading base weights because the user's checkpoint
         # (loaded immediately after this) contains all weights, including correctly
         # trained/sized PosEmbeds. This keeps the project offline-capable using only local assets.
-        print("Skipped downloading base weights (relying on custom checkpoint).")
+        logger.debug("Skipped downloading base weights (relying on custom checkpoint).")
 
         # Patch First Layer for 4 channels
         if in_channels != 3:
@@ -170,7 +172,7 @@ class GreenFormer(nn.Module):
             feature_channels = self.encoder.feature_info.channels()
         except (AttributeError, TypeError):
             feature_channels = [112, 224, 448, 896]
-        print(f"Feature Channels: {feature_channels}")
+        logger.debug(f"Feature Channels: {feature_channels}")
 
         # --- Decoders ---
         embedding_dim = 256
@@ -189,7 +191,7 @@ class GreenFormer(nn.Module):
             self.refiner = CNNRefinerModule(in_channels=7, hidden_channels=64, out_channels=4)
         else:
             self.refiner = None
-            print("Refiner Module DISABLED (Backbone Only Mode).")
+            logger.debug("Refiner Module DISABLED (Backbone Only Mode).")
 
     def _patch_input_layer(self, in_channels: int) -> None:
         """
@@ -233,7 +235,7 @@ class GreenFormer(nn.Module):
         except AttributeError:
             self.encoder.patch_embed.proj = new_conv
 
-        print(f"Patched input layer: 3 channels -> {in_channels} channels (Extra initialized to 0)")
+        logger.debug(f"Patched input layer: 3 channels -> {in_channels} channels (Extra initialized to 0)")
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         # x: [B, 4, H, W]
