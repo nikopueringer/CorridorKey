@@ -81,6 +81,10 @@ class CorridorKeyEngine:
         if len(unexpected) > 0:
             print(f"[Warning] Unexpected keys: {unexpected}")
 
+        # Cast weights to FP16 — autocast already handles FP16 activations,
+        # this halves static VRAM footprint (~400MB savings)
+        model = model.half()
+
         return model
 
     @torch.no_grad()

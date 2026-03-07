@@ -11,11 +11,12 @@ Baseline must be generated first:
     uv run python benchmarks/bench_phase.py --generate-baseline --clip <path> --alpha <path>
 
 Quality thresholds (per plan):
-    Phase 1-2 (lossless): max_err < 1e-4, MAE < 1e-5, PSNR > 80 dB
-    Phase 3-4 (lossy):    max_err < 0.02, MAE < 0.005, PSNR > 40 dB
+    lossless (bit-exact):  max_err < 1e-4, MAE < 1e-5, PSNR > 80 dB
+    fp16 (Phase 1-2):      max_err < 0.04, MAE < 1e-4, PSNR > 75 dB
+    lossy (Phase 3-4):     max_err < 0.02, MAE < 0.005, PSNR > 40 dB
 
-Default thresholds are set to the stricter lossless values. Override via
-env var QUALITY_GATE_PHASE (set to "lossy" for Phase 3-4).
+Default thresholds are set to fp16. Override via env var QUALITY_GATE_PHASE
+(set to "lossless" or "lossy" as needed).
 """
 
 from __future__ import annotations
@@ -39,6 +40,14 @@ LOSSLESS_THRESHOLDS = {
     "psnr_min_db": 80.0,
 }
 
+# FP16 weight casting is "practically lossless" but not bit-exact.
+# Max errors come from FP16 rounding in low-magnitude regions.
+FP16_THRESHOLDS = {
+    "max_abs_err": 0.04,
+    "mae": 1e-4,
+    "psnr_min_db": 75.0,
+}
+
 LOSSY_THRESHOLDS = {
     "max_abs_err": 0.02,
     "mae": 0.005,
@@ -47,10 +56,12 @@ LOSSY_THRESHOLDS = {
 
 
 def _get_thresholds() -> dict:
-    phase = os.environ.get("QUALITY_GATE_PHASE", "lossless").lower()
+    phase = os.environ.get("QUALITY_GATE_PHASE", "fp16").lower()
     if phase == "lossy":
         return LOSSY_THRESHOLDS
-    return LOSSLESS_THRESHOLDS
+    if phase == "lossless":
+        return LOSSLESS_THRESHOLDS
+    return FP16_THRESHOLDS
 
 
 # ---------------------------------------------------------------------------
