@@ -206,6 +206,11 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
+    backbone_size: int | None = None,
+    refiner_tile_size: int | None = 512,
+    refiner_tile_overlap: int = 96,
+    fp16: bool = True,
+    gpu_postprocess: bool = True,
 ):
     """Factory: returns an engine with process_frame() matching the Torch contract."""
     backend = resolve_backend(backend)
@@ -222,4 +227,13 @@ def create_engine(
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
         logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        return CorridorKeyEngine(
+            checkpoint_path=str(ckpt),
+            device=device or "cpu",
+            img_size=img_size,
+            backbone_size=backbone_size,
+            refiner_tile_size=refiner_tile_size,
+            refiner_tile_overlap=refiner_tile_overlap,
+            fp16=fp16,
+            gpu_postprocess=gpu_postprocess,
+        )

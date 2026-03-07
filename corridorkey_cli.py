@@ -47,6 +47,67 @@ def _configure_environment() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+def _prompt_optimization_preset() -> dict:
+    """Prompt user to select an optimization preset for inference."""
+    print("\n--- Optimization Presets ---")
+    print("  [1] Quality (default) — FP16 on, GPU post on, full backbone, tiled refiner")
+    print("  [2] Fast Preview       — FP16 on, GPU post on, backbone 1024, tiled refiner")
+    print("  [3] Low VRAM           — FP16 on, GPU post on, backbone 1024, tile 256")
+    print("  [4] Legacy (no opts)   — FP16 off, GPU post off, full backbone, no tiling")
+    print("  [5] Custom             — Configure each flag individually")
+
+    choice = input("Select preset [1]: ").strip()
+
+    _base = {"fp16": True, "gpu_postprocess": True, "refiner_tile_overlap": 96}
+    presets = {
+        "1": {**_base, "backbone_size": None, "refiner_tile_size": 512},
+        "2": {**_base, "backbone_size": 1024, "refiner_tile_size": 512},
+        "3": {**_base, "backbone_size": 1024, "refiner_tile_size": 256},
+        "4": {
+            "fp16": False,
+            "gpu_postprocess": False,
+            "backbone_size": None,
+            "refiner_tile_size": None,
+            "refiner_tile_overlap": 96,
+        },
+    }
+
+    if choice in presets:
+        return presets[choice]
+    if choice == "5":
+        return _prompt_custom_optimizations()
+    # Default to Quality preset
+    return presets["1"]
+
+
+def _prompt_custom_optimizations() -> dict:
+    """Prompt user to configure each optimization flag individually."""
+    fp16 = input("  FP16 weight casting? [Y/n]: ").strip().lower() != "n"
+    gpu_post = input("  GPU post-processing? [Y/n]: ").strip().lower() != "n"
+
+    bb_val = input("  Backbone size (blank = full res, e.g. 1024): ").strip()
+    backbone_size = int(bb_val) if bb_val else None
+
+    tile_val = input("  Refiner tile size (0 = disabled, blank = 512): ").strip()
+    if tile_val == "0":
+        refiner_tile_size = None
+    elif tile_val:
+        refiner_tile_size = int(tile_val)
+    else:
+        refiner_tile_size = 512
+
+    overlap_val = input("  Refiner tile overlap (blank = 96): ").strip()
+    refiner_tile_overlap = int(overlap_val) if overlap_val else 96
+
+    return {
+        "fp16": fp16,
+        "gpu_postprocess": gpu_post,
+        "backbone_size": backbone_size,
+        "refiner_tile_size": refiner_tile_size,
+        "refiner_tile_overlap": refiner_tile_overlap,
+    }
+
+
 def interactive_wizard(win_path: str, device: str | None = None) -> None:
     print("\n" + "=" * 60)
     print(" CORRIDOR KEY - SMART WIZARD")
@@ -265,8 +326,9 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         elif choice == "i":
             # Inference
             print("\n--- Corridor Key Inference ---")
+            opt_config = _prompt_optimization_preset()
             try:
-                run_inference(ready, device=device)
+                run_inference(ready, device=device, **opt_config)
             except (RuntimeError, FileNotFoundError) as e:
                 logger.error(f"Inference failed: {e}")
             input("Inference batch complete. Press Enter to Re-Scan...")
@@ -298,11 +360,27 @@ def main() -> None:
         default="auto",
         help="Compute device (default: auto-detect CUDA > MPS > CPU)",
     )
+    parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=True, help="FP16 weight casting")
+    parser.add_argument(
+        "--gpu-postprocess",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run color math on GPU with cached assets",
+    )
+    parser.add_argument(
+        "--backbone-size", type=int, default=None, help="Backbone resolution (e.g. 1024). None = full res"
+    )
+    parser.add_argument(
+        "--refiner-tile-size", type=int, default=512, help="Refiner tile size (0 = disabled, default 512)"
+    )
+    parser.add_argument("--refiner-tile-overlap", type=int, default=96, help="Refiner tile overlap pixels (default 96)")
 
     args = parser.parse_args()
 
     device = resolve_device(args.device)
     logger.info(f"Using device: {device}")
+
+    refiner_tile_size = args.refiner_tile_size or None  # 0 -> None (disabled)
 
     try:
         if args.action == "list":
@@ -312,7 +390,15 @@ def main() -> None:
             generate_alphas(clips, device=device)
         elif args.action == "run_inference":
             clips = scan_clips()
-            run_inference(clips, device=device)
+            run_inference(
+                clips,
+                device=device,
+                backbone_size=args.backbone_size,
+                refiner_tile_size=refiner_tile_size,
+                refiner_tile_overlap=args.refiner_tile_overlap,
+                fp16=args.fp16,
+                gpu_postprocess=args.gpu_postprocess,
+            )
         elif args.action == "wizard":
             if not args.win_path:
                 print("Error: --win_path required for wizard.")

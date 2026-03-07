@@ -118,6 +118,8 @@ def create_engine(
     backbone_size: int | None = None,
     refiner_tile_size: int | None = 512,
     refiner_tile_overlap: int = 64,
+    fp16: bool = True,
+    gpu_postprocess: bool = True,
 ):
     """Create a CorridorKeyEngine instance."""
     from CorridorKeyModule.inference_engine import CorridorKeyEngine
@@ -129,12 +131,15 @@ def create_engine(
         print(f"Backbone size: {backbone_size}")
     if refiner_tile_size:
         print(f"Refiner tile size: {refiner_tile_size}, overlap: {refiner_tile_overlap}")
+    print(f"FP16: {fp16}, GPU postprocess: {gpu_postprocess}")
     return CorridorKeyEngine(
         ckpt,
         device=device,
         backbone_size=backbone_size,
         refiner_tile_size=refiner_tile_size,
         refiner_tile_overlap=refiner_tile_overlap,
+        fp16=fp16,
+        gpu_postprocess=gpu_postprocess,
     )
 
 
@@ -430,6 +435,10 @@ def main():
         default=96,
         help="Refiner tile overlap in pixels (default 64)",
     )
+    parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=True, help="FP16 weight casting")
+    parser.add_argument(
+        "--gpu-postprocess", action=argparse.BooleanOptionalAction, default=True, help="GPU post-processing"
+    )
 
     args = parser.parse_args()
 
@@ -441,6 +450,8 @@ def main():
         backbone_size=args.backbone_size,
         refiner_tile_size=tile_size,
         refiner_tile_overlap=args.refiner_tile_overlap,
+        fp16=args.fp16,
+        gpu_postprocess=args.gpu_postprocess,
     )
 
     # Load frames

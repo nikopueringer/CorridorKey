@@ -472,12 +472,12 @@ Create `benchmarks/bench_matrix.py` that runs all flag combinations and outputs 
 
 ### Acceptance Criteria — Phase 5
 
-- [ ] All optimization flags exposed as CLI args in `corridorkey_cli.py`
-- [ ] Flags wired through `clip_manager.py` to engine creation
-- [ ] FP16 toggle added to `CorridorKeyEngine` (currently always-on)
-- [ ] GPU postprocess toggle added (currently always-on)
-- [ ] Wizard shows optimization preset menu
-- [ ] `benchmarks/bench_matrix.py` created
+- [x] All optimization flags exposed as CLI args in `corridorkey_cli.py`
+- [x] Flags wired through `clip_manager.py` to engine creation
+- [x] FP16 toggle added to `CorridorKeyEngine` (currently always-on)
+- [x] GPU postprocess toggle added (currently always-on)
+- [x] Wizard shows optimization preset menu
+- [x] `benchmarks/bench_matrix.py` created
 - [ ] Benchmark matrix run and results documented
 
 ---

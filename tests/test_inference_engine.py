@@ -39,6 +39,11 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     engine._checker_cache_srgb = None
     engine._checker_cache_lin = None
     engine._checker_cache_key = (0, 0)
+    engine.fp16 = True
+    engine.gpu_postprocess = True
+    engine.backbone_size = None
+    engine.refiner_tile_size = None
+    engine.refiner_tile_overlap = 96
     engine.model = mock_greenformer
     return engine
 
