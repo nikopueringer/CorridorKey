@@ -144,16 +144,21 @@ class GreenFormer(nn.Module):
         encoder_name: str = "hiera_base_plus_224.mae_in1k_ft_in1k",
         in_channels: int = 4,
         img_size: int = 512,
+        backbone_size: int | None = None,
         use_refiner: bool = True,
     ) -> None:
         super().__init__()
 
+        # Backbone resolution — None means same as img_size (no downsampling)
+        self.backbone_size = backbone_size
+        encoder_img_size = backbone_size or img_size
+
         # --- Encoder ---
         # Load Pretrained Hiera
-        # 1. Create Target Model (512x512, Random Weights)
+        # 1. Create Target Model (Random Weights)
         # We use features_only=True, which wraps it in FeatureGetterNet
-        print(f"Initializing {encoder_name} (img_size={img_size})...")
-        self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=img_size)
+        print(f"Initializing {encoder_name} (img_size={img_size}, backbone_size={encoder_img_size})...")
+        self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=encoder_img_size)
         # We skip downloading/loading base weights because the user's checkpoint
         # (loaded immediately after this) contains all weights, including correctly
         # trained/sized PosEmbeds. This keeps the project offline-capable using only local assets.
@@ -239,8 +244,18 @@ class GreenFormer(nn.Module):
         # x: [B, 4, H, W]
         input_size = x.shape[2:]
 
-        # Encode
-        features = self.encoder(x)  # Returns list of features
+        # Optionally downsample for backbone (encoder runs at lower res)
+        if self.backbone_size is not None and (
+            input_size[0] != self.backbone_size or input_size[1] != self.backbone_size
+        ):
+            x_backbone = F.interpolate(
+                x, size=(self.backbone_size, self.backbone_size), mode="bilinear", align_corners=False
+            )
+        else:
+            x_backbone = x
+
+        # Encode (at backbone resolution)
+        features = self.encoder(x_backbone)  # Returns list of features
 
         # Decode Streams
         alpha_logits = self.alpha_decoder(features)  # [B, 1, H/4, W/4]
@@ -263,8 +278,9 @@ class GreenFormer(nn.Module):
 
         # --- Refinement (CNN Hybrid) ---
         # 4. Refine (CNN)
-        # Input to refiner: RGB Image (first 3 channels of x) + Coarse Predictions (Probs)
+        # Input to refiner: RGB Image (first 3 channels of ORIGINAL x) + Coarse Predictions (Probs)
         # We give the refiner 'Probs' as input features because they are normalized [0,1]
+        # Always use full-res RGB — refiner recovers fine detail lost by backbone downsampling
         rgb = x[:, :3, :, :]
 
         # Feed the Refiner

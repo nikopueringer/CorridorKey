@@ -14,10 +14,16 @@ from .core.model_transformer import GreenFormer
 
 class CorridorKeyEngine:
     def __init__(
-        self, checkpoint_path: str, device: str = "cpu", img_size: int = 2048, use_refiner: bool = True
+        self,
+        checkpoint_path: str,
+        device: str = "cpu",
+        img_size: int = 2048,
+        backbone_size: int | None = None,
+        use_refiner: bool = True,
     ) -> None:
         self.device = torch.device(device)
         self.img_size = img_size
+        self.backbone_size = backbone_size
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
 
@@ -34,7 +40,10 @@ class CorridorKeyEngine:
         print(f"Loading CorridorKey from {self.checkpoint_path}...")
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
-            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
+            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
+            img_size=self.img_size,
+            backbone_size=self.backbone_size,
+            use_refiner=self.use_refiner,
         )
         model = model.to(self.device)
         model.eval()

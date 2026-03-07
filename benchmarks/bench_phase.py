@@ -112,14 +112,16 @@ def find_checkpoint() -> str:
     raise FileNotFoundError("No .pth checkpoint found in CorridorKeyModule/checkpoints/ or IgnoredCheckpoints/")
 
 
-def create_engine(device: str, checkpoint: str | None = None):
+def create_engine(device: str, checkpoint: str | None = None, backbone_size: int | None = None):
     """Create a CorridorKeyEngine instance."""
     from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
     ckpt = checkpoint or find_checkpoint()
     print(f"Device: {device}")
     print(f"Checkpoint: {os.path.basename(ckpt)}")
-    return CorridorKeyEngine(ckpt, device=device)
+    if backbone_size:
+        print(f"Backbone size: {backbone_size}")
+    return CorridorKeyEngine(ckpt, device=device, backbone_size=backbone_size)
 
 
 # ---------------------------------------------------------------------------
@@ -399,11 +401,14 @@ def main():
         "--baseline", default=os.path.join(PROJECT_ROOT, "benchmarks", "baseline"), help="Path to baseline directory"
     )
     parser.add_argument("--diff-dir", default=None, help="Directory for diff heatmaps (auto if comparing)")
+    parser.add_argument(
+        "--backbone-size", type=int, default=None, help="Backbone resolution (e.g. 1024). None = same as img_size"
+    )
 
     args = parser.parse_args()
 
     device = args.device or get_device()
-    engine = create_engine(device, args.checkpoint)
+    engine = create_engine(device, args.checkpoint, backbone_size=args.backbone_size)
 
     # Load frames
     frames = load_video_frames(args.clip, max_frames=args.max_frames)
