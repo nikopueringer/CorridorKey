@@ -494,7 +494,9 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def run_inference(
+    clips, device=None, backend=None, max_frames=None, tile_size=None, overlap_size=128, half_precision=False
+):
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
 
     if not ready_clips:
@@ -553,6 +555,41 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
             refiner_scale = 1.0
     logger.info(f"User selected: Refiner Strength {refiner_scale}")
 
+    # 5. Tile Size Prompt
+    print("\nTile Size (reduces VRAM by processing the image in smaller tiles):")
+    print("  [auto]  Auto-detect based on your GPU VRAM (default)")
+    print("  [off]   No tiling — full 2048x2048 pass (needs 24+ GB VRAM)")
+    print("  [672]   Low VRAM (~1.7 GB)")
+    print("  [896]   Medium VRAM (~3 GB)")
+    print("  [1344]  High VRAM (~8 GB)")
+    print("  Or enter any multiple of 224.")
+    tile_input = input("Tile Size [default auto]: ").strip().lower()
+    if tile_input == "" or tile_input == "auto":
+        tile_size = "auto"
+    elif tile_input == "off" or tile_input == "0":
+        tile_size = "off"
+    else:
+        try:
+            tile_size = int(tile_input)
+        except ValueError:
+            tile_size = "auto"
+    logger.info(f"User selected: Tile Size {tile_size}")
+
+    # 6. Half Precision Prompt
+    half_choice = input("Use fp16 half-precision weights for extra VRAM savings? [y/N]: ").strip().lower()
+    half_precision_user = half_choice == "y"
+    if half_precision_user:
+        logger.info("User selected: fp16 half-precision ON")
+    else:
+        logger.info("User selected: fp16 half-precision OFF (default)")
+
+    # Merge CLI and interactive tile settings (CLI overrides if explicitly set)
+    if tile_size is None:
+        tile_size = tile_size  # keep None
+    # half_precision: interactive choice wins unless CLI already set it
+    if not half_precision:
+        half_precision = half_precision_user
+
     print("--------------------------\n")
 
     # Ensure Output Directory exists
@@ -565,7 +602,13 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(
+        backend=backend,
+        device=device,
+        tile_size=tile_size,
+        overlap_size=overlap_size,
+        half_precision=half_precision,
+    )
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
@@ -905,6 +948,22 @@ if __name__ == "__main__":
         default=None,
         help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
     )
+    parser.add_argument(
+        "--tile-size",
+        default="auto",
+        help='Tile size in pixels, "auto", or "off" (default: "auto")',
+    )
+    parser.add_argument(
+        "--overlap",
+        type=int,
+        default=128,
+        help="Overlap size in pixels (default: 128)",
+    )
+    parser.add_argument(
+        "--half",
+        action="store_true",
+        help="Use fp16 model weights to reduce VRAM usage",
+    )
 
     args = parser.parse_args()
 
@@ -918,7 +977,15 @@ if __name__ == "__main__":
         generate_alphas(clips, device=device)
     elif args.action == "run_inference":
         clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
+        run_inference(
+            clips,
+            device=device,
+            backend=args.backend,
+            max_frames=args.max_frames,
+            tile_size=args.tile_size,
+            overlap_size=args.overlap,
+            half_precision=args.half,
+        )
     elif args.action == "wizard":
         if not args.win_path:
             print("Error: --win_path required for wizard.")

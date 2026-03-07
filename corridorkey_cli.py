@@ -47,7 +47,10 @@ def _configure_environment() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def interactive_wizard(win_path: str, device: str | None = None) -> None:
+def interactive_wizard(
+    win_path: str,
+    device: str | None = None,
+) -> None:
     print("\n" + "=" * 60)
     print(" CORRIDOR KEY - SMART WIZARD")
     print("=" * 60)
@@ -257,7 +260,10 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             # Inference
             print("\n--- Corridor Key Inference ---")
             try:
-                run_inference(ready, device=device)
+                run_inference(
+                    ready,
+                    device=device,
+                )
             except (RuntimeError, FileNotFoundError) as e:
                 logger.error(f"Inference failed: {e}")
             input("Inference batch complete. Press Enter to Re-Scan...")
@@ -289,6 +295,22 @@ def main() -> None:
         default="auto",
         help="Compute device (default: auto-detect CUDA > MPS > CPU)",
     )
+    parser.add_argument(
+        "--tile-size",
+        default="auto",
+        help='Tile size in pixels, "auto", or "off" (default: "auto")',
+    )
+    parser.add_argument(
+        "--overlap",
+        type=int,
+        default=128,
+        help="Overlap size in pixels (default: 128)",
+    )
+    parser.add_argument(
+        "--half",
+        action="store_true",
+        help="Use fp16 model weights to reduce VRAM usage",
+    )
 
     args = parser.parse_args()
 
@@ -303,12 +325,21 @@ def main() -> None:
             generate_alphas(clips, device=device)
         elif args.action == "run_inference":
             clips = scan_clips()
-            run_inference(clips, device=device)
+            run_inference(
+                clips,
+                device=device,
+                tile_size=args.tile_size,
+                overlap_size=args.overlap,
+                half_precision=args.half,
+            )
         elif args.action == "wizard":
             if not args.win_path:
                 print("Error: --win_path required for wizard.")
             else:
-                interactive_wizard(args.win_path, device=device)
+                interactive_wizard(
+                    args.win_path,
+                    device=device,
+                )
     except KeyboardInterrupt:
         print("\nInterrupted.")
         sys.exit(130)

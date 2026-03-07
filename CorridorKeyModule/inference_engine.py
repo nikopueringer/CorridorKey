@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import warnings
 
 import cv2
 import numpy as np
@@ -14,23 +15,61 @@ from .core.model_transformer import GreenFormer
 
 class CorridorKeyEngine:
     def __init__(
-        self, checkpoint_path: str, device: str = "cpu", img_size: int = 2048, use_refiner: bool = True
+        self,
+        checkpoint_path: str,
+        device: str = "cpu",
+        img_size: int = 2048,
+        use_refiner: bool = True,
+        tile_size: int | None = None,
+        overlap_size: int = 128,
+        half_precision: bool = False,
     ) -> None:
         self.device = torch.device(device)
         self.img_size = img_size
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
 
+        # When tiling, initialize the model at tile_size so Hiera's pos_embed,
+        # Unroll, and Reroll all match the tile dimensions.  The input is still
+        # resized to img_size (2048) and tiled in that space.
+        # Tile size must be a multiple of 224:
+        #   - patch_embed stride = 4
+        #   - q_stride = 2, applied 3 times → token grid must be divisible by 8
+        #   - 4 × 8 = 32 for Hiera internals
+        #   - backbone patch stride = 7
+        #   - LCM(32, 7) = 224
+        if tile_size is not None:
+            self._model_size = (tile_size // 224) * 224
+            if self._model_size == 0:
+                self._model_size = 224
+        else:
+            self._model_size = img_size
+
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
         self.model = self._load_model()
 
+        if half_precision:
+            self.model.half()
+            if self.device.type == "cpu":
+                warnings.warn(
+                    "fp16 on CPU may be slower than fp32 due to lack of hardware acceleration.",
+                    stacklevel=2,
+                )
+
+        if tile_size is not None:
+            from .tiled_inference import TiledInferenceEngine
+
+            self.tiler = TiledInferenceEngine(self.model, self.device, self._model_size, overlap_size, img_size)
+        else:
+            self.tiler = None
+
     def _load_model(self) -> GreenFormer:
         print(f"Loading CorridorKey from {self.checkpoint_path}...")
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
-            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
+            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self._model_size, use_refiner=self.use_refiner
         )
         model = model.to(self.device)
         model.eval()
@@ -152,20 +191,26 @@ class CorridorKeyEngine:
         inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).float().unsqueeze(0).to(self.device)
 
         # 5. Inference
-        # Hook for Refiner Scaling
-        handle = None
-        if refiner_scale != 1.0 and self.model.refiner is not None:
+        if self.tiler is not None:
+            out = self.tiler.forward_tiled(
+                inp_t,
+                refiner_scale=refiner_scale if refiner_scale != 1.0 else None,
+            )
+        else:
+            # Hook for Refiner Scaling
+            handle = None
+            if refiner_scale != 1.0 and self.model.refiner is not None:
 
-            def scale_hook(module, input, output):
-                return output * refiner_scale
+                def scale_hook(module, input, output):
+                    return output * refiner_scale
 
-            handle = self.model.refiner.register_forward_hook(scale_hook)
+                handle = self.model.refiner.register_forward_hook(scale_hook)
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16):
-            out = self.model(inp_t)
+            with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+                out = self.model(inp_t)
 
-        if handle:
-            handle.remove()
+            if handle:
+                handle.remove()
 
         pred_alpha = out["alpha"]
         pred_fg = out["fg"]  # Output is sRGB (Sigmoid)

@@ -206,6 +206,9 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
+    tile_size: int | str | None = None,
+    overlap_size: int = 128,
+    half_precision: bool = False,
 ):
     """Factory: returns an engine with process_frame() matching the Torch contract."""
     backend = resolve_backend(backend)
@@ -221,5 +224,32 @@ def create_engine(
         ckpt = _discover_checkpoint(TORCH_EXT)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        resolved_device = device or "cpu"
+
+        # Resolve tile_size
+        if tile_size == "auto":
+            import torch
+
+            from .tiled_inference import VRAMDetector
+
+            tile_size = VRAMDetector.recommend_tile_size(torch.device(resolved_device))
+        elif tile_size == 0 or tile_size == "off":
+            tile_size = None
+        elif isinstance(tile_size, str) and tile_size.isdigit():
+            tile_size = int(tile_size)
+
+        logger.info(
+            "Torch engine loaded: %s (device=%s, tile_size=%s, half=%s)",
+            ckpt.name,
+            resolved_device,
+            tile_size,
+            half_precision,
+        )
+        return CorridorKeyEngine(
+            checkpoint_path=str(ckpt),
+            device=resolved_device,
+            img_size=img_size,
+            tile_size=tile_size,
+            overlap_size=overlap_size,
+            half_precision=half_precision,
+        )

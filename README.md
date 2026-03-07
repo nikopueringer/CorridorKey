@@ -24,14 +24,16 @@ Naturally, I have not tested everything. If you encounter errors, please conside
 
 *   **Physically Accurate Unmixing:** Clean extraction of straight color foreground and linear alpha channels, preserving hair, motion blur, and translucency.
 *   **Resolution Independent:** The engine dynamically scales inference to handle 4K plates while predicting using its native 2048x2048 high-fidelity backbone.
+*   **Tiled Inference:** Automatically splits the 2048×2048 model input into overlapping tiles and blends them seamlessly, reducing peak VRAM from ~22.7 GB to ~6–8 GB. Consumer GPUs (8–12 GB) can now run inference out of the box.
 *   **VFX Standard Outputs:** Natively reads and writes 16-bit and 32-bit Linear float EXR files, preserving true color math for integration in Nuke, Fusion, or Resolve.
 *   **Auto-Cleanup:** Includes a morphological cleanup system to automatically prune any tracking markers or tiny background features that slip through CorridorKey's detection.
 
 ## Hardware Requirements
 
-This project was designed and built on a Linux workstation (Puget Systems PC) equipped with an NVIDIA RTX Pro 6000 with 96GB of VRAM. This project is not yet optimized for sub 24 gig VRAM systems, but with the help of the community, maybe we can make that happen.
+This project was designed and built on a Linux workstation (Puget Systems PC) equipped with an NVIDIA RTX Pro 6000 with 96GB of VRAM.
 
-*   **CorridorKey:** Running inference natively at 2048x2048 requires approximately **22.7 GB of VRAM**. You will need at least a 24GB GPU (such as a 3090, 4090, 5090, etc). It is highly recommended to run this on a secondary GPU that is not driving your OS/displays, or on a rented cloud instance (like Runpod or Google Colab) to avoid Out-Of-Memory errors.
+*   **CorridorKey (full resolution):** Running inference at the native 2048×2048 resolution in a single pass requires approximately **22.7 GB of VRAM** (24GB+ GPUs such as a 3090, 4090, 5090, etc).
+*   **CorridorKey (tiled mode):** With tiled inference enabled (the default when VRAM is limited), peak usage drops to **~6–8 GB**, making consumer GPUs (RTX 3060 12GB, RTX 4060 8GB, etc.) fully supported. The system auto-detects your available VRAM and picks an appropriate tile size — no manual configuration needed. See [Tiled Inference](#tiled-inference) below for details.
 *   **GVM (Optional):** Requires approximately **80 GB of VRAM** and utilizes massive Stable Video Diffusion models.
 *   **VideoMaMa (Optional):** Natively requires a massive chunk of VRAM as well (originally 80GB+). While the community has tweaked the architecture to run at less than 24GB, those extreme memory optimizations have not yet been fully implemented in this repository.
 
@@ -172,6 +174,44 @@ MLX uses img_size=2048 by default (same as Torch).
 - **"corridorkey_mlx not installed"** — run `uv pip install corridorkey-mlx@git+https://github.com/cmoyates/corridorkey-mlx.git`
 - **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
 - **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
+
+## Tiled Inference
+
+By default (`--tile-size auto`), CorridorKey detects your available VRAM and automatically tiles the 2048×2048 model input into smaller overlapping patches when needed. Each tile is processed independently, then blended back together with cosine ramps — no visible seams.
+
+| Your GPU VRAM | What happens |
+|---|---|
+| 24 GB+ | No tiling — full 2048² pass (same as before) |
+| 12–24 GB | 1344×1344 tiles |
+| 8–12 GB | 896×896 tiles |
+| < 8 GB | 672×672 tiles (quality warning) |
+| Apple Silicon (MPS) | No tiling (unified memory) |
+
+### Manual control
+
+```bash
+# Explicit tile size (must be a multiple of 7 for Hiera patch alignment)
+uv run python corridorkey_cli.py --tile-size 1024 --overlap 128 input.exr hint.exr -o output/
+
+# Disable tiling entirely (requires 24GB+ VRAM)
+uv run python corridorkey_cli.py --tile-size off input.exr hint.exr -o output/
+
+# Combine with fp16 weights for extra VRAM savings
+uv run python corridorkey_cli.py --half input.exr hint.exr -o output/
+```
+
+The same flags work in `clip_manager.py`:
+```bash
+uv run python clip_manager.py --action run_inference --tile-size 1024 --overlap 128 --half
+```
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--tile-size` | `auto` | Tile size in pixels, `"auto"`, or `"off"` |
+| `--overlap` | `128` | Overlap between adjacent tiles in pixels (min 65) |
+| `--half` | off | Load model weights in fp16 for additional VRAM savings |
 
 ## Advanced Usage
 
