@@ -254,3 +254,53 @@ Max errors (0.635 alpha, 0.557 FG) exceed plan's lossy threshold of 0.02. Howeve
 96px strictly better at zero cost. Remaining quality gap is inherent to tiling.
 
 **Verdict:** Excellent VRAM savings (-52% vs baseline, -41% vs Phase 2). Throughput ~17% slower than Phase 2 due to tile overhead. Quality acceptable for production — errors are edge refinement diffs, not visible seam artifacts. Combined with Phase 1+2 (no backbone downsampling), this is the recommended configuration for VRAM-constrained systems.
+
+## Phase 5 -- CLI Feature Flags & Benchmark Matrix
+
+**Date:** 2026-03-07
+**Commit:** 04c95a9
+
+### Changes
+
+- All optimizations exposed as independent CLI flags: `--fp16/--no-fp16`, `--gpu-postprocess/--no-gpu-postprocess`, `--backbone-size`, `--refiner-tile-size`, `--refiner-tile-overlap`
+- Wizard shows optimization preset menu (Quality, Fast Preview, Low VRAM, Legacy)
+- `benchmarks/bench_matrix.py` runs all presets and outputs comparison table
+
+### Benchmark Matrix Results (MPS, M3 Max, 5 frames)
+
+| Preset | FP16 | Backbone | Tile | Overlap | Median (s) | Peak Mem (GB) | Alpha MAE | Alpha PSNR | FG MAE | FG PSNR |
+|--------|------|----------|------|---------|-----------|--------------|-----------|------------|--------|---------|
+| Quality | on | 2048 | 512 | 96 | 6.12 | 15.36 | 0.000811 | 41.6 dB | 0.003061 | 39.0 dB |
+| Fast Preview | on | 1024 | 512 | 96 | 2.20 | 2.28 | 0.003663 | 31.0 dB | 0.004488 | 34.4 dB |
+| Low VRAM | on | 1024 | 256 | 96 | 3.34 | 2.28 | 0.003642 | 31.0 dB | 0.004928 | 33.9 dB |
+| Legacy | off | 2048 | none | — | 7.15 | 30.39 | 0.000041 | 68.9 dB | 0.000127 | 65.0 dB |
+
+### Per-Preset Analysis
+
+**Quality** (recommended default) — FP16 + tiled refiner, full-res backbone:
+- 14% faster than Legacy, 50% less memory
+- Alpha PSNR 41.6 dB, FG PSNR 39.0 dB — visually indistinguishable from baseline
+- Quality diff vs baseline is from tiling + FP16 combined
+
+**Fast Preview** — FP16 + 1024 backbone + tiled refiner:
+- 3.2x faster than Legacy, 93% less memory (2.28 GB peak)
+- Lossy: alpha PSNR 31.0 dB, notable at subject edges
+- Ideal for quick iteration, not final delivery
+
+**Low VRAM** — Same as Fast Preview but 256px tiles:
+- 52% slower than Fast Preview (more tiles to process)
+- Same 2.28 GB peak — no additional memory savings vs Fast Preview at 512 tiles
+- Slightly worse quality (smaller tile context)
+- Not recommended over Fast Preview unless tile_size=512 OOMs
+
+**Legacy** (no optimizations) — FP32, full-res, no tiling:
+- Closest to Phase 0 baseline (diffs are Phase 2 GPU math only)
+- Alpha PSNR 68.9 dB, 0.01% pixels > 1e-2 — practically lossless
+- 30.39 GB peak memory — requires high-VRAM system
+
+### Key Observations
+
+1. **Memory cliff at backbone=1024**: Fast Preview and Low VRAM both hit 2.28 GB peak — the 1024 backbone dominates savings far more than tile size
+2. **Quality cliff at backbone=1024**: ~10 dB PSNR drop vs Quality preset. Tiling alone (Quality preset) costs ~27 dB vs Legacy but is visually acceptable
+3. **Low VRAM preset underperforms**: 256px tiles are slower AND lower quality than 512px with no memory benefit. Consider removing or adjusting
+4. **Legacy baseline drift**: Legacy shows small diffs vs Phase 0 baseline (MAE 0.000041 alpha) from Phase 2's Lanczos4→bicubic change, confirming GPU postprocess is always active even with `--no-fp16`

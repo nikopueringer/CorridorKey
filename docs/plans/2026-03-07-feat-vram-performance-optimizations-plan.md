@@ -478,7 +478,7 @@ Create `benchmarks/bench_matrix.py` that runs all flag combinations and outputs 
 - [x] GPU postprocess toggle added (currently always-on)
 - [x] Wizard shows optimization preset menu
 - [x] `benchmarks/bench_matrix.py` created
-- [ ] Benchmark matrix run and results documented
+- [x] Benchmark matrix run and results documented
 
 ---
 
