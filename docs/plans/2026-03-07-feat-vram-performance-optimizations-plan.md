@@ -8,7 +8,7 @@ date: 2026-03-07
 
 ## Overview
 
-Five-phase optimization plan (Phase 0-4) targeting memory reduction and throughput improvement in the core CorridorKey inference pipeline. Phase 0 establishes benchmarking infrastructure and baseline measurements; Phases 1-4 implement the actual optimizations. **Primary test target: MPS (Apple Silicon)**. CUDA compatibility maintained but not the primary validation environment. Scope is strictly `CorridorKeyModule/` and `clip_manager.py` — GVM and VideoMaMa untouched.
+Six-phase optimization plan (Phase 0-5) targeting memory reduction and throughput improvement in the core CorridorKey inference pipeline. Phase 0 establishes benchmarking infrastructure and baseline measurements; Phases 1-4 implement the actual optimizations. **Primary test target: MPS (Apple Silicon)**. CUDA compatibility maintained but not the primary validation environment. Scope is strictly `CorridorKeyModule/` and `clip_manager.py` — GVM and VideoMaMa untouched.
 
 ## Problem Statement
 
@@ -419,6 +419,51 @@ weights_2d = np.outer(weights_1d, weights_1d)
 - [ ] Quality gate tests pass (lossy thresholds)
 - [ ] Visual comparison: no seam artifacts at tile boundaries
 - [x] Edge case: non-2048 resolutions handled correctly
+
+---
+
+### Phase 5: CLI Feature Flags for All Optimizations
+
+Expose each optimization as an independent CLI flag so users can mix-and-match to find optimal quality/performance tradeoffs for their hardware.
+
+#### 5a. CLI Flags
+
+**File:** `corridorkey_cli.py` (arg parsing), `clip_manager.py` (engine creation)
+
+| Flag | Default | Controls |
+|------|---------|----------|
+| `--fp16 / --no-fp16` | `--fp16` | Phase 1: FP16 weight casting |
+| `--gpu-postprocess / --no-gpu-postprocess` | `--gpu-postprocess` | Phase 2: color math on GPU + asset caching |
+| `--backbone-size <int>` | `None` (full res) | Phase 3: backbone resolution (e.g. 1024) |
+| `--refiner-tile-size <int>` | `512` | Phase 4: refiner tile size (0 = disabled) |
+| `--refiner-tile-overlap <int>` | `64` | Phase 4: tile overlap pixels |
+
+All flags already have plumbing in `CorridorKeyEngine.__init__` / `GreenFormer.__init__`. This phase wires them to the CLI and wizard.
+
+#### 5b. Wizard Integration
+
+Add an "Advanced Optimizations" section to the interactive wizard with sensible presets:
+
+| Preset | FP16 | GPU Post | Backbone | Tiling |
+|--------|------|----------|----------|--------|
+| Quality (default) | on | on | None (2048) | 512 |
+| Fast Preview | on | on | 1024 | 512 |
+| Low VRAM | on | on | 1024 | 256 |
+| Legacy (no opts) | off | off | None | off |
+
+#### 5c. Benchmark Matrix Script
+
+Create `benchmarks/bench_matrix.py` that runs all flag combinations and outputs a comparison table (timing, memory, quality diff).
+
+### Acceptance Criteria — Phase 5
+
+- [ ] All optimization flags exposed as CLI args in `corridorkey_cli.py`
+- [ ] Flags wired through `clip_manager.py` to engine creation
+- [ ] FP16 toggle added to `CorridorKeyEngine` (currently always-on)
+- [ ] GPU postprocess toggle added (currently always-on)
+- [ ] Wizard shows optimization preset menu
+- [ ] `benchmarks/bench_matrix.py` created
+- [ ] Benchmark matrix run and results documented
 
 ---
 
