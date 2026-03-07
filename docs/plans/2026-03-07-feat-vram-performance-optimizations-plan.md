@@ -335,11 +335,11 @@ Currently recreated every frame:
 
 ### Acceptance Criteria — Phase 2
 
-- [ ] `F.interpolate` replaces `cv2.resize` for upscaling predictions
-- [ ] `despill`, `srgb_to_linear`, `premultiply`, compositing all run on GPU tensors
-- [ ] `.cpu().numpy()` only called at end of `process_frame`
-- [ ] Checkerboard cached per resolution
-- [ ] Dilation kernel cached
+- [x] `F.interpolate` replaces `cv2.resize` for upscaling predictions
+- [x] `despill`, `srgb_to_linear`, `premultiply`, compositing all run on GPU tensors
+- [x] `.cpu().numpy()` only called at end of `process_frame`
+- [x] Checkerboard cached per resolution
+- [x] Dilation kernel cached
 - [ ] Phase 0 benchmarks run — memory, timing, and pixel diff recorded in results table
 - [ ] Quality gate tests pass (lossless thresholds)
 

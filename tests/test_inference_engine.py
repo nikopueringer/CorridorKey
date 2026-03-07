@@ -36,6 +36,9 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     engine.use_refiner = False
     engine.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
     engine.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+    engine._checker_cache_srgb = None
+    engine._checker_cache_lin = None
+    engine._checker_cache_key = (0, 0)
     engine.model = mock_greenformer
     return engine
 

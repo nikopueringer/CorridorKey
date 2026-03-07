@@ -247,6 +247,15 @@ def despill(
     return despilled
 
 
+_kernel_cache: dict[int, np.ndarray] = {}
+
+
+def _get_ellipse_kernel(kernel_size: int) -> np.ndarray:
+    if kernel_size not in _kernel_cache:
+        _kernel_cache[kernel_size] = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    return _kernel_cache[kernel_size]
+
+
 def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5) -> np.ndarray:
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
@@ -275,8 +284,7 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
     # Dilate
     if dilation > 0:
         kernel_size = int(dilation * 2 + 1)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        cleaned_mask = cv2.dilate(cleaned_mask, kernel)
+        cleaned_mask = cv2.dilate(cleaned_mask, _get_ellipse_kernel(kernel_size))
 
     # Blur
     if blur_size > 0:
