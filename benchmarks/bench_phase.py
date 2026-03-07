@@ -136,7 +136,7 @@ def measure_memory_before(device: str) -> int:
     elif device == "mps":
         torch.mps.empty_cache()
         torch.mps.synchronize()
-        return torch.mps.driver_allocated_size()
+        return torch.mps.driver_allocated_memory()
     return 0
 
 
@@ -151,8 +151,8 @@ def measure_memory_after(device: str) -> dict:
     elif device == "mps":
         torch.mps.synchronize()
         return {
-            "allocated_bytes": torch.mps.driver_allocated_size(),
-            "peak_bytes": torch.mps.driver_allocated_size(),  # MPS has no true peak tracker
+            "allocated_bytes": torch.mps.driver_allocated_memory(),
+            "peak_bytes": torch.mps.driver_allocated_memory(),  # MPS has no true peak tracker
         }
     return {"allocated_bytes": 0, "peak_bytes": 0}
 

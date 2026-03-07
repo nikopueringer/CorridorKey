@@ -67,11 +67,11 @@ print(f"Std: {statistics.stdev(frame_times):.4f}s")
 import torch
 
 torch.mps.empty_cache()
-mem_before = torch.mps.driver_allocated_size()
+mem_before = torch.mps.driver_allocated_memory()
 
 engine.process_frame(frame, ...)
 
-mem_after = torch.mps.driver_allocated_size()
+mem_after = torch.mps.driver_allocated_memory()
 
 print(f"Mem before: {mem_before / 1e9:.2f} GB")
 print(f"Mem after:  {mem_after / 1e9:.2f} GB")
@@ -226,11 +226,11 @@ Maintain a running table updated after each phase:
 - [x] Reference clip selected and stored locally
 - [x] `benchmarks/bench_phase.py` created with timing, memory, and pixel diff reporting
 - [x] `tests/test_quality_gate.py` created with per-channel quality gates
-- [ ] Baseline `.npy` outputs captured (unoptimized pipeline)
-- [ ] Baseline timing and memory measurements recorded
+- [x] Baseline `.npy` outputs captured (unoptimized pipeline)
+- [x] Baseline timing and memory measurements recorded
 - [x] Diff visualization generates heat maps for failures
 - [x] Baseline `.npy` files added to `.gitignore`
-- [ ] All tests pass against the baseline (trivially — comparing to itself)
+- [x] All tests pass against the baseline (trivially — comparing to itself)
 
 ### Important Caveats
 
@@ -428,7 +428,7 @@ All phases must run correctly on MPS (Apple Silicon). Key considerations:
 - **Phase 2:** `F.interpolate` works on MPS. Tensor ops in `color_utils.py` all MPS-compatible.
 - **Phase 3:** `F.interpolate` for backbone downsampling works on MPS.
 - **Phase 4:** Cache flushing must be device-aware — use `torch.mps.empty_cache()` on MPS, `torch.cuda.empty_cache()` on CUDA. MPS unified memory means CPU/GPU transfers are cheaper (shared address space), so per-tile offload overhead is lower than on CUDA.
-- **Memory measurement:** MPS uses `torch.mps.driver_allocated_size()` or `torch.mps.current_allocated_memory()`. No equivalent to CUDA's `torch.cuda.max_memory_allocated()`.
+- **Memory measurement:** MPS uses `torch.mps.driver_allocated_memory()` or `torch.mps.current_allocated_memory()`. No equivalent to CUDA's `torch.cuda.max_memory_allocated()`.
 
 ## Dependencies & Risks
 
