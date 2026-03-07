@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(echo \"$CLAUDE_TOOL_INPUT\" | jq -r '.file_path // empty'); if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.py$'; then uv run ruff format \"$file\" 2>/dev/null; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/cristopheryates/Documents/Projects/Python/CorridorKey && uv run ruff check --fix 2>&1 | tail -20"
+          }
+        ]
+      }
+    ]
+  }
+}

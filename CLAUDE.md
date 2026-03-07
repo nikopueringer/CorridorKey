@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CorridorKey is a neural-network-based green screen keyer for professional VFX. It takes an RGB image + coarse alpha hint and produces physically unmixed straight foreground color + linear alpha channel. Native inference at 2048x2048 (Hiera backbone). Requires ~22.7GB VRAM (CUDA), also supports MPS (Apple Silicon) and an experimental MLX backend.
 
+## Important
+
+Be extremely concise in all interactions and commit messages. Sacrifice grammar for the sake of being concise.
+
 ## Commands
 
 ```bash
@@ -62,6 +66,19 @@ Both invoked through `clip_manager.py` (`--action generate_alphas`). These are t
 - `/FG` — Straight foreground color, sRGB gamut (half-float EXR)
 - `/Processed` — Linear premultiplied RGBA (half-float EXR)
 - `/Comp` — Checkerboard preview (8-bit PNG)
+
+## Philosophy
+
+This codebase will outlive you. Every shortcut you take becomes
+someone else's burden. Every hack compounds into technical debt
+that slows the whole team down.
+
+You are not just writing code. You are shaping the future of this
+project. The patterns you establish will be copied. The corners
+you cut will be cut again.
+
+Fight entropy. Leave the codebase better than you found it.
+
 
 ## Critical Rules
 
