@@ -58,6 +58,7 @@ app = typer.Typer(
 # Environment setup
 # ---------------------------------------------------------------------------
 
+
 def _configure_environment() -> None:
     """Set up logging and warnings for interactive CLI use."""
     warnings.filterwarnings("ignore", category=FutureWarning)
@@ -113,6 +114,7 @@ def _on_clip_start_simple(clip_name: str, total_clips: int) -> None:
 # ---------------------------------------------------------------------------
 # Inference settings prompt (rich.prompt — CLI layer only)
 # ---------------------------------------------------------------------------
+
 
 def _prompt_inference_settings(
     *,
@@ -190,6 +192,7 @@ def _prompt_inference_settings(
 # Typer callback (shared options)
 # ---------------------------------------------------------------------------
 
+
 @app.callback()
 def app_callback(
     ctx: typer.Context,
@@ -208,6 +211,7 @@ def app_callback(
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
+
 
 @app.command("list-clips")
 def list_clips_cmd(ctx: typer.Context) -> None:
@@ -314,6 +318,7 @@ def wizard(
 # ---------------------------------------------------------------------------
 # Wizard (rich-styled)
 # ---------------------------------------------------------------------------
+
 
 def interactive_wizard(win_path: str, device: str | None = None) -> None:
     console.print(Panel("[bold]CORRIDOR KEY — SMART WIZARD[/bold]", style="cyan"))
@@ -528,6 +533,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Entry point called by the `corridorkey` console script."""

@@ -606,7 +606,6 @@ def run_inference(
             on_clip_start(clip.name, num_frames)
 
         for i in range(num_frames):
-
             # 1. Read Input
             img_srgb = None
             input_stem = f"{i:05d}"

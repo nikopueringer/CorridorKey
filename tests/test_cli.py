@@ -152,14 +152,20 @@ class TestNonInteractiveFlags:
         """When all settings flags are provided, no interactive prompts fire."""
         mock_scan.return_value = []
 
-        result = runner.invoke(app, [
-            "run-inference",
-            "--linear",
-            "--despill", "7",
-            "--despeckle",
-            "--despeckle-size", "200",
-            "--refiner", "1.5",
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--linear",
+                "--despill",
+                "7",
+                "--despeckle",
+                "--despeckle-size",
+                "200",
+                "--refiner",
+                "1.5",
+            ],
+        )
         assert result.exit_code == 0
 
         if mock_run.called:
@@ -177,13 +183,18 @@ class TestNonInteractiveFlags:
         """--srgb sets input_is_linear=False."""
         mock_scan.return_value = []
 
-        result = runner.invoke(app, [
-            "run-inference",
-            "--srgb",
-            "--despill", "5",
-            "--no-despeckle",
-            "--refiner", "1.0",
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "5",
+                "--no-despeckle",
+                "--refiner",
+                "1.0",
+            ],
+        )
         assert result.exit_code == 0
 
         if mock_run.called:
@@ -198,13 +209,18 @@ class TestNonInteractiveFlags:
         """Despill values outside 0-10 are clamped."""
         mock_scan.return_value = []
 
-        result = runner.invoke(app, [
-            "run-inference",
-            "--srgb",
-            "--despill", "15",
-            "--despeckle",
-            "--refiner", "1.0",
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "15",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+            ],
+        )
         assert result.exit_code == 0
 
         if mock_run.called:
