@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -10,6 +11,8 @@ from clip_manager import InferenceSettings
 from corridorkey_cli import app
 
 runner = CliRunner()
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +237,8 @@ class TestNonInteractiveFlags:
         """run-inference --help lists the settings flags."""
         result = runner.invoke(app, ["run-inference", "--help"])
         assert result.exit_code == 0
-        assert "--despill" in result.output
-        assert "--linear" in result.output
-        assert "--refiner" in result.output
-        assert "--despeckle-size" in result.output
+        plain = ANSI_ESCAPE.sub("", result.output)
+        assert "--despill" in plain
+        assert "--linear" in plain
+        assert "--refiner" in plain
+        assert "--despeckle-size" in plain
