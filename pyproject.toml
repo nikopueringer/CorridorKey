@@ -36,7 +36,6 @@ dependencies = [
     # CLI framework + terminal output
     "typer>=0.12",
     "rich>=13",
-    "textual>=1.0",
 ]
 
 [dependency-groups]
@@ -51,7 +50,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["CorridorKeyModule", "gvm_core", "VideoMaMaInferenceModule", "tui"]
+packages = ["CorridorKeyModule", "gvm_core", "VideoMaMaInferenceModule"]
 
 [tool.ruff]
 target-version = "py311"

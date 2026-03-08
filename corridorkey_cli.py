@@ -13,7 +13,10 @@ Usage:
 
 from __future__ import annotations
 
+import glob
 import logging
+import os
+import shutil
 import sys
 import warnings
 from typing import Annotated, Optional
@@ -24,11 +27,18 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.table import Table
 
 from clip_manager import (
+    LINUX_MOUNT_ROOT,
+    ClipEntry,
     InferenceSettings,
     generate_alphas,
+    is_video_file,
+    map_path,
+    organize_target,
     run_inference,
+    run_videomama,
     scan_clips,
 )
 from device_utils import resolve_device
@@ -302,10 +312,222 @@ def wizard(
     path: Annotated[str, typer.Argument(help="Target path (Windows or local)")],
 ) -> None:
     """Interactive wizard for organizing clips and running the pipeline."""
-    from tui.app import CorridorKeyApp
+    interactive_wizard(path, device=ctx.obj["device"])
 
-    tui_app = CorridorKeyApp(target_path=path, device=ctx.obj["device"])
-    tui_app.run()
+
+# ---------------------------------------------------------------------------
+# Wizard (rich-styled)
+# ---------------------------------------------------------------------------
+
+
+def interactive_wizard(win_path: str, device: str | None = None) -> None:
+    console.print(Panel("[bold]CORRIDOR KEY — SMART WIZARD[/bold]", style="cyan"))
+
+    # 1. Resolve Path
+    console.print(f"Windows Path: {win_path}")
+
+    # Check if we are running locally where the Windows path exists
+    if os.path.exists(win_path):
+        process_path = win_path
+        console.print(f"Running locally: [bold]{process_path}[/bold]")
+    else:
+        process_path = map_path(win_path)
+        console.print(f"Linux/Remote Path: [bold]{process_path}[/bold]")
+
+        if not os.path.exists(process_path):
+            console.print(
+                f"\n[bold red]ERROR:[/bold red] Path does not exist locally OR on Linux mount!\n"
+                f"Expected Linux Mount Root: {LINUX_MOUNT_ROOT}"
+            )
+            raise typer.Exit(code=1)
+
+    # 2. Analyze — shot or project?
+    target_is_shot = False
+    if os.path.exists(os.path.join(process_path, "Input")) or glob.glob(os.path.join(process_path, "Input.*")):
+        target_is_shot = True
+
+    work_dirs: list[str] = []
+    excluded_dirs = {"Output", "AlphaHint", "VideoMamaMaskHint", ".ipynb_checkpoints"}
+    if target_is_shot:
+        work_dirs = [process_path]
+    else:
+        work_dirs = [
+            os.path.join(process_path, d)
+            for d in os.listdir(process_path)
+            if os.path.isdir(os.path.join(process_path, d)) and d not in excluded_dirs
+        ]
+
+    console.print(f"\nFound [bold]{len(work_dirs)}[/bold] potential clip folders.")
+
+    # Check for loose videos
+    loose_videos = [
+        f for f in os.listdir(process_path) if is_video_file(f) and os.path.isfile(os.path.join(process_path, f))
+    ]
+
+    # Check folders needing organization
+    dirs_needing_org = []
+    for d in work_dirs:
+        has_input = os.path.exists(os.path.join(d, "Input")) or glob.glob(os.path.join(d, "Input.*"))
+        has_alpha = os.path.exists(os.path.join(d, "AlphaHint"))
+        has_mask = os.path.exists(os.path.join(d, "VideoMamaMaskHint"))
+        if not has_input or not has_alpha or not has_mask:
+            dirs_needing_org.append(d)
+
+    if loose_videos or dirs_needing_org:
+        if loose_videos:
+            console.print(f"Found [yellow]{len(loose_videos)}[/yellow] loose video files:")
+            for v in loose_videos:
+                console.print(f"  • {v}")
+
+        if dirs_needing_org:
+            console.print(f"Found [yellow]{len(dirs_needing_org)}[/yellow] folders needing setup:")
+            display_limit = 10
+            for d in dirs_needing_org[:display_limit]:
+                console.print(f"  • {os.path.basename(d)}")
+            if len(dirs_needing_org) > display_limit:
+                console.print(f"  …and {len(dirs_needing_org) - display_limit} others.")
+
+        # 3. Organize
+        if Confirm.ask("\nOrganize clips & create hint folders?", default=False):
+            for v in loose_videos:
+                clip_name = os.path.splitext(v)[0]
+                ext = os.path.splitext(v)[1]
+                target_folder = os.path.join(process_path, clip_name)
+
+                if os.path.exists(target_folder):
+                    logger.warning(f"Skipping loose video '{v}': Target folder '{clip_name}' already exists.")
+                    continue
+
+                try:
+                    os.makedirs(target_folder)
+                    target_file = os.path.join(target_folder, f"Input{ext}")
+                    shutil.move(os.path.join(process_path, v), target_file)
+                    logger.info(f"Organized: Moved '{v}' to '{clip_name}/Input{ext}'")
+                    for hint in ["AlphaHint", "VideoMamaMaskHint"]:
+                        os.makedirs(os.path.join(target_folder, hint), exist_ok=True)
+                except Exception as e:
+                    logger.error(f"Failed to organize video '{v}': {e}")
+
+            for d in work_dirs:
+                organize_target(d)
+            console.print("[green]Organization complete.[/green]")
+
+            if not target_is_shot:
+                work_dirs = [
+                    os.path.join(process_path, d)
+                    for d in os.listdir(process_path)
+                    if os.path.isdir(os.path.join(process_path, d)) and d not in excluded_dirs
+                ]
+
+    # 4. Status Check Loop
+    while True:
+        ready: list[ClipEntry] = []
+        masked: list[ClipEntry] = []
+        raw: list[ClipEntry] = []
+
+        for d in work_dirs:
+            entry = ClipEntry(os.path.basename(d), d)
+            try:
+                entry.find_assets()
+            except (FileNotFoundError, ValueError, OSError):
+                pass
+
+            has_mask = False
+            mask_dir = os.path.join(d, "VideoMamaMaskHint")
+            if os.path.isdir(mask_dir) and len(os.listdir(mask_dir)) > 0:
+                has_mask = True
+            if not has_mask:
+                for f in os.listdir(d):
+                    stem, _ = os.path.splitext(f)
+                    if stem.lower() == "videomamamaskhint" and is_video_file(f):
+                        has_mask = True
+                        break
+
+            if entry.alpha_asset:
+                ready.append(entry)
+            elif has_mask:
+                masked.append(entry)
+            else:
+                raw.append(entry)
+
+        # Status table
+        table = Table(title="Status Report", show_lines=True)
+        table.add_column("Category", style="bold")
+        table.add_column("Count", justify="right")
+        table.add_column("Clips")
+
+        table.add_row(
+            "[green]Ready[/green] (AlphaHint)",
+            str(len(ready)),
+            ", ".join(c.name for c in ready) or "—",
+        )
+        table.add_row(
+            "[yellow]Masked[/yellow] (VideoMaMaMaskHint)",
+            str(len(masked)),
+            ", ".join(c.name for c in masked) or "—",
+        )
+        table.add_row(
+            "[red]Raw[/red] (Input only)",
+            str(len(raw)),
+            ", ".join(c.name for c in raw) or "—",
+        )
+        console.print(table)
+
+        # Actions
+        missing_alpha = masked + raw
+        actions: list[str] = []
+
+        if missing_alpha:
+            actions.append(f"[bold]v[/bold] — Run VideoMaMa ({len(masked)} with masks)")
+            actions.append(f"[bold]g[/bold] — Run GVM (auto-matte {len(raw)} clips)")
+        if ready:
+            actions.append(f"[bold]i[/bold] — Run Inference ({len(ready)} ready clips)")
+        actions.append("[bold]r[/bold] — Re-scan folders")
+        actions.append("[bold]q[/bold] — Quit")
+
+        console.print(Panel("\n".join(actions), title="Actions", style="blue"))
+
+        choice = Prompt.ask("Select action", choices=["v", "g", "i", "r", "q"], default="q")
+
+        if choice == "v":
+            console.print(Panel("VideoMaMa", style="magenta"))
+            run_videomama(missing_alpha, chunk_size=50, device=device)
+            Prompt.ask("VideoMaMa batch complete. Press Enter to re-scan")
+
+        elif choice == "g":
+            console.print(Panel("GVM Auto-Matte", style="magenta"))
+            console.print(f"Will generate alphas for {len(raw)} clips without mask hints.")
+            if Confirm.ask("Proceed with GVM?", default=False):
+                generate_alphas(raw, device=device)
+                Prompt.ask("GVM batch complete. Press Enter to re-scan")
+
+        elif choice == "i":
+            console.print(Panel("Corridor Key Inference", style="magenta"))
+            try:
+                settings = _prompt_inference_settings()
+                global _progress
+                progress = _make_progress()
+                _progress = progress
+                with progress:
+                    run_inference(
+                        ready,
+                        device=device,
+                        settings=settings,
+                        on_clip_start=_on_clip_start,
+                        on_frame_complete=_on_frame_complete,
+                    )
+                _progress = None
+            except (RuntimeError, FileNotFoundError) as e:
+                console.print(f"[bold red]Inference failed:[/bold red] {e}")
+            Prompt.ask("Inference batch complete. Press Enter to re-scan")
+
+        elif choice == "r":
+            console.print("Re-scanning…")
+
+        elif choice == "q":
+            break
+
+    console.print("[bold green]Wizard complete. Goodbye![/bold green]")
 
 
 # ---------------------------------------------------------------------------
