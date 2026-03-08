@@ -92,6 +92,48 @@ Perhaps in the future, I will implement other generators for the AlphaHint! In t
 
 Please give feedback and share your results!
 
+### Docker (Linux + NVIDIA GPU)
+
+If you prefer not to install dependencies locally, you can run CorridorKey in Docker.
+
+1. Build the image:
+   ```bash
+   docker build -t corridorkey:latest .
+   ```
+2. Run an action directly (example: inference):
+   ```bash
+   docker run --rm -it --gpus all \
+     -e OPENCV_IO_ENABLE_OPENEXR=1 \
+     -v "$(pwd)/ClipsForInference:/app/ClipsForInference" \
+     -v "$(pwd)/Output:/app/Output" \
+     -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
+     -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
+     -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
+     corridorkey:latest --action run_inference --device cuda
+   ```
+3. Docker Compose (recommended for repeat runs):
+   ```bash
+   docker compose build
+   docker compose run --rm corridorkey --action run_inference --device cuda
+   docker compose run --rm corridorkey --action list
+   docker compose run --rm corridorkey-cpu --action run_inference --device cpu
+   ```
+
+Notes:
+- You still need to place model weights in the same folders used by native runs (mounted above).
+- The wizard works too, but use a path inside the container, for example:
+  ```bash
+  docker run --rm -it --gpus all \
+    -e OPENCV_IO_ENABLE_OPENEXR=1 \
+    -v "$(pwd)/ClipsForInference:/app/ClipsForInference" \
+    -v "$(pwd)/Output:/app/Output" \
+    -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
+    -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
+    -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
+    corridorkey:latest --action wizard --win_path /app/ClipsForInference
+  docker compose run --rm corridorkey --action wizard --win_path /app/ClipsForInference
+  ```
+
 ### 3. Usage: The Command Line Wizard
 
 For the easiest experience, use the provided launcher scripts. These scripts launch a prompt-based configuration wizard in your terminal.

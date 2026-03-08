@@ -1,0 +1,17 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Large/generated data and local outputs
+ClipsForInference/
+IgnoredClips/
+Output/
+CorridorKeyModule/checkpoints/
+gvm_core/weights/
+VideoMaMaInferenceModule/checkpoints/

@@ -1,0 +1,33 @@
+services:
+  corridorkey:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: corridorkey:latest
+    environment:
+      OPENCV_IO_ENABLE_OPENEXR: "1"
+    volumes:
+      - ./ClipsForInference:/app/ClipsForInference
+      - ./Output:/app/Output
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
+    gpus: all
+    stdin_open: true
+    tty: true
+
+  corridorkey-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: corridorkey:latest
+    environment:
+      OPENCV_IO_ENABLE_OPENEXR: "1"
+    volumes:
+      - ./ClipsForInference:/app/ClipsForInference
+      - ./Output:/app/Output
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
+    stdin_open: true
+    tty: true
