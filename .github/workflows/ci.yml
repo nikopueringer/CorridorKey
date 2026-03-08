@@ -18,7 +18,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --frozen
 
       - name: Check formatting
         run: uv run ruff format --check
@@ -40,7 +40,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --group dev --python ${{ matrix.python-version }}
+        run: uv sync --group dev --python ${{ matrix.python-version }}  --frozen
 
       - name: Run tests
         run: uv run pytest -v --tb=short -m "not gpu"
