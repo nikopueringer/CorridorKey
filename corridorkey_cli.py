@@ -54,7 +54,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
     # 1. Resolve Path
     print(f"Windows Path: {win_path}")
-    
+
     # Check if we are running locally where the Windows path exists
     if os.path.exists(win_path):
         process_path = win_path
@@ -87,7 +87,9 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
     else:
         # Scan subfolders
         work_dirs = [
-            os.path.join(process_path, d) for d in os.listdir(process_path) if os.path.isdir(os.path.join(process_path, d))
+            os.path.join(process_path, d)
+            for d in os.listdir(process_path)
+            if os.path.isdir(os.path.join(process_path, d))
         ]
         # Filter out output/hints
         work_dirs = [

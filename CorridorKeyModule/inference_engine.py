@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 
@@ -10,6 +11,8 @@ import torch.nn.functional as F
 
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
+
+logger = logging.getLogger(__name__)
 
 
 class CorridorKeyEngine:
@@ -27,7 +30,7 @@ class CorridorKeyEngine:
         self.model = self._load_model()
 
     def _load_model(self) -> GreenFormer:
-        print(f"Loading CorridorKey from {self.checkpoint_path}...")
+        logger.info("Loading CorridorKey from %s...", self.checkpoint_path)
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
             encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
@@ -53,7 +56,7 @@ class CorridorKeyEngine:
             # Check for PosEmbed Mismatch
             if "pos_embed" in k and k in model_state:
                 if v.shape != model_state[k].shape:
-                    print(f"Resizing {k} from {v.shape} to {model_state[k].shape}")
+                    logger.info("Resizing %s from %s to %s", k, v.shape, model_state[k].shape)
                     # v: [1, N_src, C]
                     # target: [1, N_dst, C]
                     # We assume square grid
@@ -77,9 +80,9 @@ class CorridorKeyEngine:
 
         missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
         if len(missing) > 0:
-            print(f"[Warning] Missing keys: {missing}")
+            logger.warning("Missing keys: %s", missing)
         if len(unexpected) > 0:
-            print(f"[Warning] Unexpected keys: {unexpected}")
+            logger.warning("Unexpected keys: %s", unexpected)
 
         return model
 
