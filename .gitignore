@@ -37,6 +37,10 @@ CorridorKey_remote.bat
 *.onnx
 
 # Checkpoint Directories
+# Benchmark baseline outputs (large .npy files)
+benchmarks/baseline/
+benchmarks/**/diffs/
+
 CorridorKeyModule/checkpoints/*
 !CorridorKeyModule/checkpoints/.gitkeep
 CorridorKeyModule/IgnoredCheckpoints/*

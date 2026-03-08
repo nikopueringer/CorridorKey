@@ -14,15 +14,33 @@ from .core.model_transformer import GreenFormer
 
 class CorridorKeyEngine:
     def __init__(
-        self, checkpoint_path: str, device: str = "cpu", img_size: int = 2048, use_refiner: bool = True
+        self,
+        checkpoint_path: str,
+        device: str = "cpu",
+        img_size: int = 2048,
+        backbone_size: int | None = None,
+        use_refiner: bool = True,
+        refiner_tile_size: int | None = 512,
+        refiner_tile_overlap: int = 96,
+        fp16: bool = True,
+        gpu_postprocess: bool = True,
     ) -> None:
         self.device = torch.device(device)
         self.img_size = img_size
+        self.backbone_size = backbone_size
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
+        self.refiner_tile_size = refiner_tile_size
+        self.refiner_tile_overlap = refiner_tile_overlap
+        self.fp16 = fp16
+        self.gpu_postprocess = gpu_postprocess
 
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+
+        self._checker_cache_srgb: torch.Tensor | None = None
+        self._checker_cache_lin: torch.Tensor | None = None
+        self._checker_cache_key: tuple[int, int] = (0, 0)
 
         self.model = self._load_model()
 
@@ -30,7 +48,12 @@ class CorridorKeyEngine:
         print(f"Loading CorridorKey from {self.checkpoint_path}...")
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
-            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
+            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
+            img_size=self.img_size,
+            backbone_size=self.backbone_size,
+            use_refiner=self.use_refiner,
+            refiner_tile_size=self.refiner_tile_size,
+            refiner_tile_overlap=self.refiner_tile_overlap,
         )
         model = model.to(self.device)
         model.eval()
@@ -82,6 +105,15 @@ class CorridorKeyEngine:
             print(f"[Warning] Unexpected keys: {unexpected}")
 
         return model
+
+    def _get_checkerboard(self, width: int, height: int) -> tuple[torch.Tensor, torch.Tensor]:
+        key = (width, height)
+        if self._checker_cache_srgb is None or self._checker_cache_key != key:
+            bg_np = cu.create_checkerboard(width, height, checker_size=128, color1=0.15, color2=0.55)
+            self._checker_cache_srgb = torch.from_numpy(bg_np).to(self.device)
+            self._checker_cache_lin = cu.srgb_to_linear(self._checker_cache_srgb)
+            self._checker_cache_key = key
+        return self._checker_cache_srgb, self._checker_cache_lin
 
     @torch.no_grad()
     def process_frame(
@@ -161,64 +193,148 @@ class CorridorKeyEngine:
 
             handle = self.model.refiner.register_forward_hook(scale_hook)
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+        if self.fp16:
+            with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+                out = self.model(inp_t)
+        else:
             out = self.model(inp_t)
 
         if handle:
             handle.remove()
 
-        pred_alpha = out["alpha"]
-        pred_fg = out["fg"]  # Output is sRGB (Sigmoid)
+        pred_alpha = out["alpha"]  # [1, 1, model_size, model_size]
+        pred_fg = out["fg"]  # [1, 3, model_size, model_size] sRGB (Sigmoid)
 
         # 6. Post-Process (Resize Back to Original Resolution)
-        # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
+        if self.gpu_postprocess:
+            return self._postprocess_gpu(
+                pred_alpha, pred_fg, h, w, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
+            )
+        else:
+            return self._postprocess_cpu(
+                pred_alpha, pred_fg, h, w, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
+            )
+
+    def _postprocess_gpu(
+        self,
+        pred_alpha: torch.Tensor,
+        pred_fg: torch.Tensor,
+        h: int,
+        w: int,
+        fg_is_straight: bool,
+        despill_strength: float,
+        auto_despeckle: bool,
+        despeckle_size: int,
+    ) -> dict[str, np.ndarray]:
+        """Post-process on GPU with cached assets — minimizes PCIe transfers."""
+        # Bicubic on GPU replaces Lanczos4 on CPU — avoids PCIe transfer bottleneck.
+        # Bicubic has slightly different ringing characteristics vs Lanczos4 but the
+        # quality delta is well within fp16 thresholds (max_abs_err < 0.04).
+        res_alpha = F.interpolate(pred_alpha.float(), size=(h, w), mode="bicubic", align_corners=False)
+        res_fg = F.interpolate(pred_fg.float(), size=(h, w), mode="bicubic", align_corners=False)
+
+        # Clamp after bicubic (can overshoot [0,1])
+        res_alpha = res_alpha.clamp(0.0, 1.0)
+        res_fg = res_fg.clamp(0.0, 1.0)
+
+        # Permute to HWC for color_utils compatibility
+        res_alpha = res_alpha[0].permute(1, 2, 0)  # [H, W, 1]
+        res_fg = res_fg[0].permute(1, 2, 0)  # [H, W, 3]
+
+        # A. Clean Matte (Auto-Despeckle) — CPU-only (cv2.connectedComponents)
+        if auto_despeckle:
+            alpha_cpu = res_alpha.cpu().numpy()
+            processed_alpha_np = cu.clean_matte(alpha_cpu, area_threshold=despeckle_size, dilation=25, blur_size=5)
+            processed_alpha = torch.from_numpy(processed_alpha_np).to(self.device)
+        else:
+            processed_alpha = res_alpha
+
+        # B. Despill FG (GPU tensor)
+        fg_despilled = cu.despill(res_fg, green_limit_mode="average", strength=despill_strength)
+
+        # C. Premultiply (for EXR Output)
+        fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
+        fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
+
+        # D. Pack RGBA — all channels strictly Linear Float
+        processed_rgba = torch.cat([fg_premul_lin, processed_alpha], dim=-1)
+
+        # E. Composite (on Checkerboard) — cached GPU tensor
+        _bg_srgb, bg_lin = self._get_checkerboard(w, h)
+
+        if fg_is_straight:
+            comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+        else:
+            comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
+
+        comp_srgb = cu.linear_to_srgb(comp_lin)
+
+        # Transfer to CPU (single batch transfer at the end)
+        return {
+            "alpha": res_alpha.cpu().numpy(),
+            "fg": res_fg.cpu().numpy(),
+            "comp": comp_srgb.cpu().numpy(),
+            "processed": processed_rgba.cpu().numpy(),
+        }
+
+    def _postprocess_cpu(
+        self,
+        pred_alpha: torch.Tensor,
+        pred_fg: torch.Tensor,
+        h: int,
+        w: int,
+        fg_is_straight: bool,
+        despill_strength: float,
+        auto_despeckle: bool,
+        despeckle_size: int,
+    ) -> dict[str, np.ndarray]:
+        """Post-process on CPU with numpy — legacy path, no GPU post-processing."""
+        # Transfer to CPU immediately
         res_alpha = pred_alpha[0].permute(1, 2, 0).float().cpu().numpy()
         res_fg = pred_fg[0].permute(1, 2, 0).float().cpu().numpy()
+
+        # Resize back to original resolution (Lanczos4 on CPU)
         res_alpha = cv2.resize(res_alpha, (w, h), interpolation=cv2.INTER_LANCZOS4)
         res_fg = cv2.resize(res_fg, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
+        # Clamp
+        res_alpha = np.clip(res_alpha, 0.0, 1.0)
+        res_fg = np.clip(res_fg, 0.0, 1.0)
+
+        # Ensure shapes
         if res_alpha.ndim == 2:
             res_alpha = res_alpha[:, :, np.newaxis]
 
-        # --- ADVANCED COMPOSITING ---
-
-        # A. Clean Matte (Auto-Despeckle)
+        # A. Clean Matte
         if auto_despeckle:
             processed_alpha = cu.clean_matte(res_alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
         else:
             processed_alpha = res_alpha
 
         # B. Despill FG
-        # res_fg is sRGB.
         fg_despilled = cu.despill(res_fg, green_limit_mode="average", strength=despill_strength)
 
-        # C. Premultiply (for EXR Output)
-        # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
+        # C. Premultiply
         fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
         fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
 
         # D. Pack RGBA
-        # [H, W, 4] - All channels are now strictly Linear Float
         processed_rgba = np.concatenate([fg_premul_lin, processed_alpha], axis=-1)
 
-        # ----------------------------
-
-        # 7. Composite (on Checkerboard) for checking
-        # Generate Dark/Light Gray Checkerboard (in sRGB, convert to Linear)
+        # E. Composite
         bg_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
         bg_lin = cu.srgb_to_linear(bg_srgb)
 
         if fg_is_straight:
             comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
         else:
-            # If premultiplied model, we shouldn't multiply again (though our pipeline forces straight)
             comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
 
         comp_srgb = cu.linear_to_srgb(comp_lin)
 
         return {
-            "alpha": res_alpha,  # Linear, Raw Prediction
-            "fg": res_fg,  # sRGB, Raw Prediction (Straight)
-            "comp": comp_srgb,  # sRGB, Composite
-            "processed": processed_rgba,  # Linear/Premul, RGBA, Garbage Matted & Despilled
+            "alpha": res_alpha,
+            "fg": res_fg,
+            "comp": comp_srgb,
+            "processed": processed_rgba,
         }

@@ -495,7 +495,35 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def add_optimization_args(parser: argparse.ArgumentParser) -> None:
+    """Register optimization CLI flags shared across entry points."""
+    parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=True, help="FP16 weight casting")
+    parser.add_argument(
+        "--gpu-postprocess",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run color math on GPU with cached assets",
+    )
+    parser.add_argument(
+        "--backbone-size", type=int, default=None, help="Backbone resolution (e.g. 1024). None = full res"
+    )
+    parser.add_argument(
+        "--refiner-tile-size", type=int, default=512, help="Refiner tile size (0 = disabled, default 512)"
+    )
+    parser.add_argument("--refiner-tile-overlap", type=int, default=96, help="Refiner tile overlap pixels (default 96)")
+
+
+def run_inference(
+    clips,
+    device=None,
+    backend=None,
+    max_frames=None,
+    backbone_size=None,
+    refiner_tile_size=512,
+    refiner_tile_overlap=96,
+    fp16=True,
+    gpu_postprocess=True,
+):
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
 
     if not ready_clips:
@@ -566,7 +594,15 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(
+        backend=backend,
+        device=device,
+        backbone_size=backbone_size,
+        refiner_tile_size=refiner_tile_size,
+        refiner_tile_overlap=refiner_tile_overlap,
+        fp16=fp16,
+        gpu_postprocess=gpu_postprocess,
+    )
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
@@ -701,9 +737,9 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
             exr_flags = [
                 cv2.IMWRITE_EXR_TYPE,
                 cv2.IMWRITE_EXR_TYPE_HALF,
-                # DWAB fails. PXR24 verified as smallest working format (46KB vs ZIP 56KB vs B44A 688KB)
+                # ZIP — PXR24 deadlocks on some Windows CUDA setups
                 cv2.IMWRITE_EXR_COMPRESSION,
-                cv2.IMWRITE_EXR_COMPRESSION_PXR24,
+                cv2.IMWRITE_EXR_COMPRESSION_ZIP,
             ]
 
             # Save FG
@@ -906,11 +942,14 @@ if __name__ == "__main__":
         default=None,
         help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
     )
+    add_optimization_args(parser)
 
     args = parser.parse_args()
 
     device = resolve_device(args.device)
     logger.info(f"Using device: {device}")
+
+    refiner_tile_size = args.refiner_tile_size or None  # 0 -> None (disabled)
 
     if args.action == "list":
         scan_clips()
@@ -919,7 +958,17 @@ if __name__ == "__main__":
         generate_alphas(clips, device=device)
     elif args.action == "run_inference":
         clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
+        run_inference(
+            clips,
+            device=device,
+            backend=args.backend,
+            max_frames=args.max_frames,
+            backbone_size=args.backbone_size,
+            refiner_tile_size=refiner_tile_size,
+            refiner_tile_overlap=args.refiner_tile_overlap,
+            fp16=args.fp16,
+            gpu_postprocess=args.gpu_postprocess,
+        )
     elif args.action == "wizard":
         if not args.win_path:
             print("Error: --win_path required for wizard.")

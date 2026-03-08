@@ -144,16 +144,31 @@ class GreenFormer(nn.Module):
         encoder_name: str = "hiera_base_plus_224.mae_in1k_ft_in1k",
         in_channels: int = 4,
         img_size: int = 512,
+        backbone_size: int | None = None,
         use_refiner: bool = True,
+        refiner_tile_size: int | None = None,
+        refiner_tile_overlap: int = 64,
     ) -> None:
         super().__init__()
 
+        # Backbone resolution — None means same as img_size (no downsampling)
+        self.backbone_size = backbone_size
+        encoder_img_size = backbone_size or img_size
+
+        # Tiled refiner config — reduces peak VRAM by processing tiles sequentially
+        self.refiner_tile_size = refiner_tile_size
+        self.refiner_tile_overlap = refiner_tile_overlap
+        if refiner_tile_size is not None:
+            self._tent_weight = self._build_tent_weight(refiner_tile_size, refiner_tile_overlap)
+        else:
+            self._tent_weight = None
+
         # --- Encoder ---
         # Load Pretrained Hiera
-        # 1. Create Target Model (512x512, Random Weights)
+        # 1. Create Target Model (Random Weights)
         # We use features_only=True, which wraps it in FeatureGetterNet
-        print(f"Initializing {encoder_name} (img_size={img_size})...")
-        self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=img_size)
+        print(f"Initializing {encoder_name} (img_size={img_size}, backbone_size={encoder_img_size})...")
+        self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=encoder_img_size)
         # We skip downloading/loading base weights because the user's checkpoint
         # (loaded immediately after this) contains all weights, including correctly
         # trained/sized PosEmbeds. This keeps the project offline-capable using only local assets.
@@ -235,12 +250,65 @@ class GreenFormer(nn.Module):
 
         print(f"Patched input layer: 3 channels -> {in_channels} channels (Extra initialized to 0)")
 
+    @staticmethod
+    def _build_tent_weight(tile_size: int, overlap: int) -> torch.Tensor:
+        """Build 2D tent (linear ramp) weight map for tile seam blending."""
+        ramp = torch.linspace(0, 1, overlap + 2)[1:-1]  # (0, 1) exclusive
+        center = torch.ones(tile_size - 2 * overlap)
+        w1d = torch.cat([ramp, center, ramp.flip(0)])
+        return (w1d.unsqueeze(1) * w1d.unsqueeze(0)).unsqueeze(0).unsqueeze(0)  # [1, 1, ts, ts]
+
+    def _tiled_refine(self, rgb: torch.Tensor, coarse_pred: torch.Tensor) -> torch.Tensor:
+        """Run refiner in tiles to reduce peak VRAM. Blends overlaps with tent weights."""
+        tile_size = self.refiner_tile_size
+        overlap = self.refiner_tile_overlap
+        stride = tile_size - overlap
+        _, _, h, w = rgb.shape
+        device = rgb.device
+
+        # CPU accumulators — tiles offloaded immediately to save VRAM
+        output_acc = torch.zeros(1, 4, h, w, dtype=torch.float32)
+        weight_acc = torch.zeros(1, 1, h, w, dtype=torch.float32)
+        tent = self._tent_weight  # [1, 1, tile_size, tile_size]
+
+        def _starts(length: int) -> list[int]:
+            """Tile start positions — last tile end-aligns with image edge."""
+            s = list(range(0, length - tile_size + 1, stride))
+            if not s or s[-1] + tile_size < length:
+                s.append(length - tile_size)
+            return sorted(set(s))
+
+        for y in _starts(h):
+            for x in _starts(w):
+                rgb_tile = rgb[:, :, y : y + tile_size, x : x + tile_size]
+                coarse_tile = coarse_pred[:, :, y : y + tile_size, x : x + tile_size]
+
+                delta = self.refiner(rgb_tile, coarse_tile)
+                delta_cpu = delta.cpu().float()
+
+                output_acc[:, :, y : y + tile_size, x : x + tile_size] += delta_cpu * tent
+                weight_acc[:, :, y : y + tile_size, x : x + tile_size] += tent
+
+                del delta, rgb_tile, coarse_tile
+
+        return (output_acc / weight_acc.clamp(min=1e-8)).to(device)
+
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         # x: [B, 4, H, W]
         input_size = x.shape[2:]
 
-        # Encode
-        features = self.encoder(x)  # Returns list of features
+        # Optionally downsample for backbone (encoder runs at lower res)
+        if self.backbone_size is not None and (
+            input_size[0] != self.backbone_size or input_size[1] != self.backbone_size
+        ):
+            x_backbone = F.interpolate(
+                x, size=(self.backbone_size, self.backbone_size), mode="bilinear", align_corners=False
+            )
+        else:
+            x_backbone = x
+
+        # Encode (at backbone resolution)
+        features = self.encoder(x_backbone)  # Returns list of features
 
         # Decode Streams
         alpha_logits = self.alpha_decoder(features)  # [B, 1, H/4, W/4]
@@ -251,11 +319,9 @@ class GreenFormer(nn.Module):
         alpha_logits_up = F.interpolate(alpha_logits, size=input_size, mode="bilinear", align_corners=False)
         fg_logits_up = F.interpolate(fg_logits, size=input_size, mode="bilinear", align_corners=False)
 
-        # --- HUMILITY CLAMP REMOVED (Phase 3) ---
-        # User requested NO CLAMPING to preserve all backbone detail.
-        # Refiner sees raw logits (-inf to +inf).
-        # alpha_logits_up = torch.clamp(alpha_logits_up, -3.0, 3.0)
-        # fg_logits_up = torch.clamp(fg_logits_up, -3.0, 3.0)
+        # Humility clamp removed: clamping logits to [-3, 3] limited refiner correction
+        # range, causing visible banding in low-contrast regions. Raw logits are safe
+        # because FP16 autocast handles numerical stability and sigmoid saturates gracefully.
 
         # Coarse Probs (for Loss and Refiner Input)
         alpha_coarse = torch.sigmoid(alpha_logits_up)
@@ -263,8 +329,9 @@ class GreenFormer(nn.Module):
 
         # --- Refinement (CNN Hybrid) ---
         # 4. Refine (CNN)
-        # Input to refiner: RGB Image (first 3 channels of x) + Coarse Predictions (Probs)
+        # Input to refiner: RGB Image (first 3 channels of ORIGINAL x) + Coarse Predictions (Probs)
         # We give the refiner 'Probs' as input features because they are normalized [0,1]
+        # Always use full-res RGB — refiner recovers fine detail lost by backbone downsampling
         rgb = x[:, :3, :, :]
 
         # Feed the Refiner
@@ -273,7 +340,13 @@ class GreenFormer(nn.Module):
         # Refiner outputs DELTA LOGITS
         # The refiner predicts the correction in valid score space (-inf, inf)
         if self.use_refiner and self.refiner is not None:
-            delta_logits = self.refiner(rgb, coarse_pred)
+            use_tiling = self.refiner_tile_size is not None and (
+                input_size[0] > self.refiner_tile_size or input_size[1] > self.refiner_tile_size
+            )
+            if use_tiling:
+                delta_logits = self._tiled_refine(rgb, coarse_pred)
+            else:
+                delta_logits = self.refiner(rgb, coarse_pred)
         else:
             # Zero Deltas
             delta_logits = torch.zeros_like(coarse_pred)

@@ -91,6 +91,17 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
+[tool.uv]
+required-environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+    "sys_platform == 'darwin'",
+]
+
 [tool.uv.sources]
-torch = { index = "pytorch" }
-torchvision = { index = "pytorch" }
+torch = [
+    { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]

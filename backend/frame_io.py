@@ -18,12 +18,12 @@ import numpy as np
 
 from .validators import normalize_mask_channels, normalize_mask_dtype
 
-# EXR write flags — PXR24 half-float (smallest working compression)
+# EXR write flags — ZIP half-float (PXR24 deadlocks on some Windows CUDA setups)
 EXR_WRITE_FLAGS = [
     cv2.IMWRITE_EXR_TYPE,
     cv2.IMWRITE_EXR_TYPE_HALF,
     cv2.IMWRITE_EXR_COMPRESSION,
-    cv2.IMWRITE_EXR_COMPRESSION_PXR24,
+    cv2.IMWRITE_EXR_COMPRESSION_ZIP,
 ]
 
 
