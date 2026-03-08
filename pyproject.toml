@@ -32,15 +32,11 @@ dependencies = [
     # CLI tools (huggingface-hub is also a transitive dep, but must be direct
     # so that uv installs the "hf" console-script entry point)
     "huggingface-hub",
-    "zensical>=0.0.24",
 ]
 
 [dependency-groups]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "ruff",
-]
+dev = ["pytest", "pytest-cov", "ruff"]
+docs = ["zensical>=0.0.24"]
 
 [project.scripts]
 corridorkey = "corridorkey_cli:main"
@@ -81,7 +77,7 @@ omit = [
     "gvm_core/*",
     "VideoMaMaInferenceModule/*",
     "tests/*",
-    "test_vram.py",  # manual GPU smoke test, not part of the pytest suite
+    "test_vram.py",               # manual GPU smoke test, not part of the pytest suite
 ]
 
 [[tool.uv.index]]

@@ -415,6 +415,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+docs = [
+    { name = "zensical" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -446,6 +449,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+docs = [{ name = "zensical", specifier = ">=0.0.24" }]
 
 [[package]]
 name = "coverage"
