@@ -228,7 +228,7 @@ _HEADERS = {
 def print_table(results: list[BenchResult]) -> None:
     """Print a neat fixed-width summary table to stdout."""
     cols = list(_HEADERS.keys())
-    header = "  ".join(h.rjust(_COL_WIDTH[c]) for c, h in zip(cols, _HEADERS.values(), strict=False))
+    header = "  ".join(h.rjust(_COL_WIDTH[c]) for c, h in zip(cols, _HEADERS.values(), strict=True))
     sep = "-" * len(header)
     print(sep)
     print(header)
