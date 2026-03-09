@@ -217,7 +217,7 @@ class GVMProcessor:
         
         # Dataloader
         if is_video:
-            dataloader = DataLoader(reader, batch_size=num_frames_per_batch)
+            dataloader = DataLoader(reader, batch_size=num_frames_per_batch, collate_fn=sequence_collate_fn)
         else:
             dataloader = DataLoader(reader, batch_size=num_frames_per_batch, collate_fn=sequence_collate_fn)
 
@@ -225,15 +225,8 @@ class GVMProcessor:
         lower_bound = 25./ 255.
 
         for batch_id, batch in tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Inferencing {file_name}"):
-            filenames = []
-            if is_video:
-                b, _, h, w = batch.shape
-                for i in range(b):
-                    file_id = batch_id * b + i
-                    filenames.append(f"{file_id:05d}.jpg")
-            else:
-                filenames = batch['rgb_names']
-                batch = batch['rgb_values']
+            filenames = batch['rgb_names']
+            batch = batch['rgb_values']
 
             # Pad (Reflective)
             batch, pad_info = impad_multi(batch)

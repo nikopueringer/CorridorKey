@@ -33,9 +33,12 @@ class VideoReader(Dataset):
     def __getitem__(self, idx):
         frame = self.video[idx]
         frame = Image.fromarray(np.asarray(frame))
+        origin_shape = torch.from_numpy(np.asarray(np.array(frame).shape[:2]))
+        
         if self.transform is not None:
             frame = self.transform(frame)
-        return frame
+            
+        return {"image": frame, "filename": f"{idx:05d}.jpg", "origin_shape": origin_shape}
 
 
 class VideoWriter:
