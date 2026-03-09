@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Corridor Key Launcher - Local Linux/macOS
 
 # Get the directory where this script is located
