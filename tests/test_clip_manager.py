@@ -116,9 +116,16 @@ class TestMapPath:
         assert "\\" not in result
 
     def test_non_v_drive_passthrough(self):
-        """Paths not on V: are returned as-is (may already be Linux paths)."""
+        """Paths not on V: are normalized and returned unchanged."""
         linux_path = "/mnt/other/data"
         assert map_path(linux_path) == linux_path
+
+    def test_linux_path_is_normalized(self):
+        assert map_path("/mnt/other/../other/data") == "/mnt/other/data"
+
+    def test_home_path_is_expanded(self):
+        home = os.path.expanduser("~")
+        assert map_path("~/clips") == os.path.join(home, "clips")
 
     def test_drive_root_only(self):
         result = map_path("V:\\")

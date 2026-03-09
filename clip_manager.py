@@ -30,8 +30,8 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "Output")
 
 # Network Mapping
 # Windows Drive -> Linux Mount Point
-WIN_DRIVE_ROOT = "V:\\"
-LINUX_MOUNT_ROOT = "/mnt/ssd-storage"
+WIN_DRIVE_ROOT = os.getenv("CORRIDORKEY_WIN_DRIVE_ROOT", "V:\\")
+LINUX_MOUNT_ROOT = os.getenv("CORRIDORKEY_LINUX_MOUNT_ROOT", "/mnt/ssd-storage")
 
 
 # --- Helpers ---
@@ -43,23 +43,22 @@ def is_video_file(filename: str) -> bool:
     return filename.lower().endswith((".mp4", ".mov", ".avi", ".mkv"))
 
 
-def map_path(win_path: str) -> str:
+def map_path(source_path: str) -> str:
     r"""
     Converts a Windows path (example: V:\Projects\Shot1) to the local Linux path.
+    Non-Windows paths are normalized and returned unchanged.
     """
-    # Normalize slashes
-    win_path = win_path.strip()
+    normalized_path = os.path.expanduser(source_path.strip())
 
     # Check if it starts with the drive letter
-    if win_path.upper().startswith(WIN_DRIVE_ROOT.upper()):
+    if normalized_path.upper().startswith(WIN_DRIVE_ROOT.upper()):
         # Remove drive letter
-        rel_path = win_path[len(WIN_DRIVE_ROOT) :]
+        rel_path = normalized_path[len(WIN_DRIVE_ROOT) :]
         # Combine and flip slashes
         linux_path = os.path.join(LINUX_MOUNT_ROOT, rel_path).replace("\\", "/")
         return linux_path
 
-    # If not on V:, maybe it's already a linux path or invalid?
-    return win_path
+    return os.path.normpath(normalized_path)
 
 
 # --- Classes ---
@@ -887,7 +886,16 @@ def scan_clips() -> list[ClipEntry]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
     parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
+    parser.add_argument(
+        "--path",
+        help="Clip source path for wizard mode. Accepts Linux/Mac paths and mapped Windows paths.",
+        default=None,
+    )
+    parser.add_argument(
+        "--win_path",
+        help=r"Deprecated alias for --path (example: V:\...)",
+        default=None,
+    )
     parser.add_argument(
         "--device",
         choices=["auto", "cuda", "mps", "cpu"],
@@ -908,6 +916,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    source_path = args.path or args.win_path
 
     device = resolve_device(args.device)
     logger.info(f"Using device: {device}")
@@ -921,7 +930,7 @@ if __name__ == "__main__":
         clips = scan_clips()
         run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
     elif args.action == "wizard":
-        if not args.win_path:
-            print("Error: --win_path required for wizard.")
+        if not source_path:
+            print("Error: --path (or deprecated --win_path) required for wizard.")
         else:
             raise NotImplementedError("interactive_wizard is not yet implemented")

@@ -125,14 +125,14 @@ By default, CorridorKey auto-detects the best available compute device: **CUDA >
 
 **Override via CLI flag:**
 ```bash
-uv run python clip_manager.py --action wizard --win_path "V:\..." --device mps
+uv run python clip_manager.py --action wizard --path "/mnt/ssd-storage/..." --device mps
 uv run python clip_manager.py --action run_inference --device cpu
 ```
 
 **Override via environment variable:**
 ```bash
 export CORRIDORKEY_DEVICE=cpu
-uv run python clip_manager.py --action wizard --win_path "V:\..."
+uv run python clip_manager.py --action wizard --path "/mnt/ssd-storage/..."
 ```
 
 Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
@@ -141,6 +141,19 @@ Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 ```
+
+
+
+### Linux Path Compatibility
+
+`clip_manager.py` now accepts a cross-platform `--path` flag (with `--win_path` kept as a deprecated alias), and path mapping can be customized on Linux with environment variables:
+
+```bash
+export CORRIDORKEY_WIN_DRIVE_ROOT="V:\\"
+export CORRIDORKEY_LINUX_MOUNT_ROOT="/mnt/ssd-storage"
+```
+
+This lets you adapt studio mount points without editing source code.
 
 ## Backend Selection
 
