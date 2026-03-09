@@ -823,7 +823,7 @@ class TestScanClips:
         input_dir = valid_shot / "Input"
         input_dir.mkdir()
         (input_dir / "frame_0000.png").write_text("data")
-        
+
         results = scan_clips()
 
         assert len(results) == 1
