@@ -298,6 +298,19 @@ def main() -> None:
         default="auto",
         help="Compute device (default: auto-detect CUDA > MPS > CPU)",
     )
+    parser.add_argument(
+        "--img-size",
+        type=int,
+        default=None,
+        help="Model inference resolution (default 2048). Lower values (e.g. 1024) cut VRAM ~4×.",
+    )
+    parser.add_argument(
+        "--low-vram",
+        action="store_true",
+        default=False,
+        help="Enable all VRAM optimizations: fp16 weights, half-res refiner, tiled inference, "
+        "periodic cache clearing. Targets ~8-10 GB instead of ~24 GB.",
+    )
 
     args = parser.parse_args()
 
@@ -312,7 +325,7 @@ def main() -> None:
             generate_alphas(clips, device=device)
         elif args.action == "run_inference":
             clips = scan_clips()
-            run_inference(clips, device=device)
+            run_inference(clips, device=device, img_size=args.img_size, low_vram=args.low_vram)
         elif args.action == "wizard":
             if not args.win_path:
                 print("Error: --win_path required for wizard.")

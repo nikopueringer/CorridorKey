@@ -495,7 +495,7 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def run_inference(clips, device=None, backend=None, max_frames=None, img_size=None, low_vram=False):
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
 
     if not ready_clips:
@@ -566,7 +566,13 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    # Resolve img_size: use provided value, or default from backend module
+    from CorridorKeyModule.backend import DEFAULT_IMG_SIZE
+    effective_img_size = img_size if img_size is not None else DEFAULT_IMG_SIZE
+    engine = create_engine(backend=backend, device=device, img_size=effective_img_size, low_vram=low_vram)
+
+    if low_vram:
+        logger.info(f"Low-VRAM mode enabled (img_size={effective_img_size}, tiled inference, periodic cache clearing)")
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
@@ -611,6 +617,13 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         for i in range(num_frames):
             if i % 10 == 0:
                 print(f"  Frame {i}/{num_frames}...", end="\r")
+                # Periodic GPU cache clearing to prevent VRAM fragmentation
+                if i > 0:
+                    try:
+                        from device_utils import clear_device_cache
+                        clear_device_cache(device)
+                    except ImportError:
+                        pass
 
             # 1. Read Input
             img_srgb = None
@@ -679,11 +692,9 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                     mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
                 )
 
-            # 3. Process
+            # 3. Process — use tiled inference in low-VRAM mode for full-res quality
             USE_STRAIGHT_MODEL = True
-            res = engine.process_frame(
-                img_srgb,
-                mask_linear,
+            process_kwargs = dict(
                 input_is_linear=input_is_linear,
                 fg_is_straight=USE_STRAIGHT_MODEL,
                 despill_strength=despill_strength,
@@ -691,6 +702,12 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                 despeckle_size=despeckle_size,
                 refiner_scale=refiner_scale,
             )
+            if low_vram and hasattr(engine, "process_frame_tiled"):
+                res = engine.process_frame_tiled(
+                    img_srgb, mask_linear, tile_size=1024, overlap=128, **process_kwargs
+                )
+            else:
+                res = engine.process_frame(img_srgb, mask_linear, **process_kwargs)
 
             pred_fg = res["fg"]  # sRGB
             pred_alpha = res["alpha"]  # Linear

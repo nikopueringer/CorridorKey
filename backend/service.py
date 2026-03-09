@@ -154,12 +154,14 @@ class CorridorKeyService:
             service.run_inference(clip, params, on_progress=my_callback)
     """
 
-    def __init__(self):
+    def __init__(self, img_size: int = 2048, low_vram: bool = False):
         self._engine = None
         self._gvm_processor = None
         self._videomama_pipeline = None
         self._active_model = _ActiveModel.NONE
         self._device: str = "cpu"
+        self._img_size = img_size
+        self._low_vram = low_vram
         self._job_queue: GPUJobQueue | None = None
         # GPU mutex — serializes ALL model operations (Codex: thread safety)
         self._gpu_lock = threading.Lock()
@@ -308,7 +310,8 @@ class CorridorKeyService:
         self._engine = CorridorKeyEngine(
             checkpoint_path=ckpt_path,
             device=self._device,
-            img_size=2048,
+            img_size=self._img_size,
+            low_vram=self._low_vram,
         )
         logger.info(f"Engine loaded in {time.monotonic() - t0:.1f}s")
         return self._engine

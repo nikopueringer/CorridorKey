@@ -206,8 +206,16 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
+    low_vram: bool = False,
 ):
-    """Factory: returns an engine with process_frame() matching the Torch contract."""
+    """Factory: returns an engine with process_frame() matching the Torch contract.
+
+    Args:
+        backend: "auto", "torch", or "mlx".
+        device: Compute device string.
+        img_size: Model inference resolution (default 2048). Lower = less VRAM.
+        low_vram: Enable all VRAM optimizations (half-res refiner, aggressive cache clearing).
+    """
     backend = resolve_backend(backend)
 
     if backend == "mlx":
@@ -221,5 +229,10 @@ def create_engine(
         ckpt = _discover_checkpoint(TORCH_EXT)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        logger.info("Torch engine loaded: %s (device=%s, img_size=%d, low_vram=%s)", ckpt.name, device, img_size, low_vram)
+        return CorridorKeyEngine(
+            checkpoint_path=str(ckpt),
+            device=device or "cpu",
+            img_size=img_size,
+            low_vram=low_vram,
+        )

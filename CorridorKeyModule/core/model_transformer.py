@@ -145,6 +145,7 @@ class GreenFormer(nn.Module):
         in_channels: int = 4,
         img_size: int = 512,
         use_refiner: bool = True,
+        half_res_refiner: bool = False,
     ) -> None:
         super().__init__()
 
@@ -185,6 +186,7 @@ class GreenFormer(nn.Module):
         # CNN Refiner
         # In Channels: 3 (RGB) + 4 (Coarse Pred) = 7
         self.use_refiner = use_refiner
+        self.half_res_refiner = half_res_refiner
         if self.use_refiner:
             self.refiner = CNNRefinerModule(in_channels=7, hidden_channels=64, out_channels=4)
         else:
@@ -273,7 +275,17 @@ class GreenFormer(nn.Module):
         # Refiner outputs DELTA LOGITS
         # The refiner predicts the correction in valid score space (-inf, inf)
         if self.use_refiner and self.refiner is not None:
-            delta_logits = self.refiner(rgb, coarse_pred)
+            if self.half_res_refiner:
+                # Run refiner at half resolution to save ~1.5 GB VRAM.
+                full_h, full_w = rgb.shape[2], rgb.shape[3]
+                rgb_half = F.interpolate(rgb, scale_factor=0.5, mode="bilinear", align_corners=False)
+                coarse_half = F.interpolate(coarse_pred, scale_factor=0.5, mode="bilinear", align_corners=False)
+                delta_logits_half = self.refiner(rgb_half, coarse_half)
+                delta_logits = F.interpolate(
+                    delta_logits_half, size=(full_h, full_w), mode="bilinear", align_corners=False
+                )
+            else:
+                delta_logits = self.refiner(rgb, coarse_pred)
         else:
             # Zero Deltas
             delta_logits = torch.zeros_like(coarse_pred)
