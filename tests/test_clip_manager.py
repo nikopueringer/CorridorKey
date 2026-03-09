@@ -10,7 +10,7 @@ No GPU, model weights, or interactive input required.
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import cv2
 import numpy as np
@@ -22,6 +22,7 @@ from clip_manager import (
     is_image_file,
     is_video_file,
     map_path,
+    generate_alphas,
     organize_clips,
     organize_target,
     scan_clips,
@@ -244,11 +245,142 @@ class TestClipEntryFindAssets:
         entry.find_assets()
         entry.validate_pair()  # should not raise
 
+# ---------------------------------------------------------------------------
+# generate_alphas
+# ---------------------------------------------------------------------------
+
+class TestGenerateAlphas:
+    """
+    Tests for the generate_alphas orchestrator.
+    Focuses on GVM integration, directory cleanup, and filename remapping.
+    """
+
+    @patch("clip_manager.get_gvm_processor")
+    def test_all_clips_valid_skips_generation(self, mock_get_processor, caplog):
+        """
+        Scenario: All provided clips already have an alpha_asset populated.
+        Expected: Function logs that no generation is needed and returns without calling GVM.
+        """
+        caplog.set_level("INFO")
+        clip = ClipEntry("shot_a", "/tmp/shot_a")
+        clip.alpha_asset = MagicMock()
+
+        generate_alphas([clip])
+        
+        assert "All clips have valid Alpha assets" in caplog.text
+        mock_get_processor.assert_not_called()
+
+    @patch("clip_manager.get_gvm_processor")
+    def test_gvm_missing_exits_gracefully(self, mock_get_processor, caplog):
+        """
+        Scenario: GVM requirements are not installed (ImportError).
+        Expected: Function logs the error and returns early without crashing.
+        """
+        mock_get_processor.side_effect = ImportError("No module named 'gvm'")
+
+        clip = ClipEntry("shot_a", "/tmp/shot_a")
+        clip.alpha_asset = None 
+
+        generate_alphas([clip])
+        
+        assert "GVM Import Error" in caplog.text
+        assert "Skipping GVM generation" in caplog.text
+
+    @patch("clip_manager.shutil.rmtree")
+    @patch("clip_manager.os.path.exists", return_value=True)
+    @patch("clip_manager.get_gvm_processor")
+    def test_existing_alpha_dir_is_cleaned(self, _, __, mock_rmtree):
+        """
+        Scenario: An old AlphaHint folder already exists.
+        Expected: The existing folder is deleted (rmtree) before new generation starts.
+        """
+        clip = ClipEntry("shot_a", "/tmp/shot_a")
+        clip.alpha_asset = None
+        clip.input_asset = MagicMock()
+
+        with patch("clip_manager.os.makedirs"):
+            generate_alphas([clip])
+        
+        mock_rmtree.assert_called_once_with(os.path.join("/tmp/shot_a", "AlphaHint"))
+
+    def test_naming_remap_sequence(self, tmp_path):
+        """
+        Scenario: Input is a sequence (frame_A.png). GVM outputs generic output_0.png.
+        Expected: Output is renamed to frame_A_alphaHint_0000.png.
+        """
+        shot_dir = tmp_path / "shot_01"
+        input_dir = shot_dir / "Input"
+        alpha_dir = shot_dir / "AlphaHint"
+        input_dir.mkdir(parents=True)
+        alpha_dir.mkdir()
+
+        (input_dir / "frame_A.png").write_text("data")
+        (alpha_dir / "output_0.png").write_text("mask_data")
+
+        clip = ClipEntry("shot_01", str(shot_dir))
+        clip.input_asset = ClipAsset(path=str(input_dir), asset_type="sequence")
+        clip.alpha_asset = None
+
+        with (patch("clip_manager.get_gvm_processor"),
+            patch("clip_manager.resolve_device"),
+            patch("clip_manager.os.rename") as mock_rename,
+            patch("clip_manager.shutil.rmtree"),
+            patch("clip_manager.is_image_file", return_value=True)):
+            
+            generate_alphas([clip])
+
+            expected_old = os.path.join(str(alpha_dir), "output_0.png")
+            expected_new = os.path.join(str(alpha_dir), "frame_A_alphaHint_0000.png")
+            
+            mock_rename.assert_called_once_with(expected_old, expected_new)
+    
+    def test_naming_remap_video(self, tmp_path):
+        """
+        Scenario: Input is a single video file ('my_clip.mp4').
+        Expected: Generated alpha frames use 'my_clip' as the stem for renaming.
+        """
+        shot_dir = tmp_path / "shot_01"
+        alpha_dir = shot_dir / "AlphaHint"
+        shot_dir.mkdir()
+        alpha_dir.mkdir()
+
+        video_path = str(shot_dir / "my_clip.mp4")
+        clip = ClipEntry("shot_01", str(shot_dir))
+        clip.input_asset = ClipAsset(path=video_path, asset_type="video")
+        clip.alpha_asset = None
+
+        with (patch("clip_manager.get_gvm_processor"),
+            patch("clip_manager.resolve_device"),
+            patch("clip_manager.os.rename") as mock_rename,
+            patch("clip_manager.os.listdir", return_value=["gvm_output.png"])):
+            generate_alphas([clip])
+
+            expected_new = os.path.join(str(alpha_dir), "my_clip_alphaHint_0000.png")
+            
+            args, _ = mock_rename.call_args
+            assert args[1] == expected_new
+
+    @patch("clip_manager.get_gvm_processor")
+    def test_empty_output_logs_error(self, _mock_get_processor, caplog):
+        """
+        Scenario: The processor completes but the AlphaHint directory is empty.
+        Expected: Logs an error indicating no PNGs were found and continues.
+        """
+        clip = ClipEntry("shot_a", "/tmp/shot_a")
+        clip.alpha_asset = None
+        clip.input_asset = MagicMock()
+
+        with (patch("clip_manager.os.path.exists", return_value=True),
+            patch("clip_manager.shutil.rmtree"),
+            patch("clip_manager.os.makedirs"),
+            patch("clip_manager.os.listdir", return_value=[])):
+            generate_alphas([clip])
+            
+            assert "no PNGs found" in caplog.text
 
 # ---------------------------------------------------------------------------
 # organize_target
 # ---------------------------------------------------------------------------
-
 
 class TestOrganizeTarget:
     """organize_target() sets up the hint directory structure for a shot.
@@ -422,7 +554,7 @@ class TestOrganizeClips:
 
 class TestScanClips:
     """
-    Tests for the scan_clips orchestrator.
+    Tests for the scan_clips file orchestrator.
     Ensures directory health, automatic organization, and validation reporting.
     """
 
