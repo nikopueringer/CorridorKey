@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-from timeit import timeit
 
 import cv2
 import numpy as np
@@ -15,9 +14,9 @@ from .core.model_transformer import GreenFormer
 
 class CorridorKeyEngine:
     def __init__(
-        self, 
-        checkpoint_path: str, 
-        device: str = "cpu", 
+        self,
+        checkpoint_path: str,
+        device: str = "cpu",
         img_size: int = 2048,
         use_refiner: bool = True,
         mixed_precision: bool = True,
@@ -30,17 +29,18 @@ class CorridorKeyEngine:
 
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
-        
+
         if mixed_precision or model_precision != torch.float32:
             # Use faster matrix multiplication implementation
-            # This reduces the floating point precision a little bit, but it should be negligible compared to fp16 precision
-            torch.set_float32_matmul_precision('high')
-        
+            # This reduces the floating point precision a little bit,
+            # but it should be negligible compared to fp16 precision
+            torch.set_float32_matmul_precision("high")
+
         self.mixed_precision = mixed_precision
         if mixed_precision and model_precision == torch.float16:
             # using mixed precision, when the precision is already fp16, is slower
             self.mixed_precision = False
-            
+
         self.model_precision = model_precision
 
         self.model = self._load_model().to(model_precision)
@@ -168,7 +168,7 @@ class CorridorKeyEngine:
 
         # 4. Prepare Tensor
         inp_np = np.concatenate([img_norm, mask_resized], axis=-1)  # [H, W, 4]
-        inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).float().unsqueeze(0).to(self.model_precision).to(self.device)
+        inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
 
         # 5. Inference
         # Hook for Refiner Scaling
