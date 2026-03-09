@@ -5,10 +5,13 @@ services:
       context: .
       dockerfile: Dockerfile
     image: corridorkey:latest
-    gpus: all
+    gpus: ${CK_GPUS:-all}
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - OPENCV_IO_ENABLE_OPENEXR=1
+      # Use "all", "0", "1", or CSV like "0,1" for multi-GPU pinning.
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      # Add graphics if needed for GUI/OpenGL workloads.
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
     volumes:
       - ./ClipsForInference:/app/ClipsForInference
       - ./Output:/app/Output

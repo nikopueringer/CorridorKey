@@ -96,6 +96,11 @@ Please give feedback and share your results!
 
 If you prefer not to install dependencies locally, you can run CorridorKey in Docker.
 
+Prerequisites:
+- Docker Engine + Docker Compose plugin installed.
+- NVIDIA driver installed on the host (Linux), with CUDA compatibility for the PyTorch CUDA 12.6 wheels used by this project.
+- NVIDIA Container Toolkit installed and configured for Docker (`nvidia-smi` should work on host, and `docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi` should succeed).
+
 1. Build the image:
    ```bash
    docker build -t corridorkey:latest .
@@ -118,9 +123,15 @@ If you prefer not to install dependencies locally, you can run CorridorKey in Do
    docker compose --profile gpu run --rm corridorkey --action list
    docker compose --profile cpu run --rm corridorkey-cpu --action run_inference --device cpu
    ```
+4. Optional: pin to specific GPU(s) for multi-GPU workstations:
+   ```bash
+   NVIDIA_VISIBLE_DEVICES=0 docker compose --profile gpu run --rm corridorkey --action list
+   NVIDIA_VISIBLE_DEVICES=1,2 docker compose --profile gpu run --rm corridorkey --action run_inference --device cuda
+   ```
 
 Notes:
 - You still need to place model weights in the same folders used by native runs (mounted above).
+- The container does not include kernel GPU drivers; those always come from the host. The image provides user-space dependencies and relies on Docker's NVIDIA runtime to pass through driver libraries/devices.
 - The wizard works too, but use a path inside the container, for example:
   ```bash
   docker run --rm -it --gpus all \
