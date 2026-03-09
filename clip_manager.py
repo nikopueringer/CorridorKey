@@ -30,8 +30,8 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "Output")
 
 # Network Mapping
 # Windows Drive -> Linux Mount Point
-WIN_DRIVE_ROOT = "V:\\"
-LINUX_MOUNT_ROOT = "/mnt/ssd-storage"
+WIN_DRIVE_ROOT = os.getenv("CORRIDORKEY_WIN_DRIVE_ROOT", "V:\\")
+LINUX_MOUNT_ROOT = os.getenv("CORRIDORKEY_LINUX_MOUNT_ROOT", "/mnt/ssd-storage")
 
 
 # --- Helpers ---
@@ -43,23 +43,22 @@ def is_video_file(filename: str) -> bool:
     return filename.lower().endswith((".mp4", ".mov", ".avi", ".mkv"))
 
 
-def map_path(win_path: str) -> str:
+def map_path(source_path: str) -> str:
     r"""
     Converts a Windows path (example: V:\Projects\Shot1) to the local Linux path.
+    Non-Windows paths are normalized and returned unchanged.
     """
-    # Normalize slashes
-    win_path = win_path.strip()
+    normalized_path = os.path.expanduser(source_path.strip())
 
     # Check if it starts with the drive letter
-    if win_path.upper().startswith(WIN_DRIVE_ROOT.upper()):
+    if normalized_path.upper().startswith(WIN_DRIVE_ROOT.upper()):
         # Remove drive letter
-        rel_path = win_path[len(WIN_DRIVE_ROOT) :]
+        rel_path = normalized_path[len(WIN_DRIVE_ROOT) :]
         # Combine and flip slashes
         linux_path = os.path.join(LINUX_MOUNT_ROOT, rel_path).replace("\\", "/")
         return linux_path
 
-    # If not on V:, maybe it's already a linux path or invalid?
-    return win_path
+    return os.path.normpath(normalized_path)
 
 
 # --- Classes ---
@@ -495,7 +494,8 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def run_inference(clips, device=None, backend=None, max_frames=None, img_size=2048, precision="auto"):
+
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
 
     if not ready_clips:
@@ -566,7 +566,7 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(backend=backend, device=device, img_size=img_size, precision=precision)
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
@@ -887,7 +887,16 @@ def scan_clips() -> list[ClipEntry]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
     parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
+    parser.add_argument(
+        "--path",
+        help="Clip source path for wizard mode. Accepts Linux/Mac paths and mapped Windows paths.",
+        default=None,
+    )
+    parser.add_argument(
+        "--win_path",
+        help=r"Deprecated alias for --path (example: V:\...)",
+        default=None,
+    )
     parser.add_argument(
         "--device",
         choices=["auto", "cuda", "mps", "cpu"],
@@ -906,8 +915,21 @@ if __name__ == "__main__":
         default=None,
         help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
     )
+    parser.add_argument(
+        "--img-size",
+        type=int,
+        default=2048,
+        help="Model inference resolution. Lower values reduce VRAM usage (default: 2048).",
+    )
+    parser.add_argument(
+        "--precision",
+        choices=["auto", "fp16", "fp32"],
+        default="auto",
+        help="Torch precision mode. auto uses fp16 on CUDA and fp32 elsewhere.",
+    )
 
     args = parser.parse_args()
+    source_path = args.path or args.win_path
 
     device = resolve_device(args.device)
     logger.info(f"Using device: {device}")
@@ -919,9 +941,16 @@ if __name__ == "__main__":
         generate_alphas(clips, device=device)
     elif args.action == "run_inference":
         clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
+        run_inference(
+            clips,
+            device=device,
+            backend=args.backend,
+            max_frames=args.max_frames,
+            img_size=args.img_size,
+            precision=args.precision,
+        )
     elif args.action == "wizard":
-        if not args.win_path:
-            print("Error: --win_path required for wizard.")
+        if not source_path:
+            print("Error: --path (or deprecated --win_path) required for wizard.")
         else:
             raise NotImplementedError("interactive_wizard is not yet implemented")
