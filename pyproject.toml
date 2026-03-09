@@ -13,7 +13,8 @@ dependencies = [
     "torchvision==0.25.0",
     "timm==1.0.24",
     "numpy",
-    "opencv-python",
+    "opencv-python; sys_platform != 'darwin'",
+    "opencv-python-headless; sys_platform == 'darwin'",
     "tqdm",
     "setuptools",
 

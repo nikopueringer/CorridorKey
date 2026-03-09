@@ -197,6 +197,13 @@ def generate_alphas(clips, device=None):
     if device is None:
         device = resolve_device()
 
+    # Auto- Download Weights if missing
+    import huggingface_hub
+    weights_dir = os.path.join(BASE_DIR, "gvm_core", "weights")
+    if not os.path.exists(os.path.join(weights_dir, "config.json")):
+        logger.info(f"Downloading GVM weights to {weights_dir}...")
+        huggingface_hub.snapshot_download(repo_id="geyongtao/gvm", local_dir=weights_dir)
+
     try:
         processor = get_gvm_processor(device=device)
     except ImportError as e:
@@ -332,6 +339,15 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
 
     if device is None:
         device = resolve_device()
+
+    # Auto- Download Weights if missing
+    import huggingface_hub
+    # The VideoMaMa script looks inside checkpoints for the SammyLim/VideoMaMa config, so either checkpoints or checkpoints/VideoMaMa
+    # Looking at the original bat file, it downloads to checkpoints
+    vm_weights_dir = os.path.join(BASE_DIR, "VideoMaMaInferenceModule", "checkpoints")
+    if not os.path.exists(os.path.join(vm_weights_dir, "config.json")) and not os.path.exists(os.path.join(vm_weights_dir, "VideoMaMa", "config.json")):
+        logger.info(f"Downloading VideoMaMa weights to {vm_weights_dir}...")
+        huggingface_hub.snapshot_download(repo_id="SammyLim/VideoMaMa", local_dir=vm_weights_dir)
 
     logger.info("Loading VideoMaMa Pipeline...")
     pipeline = load_videomama_model(device=device)

@@ -3,6 +3,23 @@
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Ensure uv is installed and in PATH
+if ! command -v uv &> /dev/null; then
+    if [ -f "$HOME/.cargo/bin/uv" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+    elif [ -f "$HOME/.local/bin/uv" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+    else
+        echo "uv not found. Installing..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if [ -f "$HOME/.cargo/bin/uv" ]; then
+            export PATH="$HOME/.cargo/bin:$PATH"
+        elif [ -f "$HOME/.local/bin/uv" ]; then
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+    fi
+fi
 LOCAL_SCRIPT="$SCRIPT_DIR/corridorkey_cli.py"
 
 # SAFETY CHECK: Ensure a folder was provided as an argument
