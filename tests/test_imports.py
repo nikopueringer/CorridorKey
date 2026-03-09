@@ -21,6 +21,22 @@ def test_import_model_transformer():
     from CorridorKeyModule.core import model_transformer  # noqa: F401
 
 
+def test_import_greenformersmall():
+    from CorridorKeyModule.core.model_transformer import GreenFormerSmall  # noqa: F401
+
+
+def test_import_distillation():
+    import distillation  # noqa: F401
+
+
+def test_import_distillation_dataset():
+    from distillation import dataset  # noqa: F401
+
+
+def test_import_distillation_losses():
+    from distillation import losses  # noqa: F401
+
+
 def test_import_gvm_core():
     import gvm_core  # noqa: F401
 

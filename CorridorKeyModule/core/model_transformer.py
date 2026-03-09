@@ -138,6 +138,114 @@ class CNNRefinerModule(nn.Module):
         return self.final(x) * 10.0
 
 
+class GreenFormerSmall(nn.Module):
+    """
+    A lightweight knowledge-distillation student variant of GreenFormer.
+
+    Replaces the heavy Hiera Base Plus backbone with the smaller
+    ``hiera_small_224`` encoder and halves both the decoder embedding
+    dimension (128 vs 256) and the CNN refiner hidden channels (32 vs 64),
+    yielding a model that is roughly 4× smaller while preserving the
+    same input/output interface as :class:`GreenFormer`.
+
+    Intended to be trained via torchdistill knowledge distillation
+    (see ``distillation/train_distill.py``).
+    """
+
+    def __init__(
+        self,
+        encoder_name: str = "hiera_small_224.mae_in1k_ft_in1k",
+        in_channels: int = 4,
+        img_size: int = 512,
+        use_refiner: bool = True,
+    ) -> None:
+        super().__init__()
+
+        print(f"Initializing GreenFormerSmall with {encoder_name} (img_size={img_size})...")
+        self.encoder = timm.create_model(encoder_name, pretrained=False, features_only=True, img_size=img_size)
+        print("Skipped downloading base weights (relying on custom checkpoint).")
+
+        if in_channels != 3:
+            self._patch_input_layer(in_channels)
+
+        try:
+            feature_channels = self.encoder.feature_info.channels()
+        except (AttributeError, TypeError):
+            feature_channels = [96, 192, 384, 768]
+        print(f"Feature Channels: {feature_channels}")
+
+        embedding_dim = 128
+
+        self.alpha_decoder = DecoderHead(feature_channels, embedding_dim, output_dim=1)
+        self.fg_decoder = DecoderHead(feature_channels, embedding_dim, output_dim=3)
+
+        self.use_refiner = use_refiner
+        if self.use_refiner:
+            self.refiner = CNNRefinerModule(in_channels=7, hidden_channels=32, out_channels=4)
+        else:
+            self.refiner = None
+            print("Refiner Module DISABLED (Backbone Only Mode).")
+
+    def _patch_input_layer(self, in_channels: int) -> None:
+        """Modifies the first convolution layer to accept ``in_channels``."""
+        try:
+            patch_embed = self.encoder.model.patch_embed.proj
+        except AttributeError:
+            patch_embed = self.encoder.patch_embed.proj
+        weight = patch_embed.weight.data
+        bias = patch_embed.bias.data if patch_embed.bias is not None else None
+
+        out_channels, _, kh, kw = weight.shape
+        new_conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=(kh, kw),
+            stride=patch_embed.stride,
+            padding=patch_embed.padding,
+            bias=(bias is not None),
+        )
+        new_conv.weight.data[:, :3, :, :] = weight
+        new_conv.weight.data[:, 3:, :, :] = 0.0
+        if bias is not None:
+            new_conv.bias.data = bias
+
+        try:
+            self.encoder.model.patch_embed.proj = new_conv
+        except AttributeError:
+            self.encoder.patch_embed.proj = new_conv
+
+        print(f"Patched input layer: 3 channels -> {in_channels} channels (Extra initialized to 0)")
+
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        input_size = x.shape[2:]
+        features = self.encoder(x)
+
+        alpha_logits = self.alpha_decoder(features)
+        fg_logits = self.fg_decoder(features)
+
+        alpha_logits_up = F.interpolate(alpha_logits, size=input_size, mode="bilinear", align_corners=False)
+        fg_logits_up = F.interpolate(fg_logits, size=input_size, mode="bilinear", align_corners=False)
+
+        alpha_coarse = torch.sigmoid(alpha_logits_up)
+        fg_coarse = torch.sigmoid(fg_logits_up)
+
+        rgb = x[:, :3, :, :]
+        coarse_pred = torch.cat([alpha_coarse, fg_coarse], dim=1)
+
+        if self.use_refiner and self.refiner is not None:
+            delta_logits = self.refiner(rgb, coarse_pred)
+        else:
+            delta_logits = torch.zeros_like(coarse_pred)
+
+        delta_alpha = delta_logits[:, 0:1]
+        delta_fg = delta_logits[:, 1:4]
+
+        alpha_final = torch.sigmoid(alpha_logits_up + delta_alpha)
+        fg_final = torch.sigmoid(fg_logits_up + delta_fg)
+
+        return {"alpha": alpha_final, "fg": fg_final}
+
+
 class GreenFormer(nn.Module):
     def __init__(
         self,
@@ -207,13 +315,13 @@ class GreenFormer(nn.Module):
         bias = patch_embed.bias.data if patch_embed.bias is not None else None
 
         new_in_channels = in_channels
-        out_channels, _, k, k = weight.shape
+        out_channels, _, kh, kw = weight.shape
 
         # Create new conv
         new_conv = nn.Conv2d(
             new_in_channels,
             out_channels,
-            kernel_size=k,
+            kernel_size=(kh, kw),
             stride=patch_embed.stride,
             padding=patch_embed.padding,
             bias=(bias is not None),

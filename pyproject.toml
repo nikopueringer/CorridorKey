@@ -43,6 +43,9 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+distillation = [
+    "torchdistill>=1.1.4",
+]
 
 [project.scripts]
 corridorkey = "corridorkey_cli:main"

@@ -1,0 +1,104 @@
+# distill_greenformer.yaml
+#
+# torchdistill single-stage distillation configuration for training
+# GreenFormerSmall (student) from a frozen GreenFormer (teacher).
+#
+# Usage (from repository root):
+#   python -m distillation.train_distill \
+#       --config distillation/configs/distill_greenformer.yaml \
+#       --data-root /path/to/dataset \
+#       --teacher-ckpt /path/to/teacher.pth \
+#       --output-dir ./checkpoints/student
+#
+# Dataset layout expected under <data-root>:
+#   train/
+#     input/        # RGB green-screen frames
+#     alpha_hint/   # Coarse alpha hints
+#     alpha_gt/     # Ground-truth alpha mattes
+#     fg_gt/        # Ground-truth foreground colours (optional)
+#   val/
+#     (same structure)
+
+num_epochs: &num_epochs 50
+
+# ---------------------------------------------------------------------------
+# Teacher — frozen GreenFormer loaded from a checkpoint
+# ---------------------------------------------------------------------------
+teacher:
+  requires_grad: false
+  forward_proc: 'forward_batch_only'
+  # src_ckpt is supplied via the --teacher-ckpt CLI argument in train_distill.py
+  # and injected into this dict at runtime; no need to hard-code it here.
+
+# ---------------------------------------------------------------------------
+# Student — GreenFormerSmall to be trained
+# ---------------------------------------------------------------------------
+student:
+  requires_grad: true
+  forward_proc: 'forward_batch_only'
+  # dst_ckpt is supplied via the --output-dir CLI argument at runtime.
+
+# ---------------------------------------------------------------------------
+# Optimizer
+# ---------------------------------------------------------------------------
+optimizer:
+  key: 'Adam'
+  kwargs:
+    lr: 1.0e-4
+    weight_decay: 1.0e-5
+
+# ---------------------------------------------------------------------------
+# Learning-rate scheduler (cosine decay over the full training run)
+# ---------------------------------------------------------------------------
+scheduler:
+  key: 'CosineAnnealingLR'
+  kwargs:
+    T_max: *num_epochs
+  scheduling_step: 0   # 0 = epoch-wise stepping
+
+# ---------------------------------------------------------------------------
+# Loss criterion
+# WeightedSumLoss combines:
+#   task_loss  — MSE vs ground-truth alpha/fg (weight 1.0)
+#   kd_loss    — MSE vs teacher soft predictions (weight 0.5)
+# ---------------------------------------------------------------------------
+criterion:
+  key: 'WeightedSumLoss'
+  kwargs:
+    sub_terms:
+      task_loss:
+        criterion:
+          key: 'MatteTaskLoss'
+          kwargs:
+            alpha_weight: 1.0
+            fg_weight: 1.0
+        weight: 1.0
+      kd_loss:
+        criterion:
+          key: 'MatteResponseKDLoss'
+          kwargs:
+            alpha_weight: 0.5
+            fg_weight: 0.5
+        weight: 0.5
+
+# ---------------------------------------------------------------------------
+# Data loaders
+# dataset_id keys must match the keys in the dataset_dict passed to
+# DistillationBox in train_distill.py.
+# ---------------------------------------------------------------------------
+train_data_loader:
+  dataset_id: 'train'
+  batch_size: 4
+  num_workers: 2
+  shuffle: true
+  drop_last: true
+  pin_memory: true
+  requires_supp: true
+
+val_data_loader:
+  dataset_id: 'val'
+  batch_size: 4
+  num_workers: 2
+  shuffle: false
+  pin_memory: true
+  requires_supp: true
