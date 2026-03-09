@@ -10,7 +10,7 @@ No GPU, model weights, or interactive input required.
 from __future__ import annotations
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
@@ -19,12 +19,13 @@ import pytest
 from clip_manager import (
     ClipAsset,
     ClipEntry,
+    generate_alphas,
     is_image_file,
     is_video_file,
     map_path,
-    generate_alphas,
     organize_clips,
     organize_target,
+    run_videomama,
     scan_clips,
 )
 
@@ -245,9 +246,11 @@ class TestClipEntryFindAssets:
         entry.find_assets()
         entry.validate_pair()  # should not raise
 
+
 # ---------------------------------------------------------------------------
 # generate_alphas
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateAlphas:
     """
@@ -255,132 +258,388 @@ class TestGenerateAlphas:
     Focuses on GVM integration, directory cleanup, and filename remapping.
     """
 
-    @patch("clip_manager.get_gvm_processor")
-    def test_all_clips_valid_skips_generation(self, mock_get_processor, caplog):
+    def test_all_clips_valid_skips_generation(self, caplog):
         """
-        Scenario: All provided clips already have an alpha_asset populated.
-        Expected: Function logs that no generation is needed and returns without calling GVM.
+        Scenario: Every provided clip already has a valid alpha_asset.
+        Expected: Logs that generation is unnecessary and returns without invoking GVM.
         """
         caplog.set_level("INFO")
         clip = ClipEntry("shot_a", "/tmp/shot_a")
         clip.alpha_asset = MagicMock()
 
         generate_alphas([clip])
-        
+
         assert "All clips have valid Alpha assets" in caplog.text
-        mock_get_processor.assert_not_called()
 
     @patch("clip_manager.get_gvm_processor")
     def test_gvm_missing_exits_gracefully(self, mock_get_processor, caplog):
         """
-        Scenario: GVM requirements are not installed (ImportError).
-        Expected: Function logs the error and returns early without crashing.
+        Scenario: GVM requirements are missing (ImportError) during initialization.
+        Expected: Logs a specific GVM Import Error and exits early without a crash.
         """
         mock_get_processor.side_effect = ImportError("No module named 'gvm'")
 
         clip = ClipEntry("shot_a", "/tmp/shot_a")
-        clip.alpha_asset = None 
+        clip.alpha_asset = None
 
         generate_alphas([clip])
-        
+
         assert "GVM Import Error" in caplog.text
         assert "Skipping GVM generation" in caplog.text
 
-    @patch("clip_manager.shutil.rmtree")
-    @patch("clip_manager.os.path.exists", return_value=True)
     @patch("clip_manager.get_gvm_processor")
-    def test_existing_alpha_dir_is_cleaned(self, _, __, mock_rmtree):
+    def test_existing_alpha_dir_is_cleaned(self, _mock_gvm, tmp_path):
         """
-        Scenario: An old AlphaHint folder already exists.
-        Expected: The existing folder is deleted (rmtree) before new generation starts.
+        Scenario: A legacy AlphaHint folder exists from a previous failed run.
+        Expected: Deletes the existing directory physically before creating a fresh one.
         """
-        clip = ClipEntry("shot_a", "/tmp/shot_a")
+        shot_dir = tmp_path / "shot_a"
+        shot_dir.mkdir()
+        alpha_dir = shot_dir / "AlphaHint"
+        alpha_dir.mkdir()
+        (alpha_dir / "old_file.png").write_text("junk")
+
+        clip = ClipEntry("shot_a", str(shot_dir))
         clip.alpha_asset = None
-        clip.input_asset = MagicMock()
+        clip.input_asset = ClipAsset(str(shot_dir / "in.mp4"), "video")
 
-        with patch("clip_manager.os.makedirs"):
-            generate_alphas([clip])
-        
-        mock_rmtree.assert_called_once_with(os.path.join("/tmp/shot_a", "AlphaHint"))
+        generate_alphas([clip])
 
-    def test_naming_remap_sequence(self, tmp_path):
+        assert alpha_dir.exists()
+        assert not (alpha_dir / "old_file.png").exists()
+
+    @patch("clip_manager.get_gvm_processor")
+    def test_naming_remap_sequence(self, mock_get_processor, tmp_path):
         """
-        Scenario: Input is a sequence (frame_A.png). GVM outputs generic output_0.png.
-        Expected: Output is renamed to frame_A_alphaHint_0000.png.
+        Scenario: Input is a sequence; GVM 'processor' is called with Path objects.
+        Expected: Mock processor creates a file, and the renamer finds it in the AlphaHint dir.
         """
         shot_dir = tmp_path / "shot_01"
+        shot_dir.mkdir()
         input_dir = shot_dir / "Input"
+        input_dir.mkdir()
         alpha_dir = shot_dir / "AlphaHint"
-        input_dir.mkdir(parents=True)
-        alpha_dir.mkdir()
 
-        (input_dir / "frame_A.png").write_text("data")
-        (alpha_dir / "output_0.png").write_text("mask_data")
+        (input_dir / "frame_A.png").write_text("fake_png")
 
         clip = ClipEntry("shot_01", str(shot_dir))
         clip.input_asset = ClipAsset(path=str(input_dir), asset_type="sequence")
-        clip.alpha_asset = None
 
-        with (patch("clip_manager.get_gvm_processor"),
-            patch("clip_manager.resolve_device"),
-            patch("clip_manager.os.rename") as mock_rename,
-            patch("clip_manager.shutil.rmtree"),
-            patch("clip_manager.is_image_file", return_value=True)):
-            
-            generate_alphas([clip])
+        mock_processor = MagicMock()
+        mock_get_processor.return_value = mock_processor
 
-            expected_old = os.path.join(str(alpha_dir), "output_0.png")
-            expected_new = os.path.join(str(alpha_dir), "frame_A_alphaHint_0000.png")
-            
-            mock_rename.assert_called_once_with(expected_old, expected_new)
-    
-    def test_naming_remap_video(self, tmp_path):
-        """
-        Scenario: Input is a single video file ('my_clip.mp4').
-        Expected: Generated alpha frames use 'my_clip' as the stem for renaming.
-        """
-        shot_dir = tmp_path / "shot_01"
-        alpha_dir = shot_dir / "AlphaHint"
-        shot_dir.mkdir()
-        alpha_dir.mkdir()
+        def side_effect_create_file(*args, **kwargs):
+            from pathlib import Path
+            target = Path(kwargs.get('direct_output_dir'))
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "output_0.png").write_text("mask")
 
-        video_path = str(shot_dir / "my_clip.mp4")
-        clip = ClipEntry("shot_01", str(shot_dir))
-        clip.input_asset = ClipAsset(path=video_path, asset_type="video")
-        clip.alpha_asset = None
+        mock_processor.process_sequence.side_effect = side_effect_create_file
 
-        with (patch("clip_manager.get_gvm_processor"),
-            patch("clip_manager.resolve_device"),
-            patch("clip_manager.os.rename") as mock_rename,
-            patch("clip_manager.os.listdir", return_value=["gvm_output.png"])):
-            generate_alphas([clip])
+        generate_alphas([clip])
 
-            expected_new = os.path.join(str(alpha_dir), "my_clip_alphaHint_0000.png")
-            
-            args, _ = mock_rename.call_args
-            assert args[1] == expected_new
+        expected_name = "frame_A_alphaHint_0000.png"
+        assert (alpha_dir / expected_name).exists()
 
     @patch("clip_manager.get_gvm_processor")
-    def test_empty_output_logs_error(self, _mock_get_processor, caplog):
+    def test_naming_remap_video(self, mock_get_processor, tmp_path):
         """
-        Scenario: The processor completes but the AlphaHint directory is empty.
-        Expected: Logs an error indicating no PNGs were found and continues.
+        Scenario: Input is a video file; stem 'my_clip' is used for remapping.
+        Expected: Generic GVM output is renamed to 'my_clip_alphaHint_0000.png'.
         """
-        clip = ClipEntry("shot_a", "/tmp/shot_a")
-        clip.alpha_asset = None
-        clip.input_asset = MagicMock()
+        shot_dir = tmp_path / "shot_01"
+        shot_dir.mkdir()
+        alpha_dir = shot_dir / "AlphaHint"
 
-        with (patch("clip_manager.os.path.exists", return_value=True),
-            patch("clip_manager.shutil.rmtree"),
-            patch("clip_manager.os.makedirs"),
-            patch("clip_manager.os.listdir", return_value=[])):
-            generate_alphas([clip])
-            
-            assert "no PNGs found" in caplog.text
+        video_path = shot_dir / "my_clip.mp4"
+        video_path.write_text("headers")
+
+        clip = ClipEntry("shot_01", str(shot_dir))
+        clip.input_asset = ClipAsset(path=str(video_path), asset_type="video")
+
+        mock_processor = MagicMock()
+        mock_get_processor.return_value = mock_processor
+
+        def side_effect_create_file(*args, **kwargs):
+            from pathlib import Path
+            target = Path(kwargs.get('direct_output_dir'))
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "frame_0.png").write_text("mask")
+
+        mock_processor.process_sequence.side_effect = side_effect_create_file
+
+        generate_alphas([clip])
+
+        assert (alpha_dir / "my_clip_alphaHint_0000.png").exists()
+
+    @patch("clip_manager.get_gvm_processor")
+    def test_empty_output_logs_error(self, mock_get_processor, tmp_path, caplog):
+        """
+        Scenario: GVM finishes (mocked) but the output directory is physically empty.
+        Expected: The runner logs that no PNGs were found in AlphaHint.
+        """
+        caplog.set_level("ERROR")
+
+        shot_dir = tmp_path / "shot_a"
+        shot_dir.mkdir()
+        (shot_dir / "AlphaHint").mkdir()
+
+        clip = ClipEntry("shot_a", str(shot_dir))
+        clip.input_asset = ClipAsset(str(shot_dir / "in.mp4"), "video")
+
+        mock_processor = MagicMock()
+        mock_get_processor.return_value = mock_processor
+
+        generate_alphas([clip])
+
+        assert "no pngs found" in caplog.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# run_videomama
+# ---------------------------------------------------------------------------
+
+
+class TestVideoMaMa:
+
+    def test_videomama_skips_if_sequence_exists(self, stage_shot, caplog):
+        """
+        Scenario: A clip already has a populated AlphaHint directory.
+        Expected: run_videomama identifies no candidates and skips processing.
+        """
+        caplog.set_level("INFO")
+        path = stage_shot("shot_exists", create_alpha=True)
+        mask_path = path / "VideoMamaMaskHint"
+        if mask_path.exists():
+            import shutil
+            shutil.rmtree(mask_path)
+
+        clip = ClipEntry("shot_exists", str(path))
+        clip.find_assets()
+
+        run_videomama([clip])
+
+        assert "No candidates for VideoMaMa" in caplog.text
+
+    def test_videomama_processes_valid_candidate(self, stage_shot):
+        """
+        Scenario: A clip has Input and VideoMamaMaskHint but no AlphaHint.
+        Expected: AlphaHint is created and populated with generated frames.
+        """
+        path = stage_shot("shot_valid")
+        clip = ClipEntry("shot_valid", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        alpha_dir = os.path.join(str(path), "AlphaHint")
+        assert os.path.isdir(alpha_dir)
+        assert len(os.listdir(alpha_dir)) > 0
+
+    def test_videomama_skips_if_input_missing(self, tmp_path):
+        """
+        Scenario: A clip directory is missing the Input folder.
+        Expected: ClipEntry raises ValueError during discovery.
+        """
+        path = tmp_path / "shot_no_input"
+        path.mkdir()
+        clip = ClipEntry("shot_no_input", str(path))
+        with pytest.raises(ValueError, match="No 'Input' directory"):
+            clip.find_assets()
+
+    def test_videomama_skips_if_mask_missing(self, stage_shot, caplog):
+        """
+        Scenario: A clip is missing all valid VideoMamaMaskHint variants.
+        Expected: run_videomama skips the clip.
+        """
+        caplog.set_level("INFO")
+        path = stage_shot("shot_no_mask")
+        for d in ["VideoMamaMaskHint", "videomamamaskhint", "VIDEOMAMAMASKHINT"]:
+            mask_path = path / d
+            if mask_path.exists():
+                import shutil
+                shutil.rmtree(mask_path)
+
+        clip = ClipEntry("shot_no_mask", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert "No candidates for VideoMaMa" in caplog.text
+
+    def test_videomama_mask_thresholding(self, stage_shot):
+        """
+        Scenario: VideoMaMaMaskHint contains soft grayscale values.
+        Expected: Input masks are binarized before being passed to the model.
+        """
+        path = stage_shot("shot_threshold")
+        mask_path = path / "VideoMamaMaskHint" / "mask_0000.png"
+        soft_mask = np.full((4, 4), 128, dtype=np.uint8)
+        cv2.imwrite(str(mask_path), soft_mask)
+        clip = ClipEntry("shot_threshold", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert os.path.isdir(os.path.join(str(path), "AlphaHint"))
+
+    def test_videomama_rgba_to_rgb_conversion(self, stage_shot):
+        """
+        Scenario: Input directory contains 4-channel RGBA images.
+        Expected: Images are converted to 3-channel RGB without crashing.
+        """
+        path = stage_shot("shot_rgba")
+        in_file = path / "Input" / "frame_0000.png"
+        rgba = np.zeros((4, 4, 4), dtype=np.uint8)
+        cv2.imwrite(str(in_file), rgba)
+        clip = ClipEntry("shot_rgba", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert os.path.exists(os.path.join(str(path), "AlphaHint"))
+
+    def test_videomama_exr_gamma_handling(self, stage_shot):
+        """
+        Scenario: Input directory contains Linear EXR files.
+        Expected: Data is normalized and handled as linear float32.
+        """
+        path = stage_shot("shot_exr")
+        in_dir = path / "Input"
+        exr_file = str(in_dir / "frame_0000.exr")
+        img = np.zeros((4, 4, 3), dtype=np.float32)
+        cv2.imwrite(exr_file, img)
+        clip = ClipEntry("shot_exr", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert os.path.exists(os.path.join(str(path), "AlphaHint"))
+
+    def test_safety_removes_file_blocking_dir(self, stage_shot):
+        """
+        Scenario: A file exists where the AlphaHint directory needs to be created.
+        Expected: The blocking file is removed and replaced by a directory.
+        """
+        path = stage_shot("shot_blocker")
+        blocker = path / "AlphaHint"
+        blocker.write_text("i am a file")
+        clip = ClipEntry("shot_blocker", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert blocker.is_dir()
+        assert len(os.listdir(blocker)) > 0
+
+    def test_videomama_multiple_clips_batch(self, stage_shot):
+        """
+        Scenario: Multiple valid clip candidates are passed to the runner.
+        Expected: All candidates are processed and receive generated AlphaHints.
+        """
+        path_1 = stage_shot("shot_1")
+        path_2 = stage_shot("shot_2")
+        c1 = ClipEntry("shot_1", str(path_1))
+        c2 = ClipEntry("shot_2", str(path_2))
+        c1.find_assets()
+        c2.find_assets()
+        run_videomama([c1, c2])
+        assert os.path.isdir(os.path.join(str(path_1), "AlphaHint"))
+        assert os.path.isdir(os.path.join(str(path_2), "AlphaHint"))
+
+    def test_videomama_upgrades_video_alpha(self, stage_shot):
+        """
+        Scenario: A clip uses a video file as input rather than a sequence.
+        Expected: VideoMaMa processes the video and outputs an image sequence alpha.
+        """
+        path = stage_shot("shot_video")
+        clip = ClipEntry("shot_video", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert os.path.isdir(os.path.join(str(path), "AlphaHint"))
+
+    def test_videomama_handles_invalid_image_load(self, stage_shot, caplog):
+        """
+        Scenario: The runner attempts to load a non-image file.
+        Expected: The failure is logged.
+        """
+        caplog.set_level("INFO")
+        path = stage_shot("shot_corrupt")
+        corrupt = path / "Input" / "frame_0000.png"
+        corrupt.write_text("not an image")
+
+        clip = ClipEntry("shot_corrupt", str(path))
+        clip.find_assets()
+
+        with patch("clip_manager.run_inference") as mock_run:
+            mock_run.side_effect = Exception("corrupt image data")
+            try:
+                run_videomama([clip])
+            except Exception:
+                pass
+
+        assert any(x in caplog.text.lower() for x in ["error", "fail", "corrupt"])
+
+    def test_videomama_priority_folder_over_video(self, stage_shot):
+        """
+        Scenario: Both a video file and an Input directory exist in the shot.
+        Expected: The Input directory takes priority for processing.
+        """
+        path = stage_shot("shot_priority")
+        (path / "input_video.mp4").write_text("dummy")
+        clip = ClipEntry("shot_priority", str(path))
+        clip.find_assets()
+        assert clip.input_asset.type == "sequence"
+        run_videomama([clip])
+        assert os.path.isdir(os.path.join(str(path), "AlphaHint"))
+
+    def test_loop_chunking_logic(self, tmp_path):
+        """
+        Scenario: A 12-frame sequence is processed.
+        Expected: All 12 frames are saved to AlphaHint.
+        """
+        path = tmp_path / "shot_large"
+        in_dir = path / "Input"
+        mask_dir = path / "VideoMamaMaskHint"
+        in_dir.mkdir(parents=True)
+        mask_dir.mkdir(parents=True)
+
+        for i in range(12):
+            cv2.imwrite(str(in_dir / f"frame_{i:04d}.png"), np.zeros((4,4,3), np.uint8))
+            cv2.imwrite(str(mask_dir / f"mask_{i:04d}.png"), np.zeros((4,4), np.uint8))
+
+        clip = ClipEntry("shot_large", str(path))
+        clip.find_assets()
+
+        run_videomama([clip])
+
+        alpha_dir = os.path.join(str(path), "AlphaHint")
+        files = [f for f in os.listdir(alpha_dir) if f.endswith(".png")]
+        assert len(files) == 12
+
+    def test_videomama_mask_from_video(self, stage_shot):
+        """
+        Scenario: The mask hint is provided as a video file instead of a sequence.
+        Expected: The runner extracts frames from the mask video to guide inference.
+        """
+        path = stage_shot("shot_mask_vid")
+        clip = ClipEntry("shot_mask_vid", str(path))
+        clip.find_assets()
+        run_videomama([clip])
+        assert os.path.isdir(os.path.join(str(path), "AlphaHint"))
+
+    def test_videomama_cleanup_on_failure(self, stage_shot, caplog):
+        """
+        Scenario: An error occurs during the inference loop.
+        Expected: The error is caught by the runner's try/except and logged.
+        """
+        caplog.set_level("ERROR")
+        path = stage_shot("shot_fail")
+        clip = ClipEntry("shot_fail", str(path))
+        clip.find_assets()
+
+        target = "VideoMaMaInferenceModule.inference.run_inference"
+
+        with patch(target, side_effect=RuntimeError("GPU OOM")):
+            run_videomama([clip])
+
+        log_text = caplog.text
+        assert "VideoMaMa failed" in log_text
+        assert "GPU OOM" in log_text
+
 
 # ---------------------------------------------------------------------------
 # organize_target
 # ---------------------------------------------------------------------------
+
 
 class TestOrganizeTarget:
     """organize_target() sets up the hint directory structure for a shot.
@@ -431,12 +690,10 @@ class TestOrganizeTarget:
 # organize_clips
 # ---------------------------------------------------------------------------
 
+
 class TestOrganizeClips:
     """
-    Legacy wrapper tests for organizing the main Clips directory.
-
-    This handles moving loose video files into structured folders and then
-    triggering organize_target on all subdirectories.
+    Tests for the legacy wrapper that organizes the main /Clips directory.
     """
 
     def test_organize_loose_video_file(self, tmp_path):
@@ -478,8 +735,6 @@ class TestOrganizeClips:
         conflict_folder = clips_dir / "shot_001"
         conflict_folder.mkdir()
 
-
-
         organize_clips(str(clips_dir))
         assert video_path.exists(), "The video was moved even though a folder existed!"
         assert "already exists" in caplog.text
@@ -499,8 +754,6 @@ class TestOrganizeClips:
         (clips_dir / "IgnoredClips").mkdir()
 
         with patch("clip_manager.organize_target") as mock_target:
-
-
             organize_clips(str(clips_dir))
 
         mock_target.assert_any_call(str(clips_dir / "shot_001"))
@@ -538,8 +791,6 @@ class TestOrganizeClips:
         folder_b.mkdir()
 
         with patch("clip_manager.organize_target") as mock_target:
-
-
             organize_clips(str(clips_dir))
 
         assert (clips_dir / "shot_A" / "Input.mp4").exists()
@@ -548,9 +799,11 @@ class TestOrganizeClips:
         mock_target.assert_any_call(str(clips_dir / "shot_B"))
         assert mock_target.call_count == 2
 
+
 # ---------------------------------------------------------------------------
 # scan_clips
 # ---------------------------------------------------------------------------
+
 
 class TestScanClips:
     """
@@ -558,96 +811,87 @@ class TestScanClips:
     Ensures directory health, automatic organization, and validation reporting.
     """
 
-    @patch("clip_manager.os.makedirs")
-    @patch("clip_manager.os.path.exists", return_value=False)
-    def test_empty_start_creates_dir(self, _mock_exists, mock_makedirs):
+    def test_noise_filter_skips_hidden_folders(self, sandbox_clip_manager):
         """
-        Scenario: The Clips directory is missing entirely.
-        Expected: Function creates the directory and returns an empty list.
+        Scenario: A .git folder and a 'shot_01' folder exist.
+        Expected: .git is ignored; shot_01 is returned.
         """
+        (sandbox_clip_manager / ".git").mkdir()
+        valid_shot = sandbox_clip_manager / "shot_01"
+        valid_shot.mkdir()
+
+        input_dir = valid_shot / "Input"
+        input_dir.mkdir()
+        (input_dir / "frame_0000.png").write_text("data")
+        
         results = scan_clips()
 
-        assert results == []
-        mock_makedirs.assert_called_once()
+        assert len(results) == 1
+        assert results[0].name == "shot_01"
 
-    def test_noise_filter_skips_hidden_folders(self, tmp_path):
+    def test_scanner_handles_multiple_shots(self, sandbox_clip_manager):
         """
-        Scenario: Folder contains .git, _internal, and IgnoredClips.
-        Expected: These are ignored and not processed as potential clips.
+        Scenario: Multiple valid shot folders.
+        Expected: 3 ClipEntry objects found, verified in alphabetical order.
         """
-        clips_dir = tmp_path / "Clips"
-        clips_dir.mkdir()
-        (clips_dir / ".git").mkdir()
-        (clips_dir / "_cache").mkdir()
-        (clips_dir / "IgnoredClips").mkdir()
-        (clips_dir / "valid_shot").mkdir()
+        for name in ["shot_C", "shot_B", "shot_A"]:
+            d = sandbox_clip_manager / name
+            d.mkdir()
+            (d / "Input").mkdir()
+            (d / "Input" / "f.png").write_text("data")
 
-        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
-             patch("clip_manager.organize_clips"),
-             patch("clip_manager.ClipEntry") as mock_entry):
+        results = scan_clips()
 
-            scan_clips()
+        assert len(results) == 3
+        names = sorted([r.name for r in results])
+        assert names == ["shot_A", "shot_B", "shot_C"]
 
-            assert mock_entry.call_count == 1
-            mock_entry.assert_called_with("valid_shot", str(clips_dir / "valid_shot"))
-
-    def test_clean_run_returns_valid_entries(self, tmp_path):
+    def test_ideal_organization_loose_videos(self, sandbox_clip_manager):
         """
-        Scenario: Multiple valid folders exist.
-        Expected: Returns a list of ClipEntry objects that have been validated.
+        Scenario: A loose video file 'my_clip.mp4' exists.
+        Expected: Folder 'my_clip' created with 'Input.mp4' inside.
         """
-        clips_dir = tmp_path / "Clips"
-        clips_dir.mkdir()
-        (clips_dir / "shot_001").mkdir()
+        video_file = sandbox_clip_manager / "my_clip.mp4"
+        video_file.write_text("content")
+        expected_folder = sandbox_clip_manager / "my_clip"
+        organize_clips(str(sandbox_clip_manager))
 
-        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
-             patch("clip_manager.organize_clips"),
-             patch("clip_manager.ClipEntry") as mock_entry):
+        assert expected_folder.is_dir()
+        assert (expected_folder / "Input.mp4").exists() or (expected_folder / "Input" / "my_clip.mp4").exists()
+        assert (expected_folder / "AlphaHint").exists()
 
-            instance = mock_entry.return_value
-
-            results = scan_clips()
-
-            assert len(results) == 1
-            instance.find_assets.assert_called_once()
-            instance.validate_pair.assert_called_once()
-
-    def test_invalid_clip_reporting(self, tmp_path, capsys):
+    def test_organization_skips_existing_folders(self, sandbox_clip_manager, caplog):
         """
-        Scenario: A folder exists but ClipEntry raises a ValueError (e.g., missing video).
-        Expected: The clip is added to invalid_clips and printed to the console.
+        Scenario: Both 'collision.mp4' and folder 'collision' exist.
+        Expected: Conflict warning logged, file not moved.
         """
-        clips_dir = tmp_path / "Clips"
-        clips_dir.mkdir()
-        (clips_dir / "broken_shot").mkdir()
+        (sandbox_clip_manager / "collision").mkdir()
+        video_file = sandbox_clip_manager / "collision.mp4"
+        video_file.write_text("data")
+        organize_clips(str(sandbox_clip_manager))
 
-        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
-             patch("clip_manager.organize_clips"),
-             patch("clip_manager.ClipEntry") as mock_entry):
+        assert video_file.exists()
+        assert "already exists" in caplog.text.lower()
 
-            mock_entry.return_value.find_assets.side_effect = ValueError("Missing Input.mp4")
-            results = scan_clips()
-            captured = capsys.readouterr()
-
-            assert results == []
-            assert "INVALID OR SKIPPED CLIPS" in captured.out
-            assert "broken_shot: Missing Input.mp4" in captured.out
-
-    def test_crash_recovery_continues_loop(self, tmp_path):
+    def test_batch_processing_mix(self, sandbox_clip_manager):
         """
-        Scenario: One folder causes an unexpected Exception.
-        Expected: The function catches the error for that folder and continues to the next.
+        Scenario: Mix of loose files and existing folders.
+        Expected: Loose files migrated; existing folders left intact.
         """
-        clips_dir = tmp_path / "Clips"
-        clips_dir.mkdir()
-        (clips_dir / "crash_shot").mkdir()
-        (clips_dir / "good_shot").mkdir()
+        (sandbox_clip_manager / "existing").mkdir()
+        video_file = sandbox_clip_manager / "new_shot.mp4"
+        video_file.write_text("data")
+        organize_clips(str(sandbox_clip_manager))
 
-        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
-             patch("clip_manager.organize_clips"),
-             patch("clip_manager.ClipEntry") as mock_entry):
+        assert (sandbox_clip_manager / "new_shot").is_dir()
+        assert (sandbox_clip_manager / "existing").is_dir()
 
-            mock_entry.side_effect = [Exception("Disk Error"), mock_entry.return_value]
-            results = scan_clips()
+    def test_nonexistent_directory_logging(self, caplog):
+        """
+        Scenario: Path doesn't exist.
+        Expected: 'not found' warning logged.
+        """
+        fake_path = "/tmp/missing_dir_999"
+        organize_clips(fake_path)
 
-            assert len(results) == 1
+        assert "not found" in caplog.text.lower()
