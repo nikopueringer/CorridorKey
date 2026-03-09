@@ -6,7 +6,10 @@ import os
 import cv2
 import numpy as np
 import torch
+import torchvision
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
+
 
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
@@ -27,8 +30,8 @@ class CorridorKeyEngine:
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
 
-        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
-        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+        self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device).reshape(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], dtype=model_precision, device=self.device).reshape(3, 1, 1)
 
         if mixed_precision or model_precision != torch.float32:
             # Use faster matrix multiplication implementation
@@ -132,43 +135,55 @@ class CorridorKeyEngine:
         Returns:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """
-        # 1. Inputs Check & Normalization
-        if image.dtype == np.uint8:
-            image = image.astype(np.float32) / 255.0
+        image_was_uint8 = image.dtype == np.uint8
+        mask_was_uint8 = mask_linear.dtype == np.uint8
 
-        if mask_linear.dtype == np.uint8:
-            mask_linear = mask_linear.astype(np.float32) / 255.0
+        # immediately casting to float is fine since fp16 can represent all uint8 values exactly
+        image = torch.from_numpy(image).to(self.model_precision).to(self.device)
+        mask_linear = torch.from_numpy(mask_linear).to(self.model_precision).to(self.device)
+        # 1. Inputs Check & Normalization
+        if image_was_uint8:
+            image = image / 255.0
+
+        if mask_was_uint8:
+            mask_linear = mask_linear / 255.0
 
         h, w = image.shape[:2]
 
         # Ensure Mask Shape
         if mask_linear.ndim == 2:
-            mask_linear = mask_linear[:, :, np.newaxis]
+            mask_linear = mask_linear.unsqueeze(-1)
+
+        image = image.permute(2, 0, 1)  # [C, H, W]
+        mask_linear = mask_linear.permute(2, 0, 1)  # [C, H, W]
 
         # 2. Resize to Model Size
         # If input is linear, we resize in linear to preserve energy/highlights,
         # THEN convert to sRGB for the model.
         if input_is_linear:
-            # Resize in Linear
-            img_resized_lin = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+            # TODO: Check if interpolation is comparable to cv2.INTER_LINEAR (probably close enough)
+            img_resized_lin = TF.resize(
+                image, [self.img_size, self.img_size], interpolation=torchvision.transforms.InterpolationMode.BILINEAR
+            )
             # Convert to sRGB for Model
             img_resized = cu.linear_to_srgb(img_resized_lin)
         else:
             # Standard sRGB Resize
-            img_resized = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+            img_resized = TF.resize(
+                image, [self.img_size, self.img_size], interpolation=torchvision.transforms.InterpolationMode.BILINEAR
+            )
 
-        mask_resized = cv2.resize(mask_linear, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-
-        if mask_resized.ndim == 2:
-            mask_resized = mask_resized[:, :, np.newaxis]
+        mask_resized = TF.resize(
+            mask_linear, [self.img_size, self.img_size], interpolation=torchvision.transforms.InterpolationMode.BILINEAR
+        )
 
         # 3. Normalize (ImageNet)
         # Model expects sRGB input normalized
         img_norm = (img_resized - self.mean) / self.std
 
         # 4. Prepare Tensor
-        inp_np = np.concatenate([img_norm, mask_resized], axis=-1)  # [H, W, 4]
-        inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
+        inp_concat = torch.concat((img_norm, mask_resized), 0)  # [4, H, W]
+        inp_t = inp_concat.unsqueeze(0)
 
         # 5. Inference
         # Hook for Refiner Scaling
