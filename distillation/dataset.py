@@ -114,8 +114,7 @@ class GreenScreenMattingDataset(Dataset):
             )
         if self.fg_gt_paths is not None and len(self.fg_gt_paths) != len(self.input_paths):
             raise ValueError(
-                f"Mismatch: {len(self.input_paths)} input frames vs "
-                f"{len(self.fg_gt_paths)} fg_gt frames in {self.root}"
+                f"Mismatch: {len(self.input_paths)} input frames vs {len(self.fg_gt_paths)} fg_gt frames in {self.root}"
             )
 
     def __len__(self) -> int:

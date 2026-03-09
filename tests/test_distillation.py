@@ -86,9 +86,7 @@ class TestGreenFormerSmall:
         """GreenFormerSmall must have fewer parameters than GreenFormer."""
         n_student = _count_params(small_model)
         n_teacher = _count_params(teacher_model)
-        assert n_student < n_teacher, (
-            f"Student ({n_student:,}) should be smaller than teacher ({n_teacher:,})"
-        )
+        assert n_student < n_teacher, f"Student ({n_student:,}) should be smaller than teacher ({n_teacher:,})"
 
     def test_no_refiner_mode(self):
         """use_refiner=False should disable the refiner without error."""

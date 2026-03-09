@@ -42,6 +42,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "torchdistill>=1.1.4",
 ]
 distillation = [
     "torchdistill>=1.1.4",

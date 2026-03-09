@@ -21,7 +21,7 @@ import poc_distill as pd
 # ---------------------------------------------------------------------------
 
 CPU = torch.device("cpu")
-_TINY = 32   # img_size for fast CPU tests
+_TINY = 32  # img_size for fast CPU tests
 
 
 def _run(steps: int = 5, img_size: int = _TINY, **kwargs) -> list[pd.StepRecord]:
@@ -150,9 +150,7 @@ class TestRunDistillation:
         # Compare first 5 steps avg vs last 5 steps avg
         first_avg = sum(r.total_loss for r in records[:5]) / 5
         last_avg = sum(r.total_loss for r in records[-5:]) / 5
-        assert last_avg < first_avg, (
-            f"Expected loss to decrease: first={first_avg:.4f}, last={last_avg:.4f}"
-        )
+        assert last_avg < first_avg, f"Expected loss to decrease: first={first_avg:.4f}, last={last_avg:.4f}"
 
     def test_teacher_params_unchanged(self):
         """Teacher parameters must stay frozen (no gradient updates)."""
@@ -163,9 +161,16 @@ class TestRunDistillation:
         before = {k: v.clone() for k, v in teacher.state_dict().items()}
 
         pd.run_distillation(
-            teacher=teacher, student=student, device=CPU,
-            img_size=_TINY, batch_size=1, steps=3,
-            lr=1e-3, task_weight=1.0, kd_weight=0.5, use_amp=False,
+            teacher=teacher,
+            student=student,
+            device=CPU,
+            img_size=_TINY,
+            batch_size=1,
+            steps=3,
+            lr=1e-3,
+            task_weight=1.0,
+            kd_weight=0.5,
+            use_amp=False,
         )
 
         after = teacher.state_dict()
@@ -179,9 +184,16 @@ class TestRunDistillation:
 
         before = {k: v.clone() for k, v in student.state_dict().items()}
         pd.run_distillation(
-            teacher=teacher, student=student, device=CPU,
-            img_size=_TINY, batch_size=1, steps=3,
-            lr=1e-3, task_weight=1.0, kd_weight=0.5, use_amp=False,
+            teacher=teacher,
+            student=student,
+            device=CPU,
+            img_size=_TINY,
+            batch_size=1,
+            steps=3,
+            lr=1e-3,
+            task_weight=1.0,
+            kd_weight=0.5,
+            use_amp=False,
         )
         after = student.state_dict()
 
@@ -193,9 +205,16 @@ class TestRunDistillation:
         teacher = pd._build_teacher(_TINY, use_refiner=False, device=CPU)
         student = pd._build_student(_TINY, use_refiner=False, device=CPU)
         zero_kd = pd.run_distillation(
-            teacher=teacher, student=student, device=CPU,
-            img_size=_TINY, batch_size=1, steps=2,
-            lr=1e-3, task_weight=1.0, kd_weight=0.0, use_amp=False,
+            teacher=teacher,
+            student=student,
+            device=CPU,
+            img_size=_TINY,
+            batch_size=1,
+            steps=2,
+            lr=1e-3,
+            task_weight=1.0,
+            kd_weight=0.0,
+            use_amp=False,
         )
         for r in zero_kd:
             assert r.total_loss == pytest.approx(r.task_loss, rel=1e-5)
@@ -286,13 +305,19 @@ class TestArgParsing:
         assert not args.no_amp
 
     def test_custom_flags(self):
-        args = pd._parse_args([
-            "--img-size", "128",
-            "--steps", "10",
-            "--kd-weight", "0.8",
-            "--device", "cpu",
-            "--no-refiner",
-        ])
+        args = pd._parse_args(
+            [
+                "--img-size",
+                "128",
+                "--steps",
+                "10",
+                "--kd-weight",
+                "0.8",
+                "--device",
+                "cpu",
+                "--no-refiner",
+            ]
+        )
         assert args.img_size == 128
         assert args.steps == 10
         assert args.kd_weight == pytest.approx(0.8)
@@ -311,28 +336,85 @@ class TestArgParsing:
 
 class TestMainCli:
     def test_main_returns_zero(self):
-        rc = pd.main(["--img-size", "32", "--steps", "5", "--device", "cpu",
-                      "--no-refiner", "--no-amp", "--warmup", "1", "--time-runs", "2"])
+        rc = pd.main(
+            [
+                "--img-size",
+                "32",
+                "--steps",
+                "5",
+                "--device",
+                "cpu",
+                "--no-refiner",
+                "--no-amp",
+                "--warmup",
+                "1",
+                "--time-runs",
+                "2",
+            ]
+        )
         assert rc == 0
 
     def test_main_prints_convergence_info(self, capsys):
-        pd.main(["--img-size", "32", "--steps", "40", "--device", "cpu",
-                 "--no-refiner", "--no-amp", "--warmup", "1", "--time-runs", "2"])
+        pd.main(
+            [
+                "--img-size",
+                "32",
+                "--steps",
+                "40",
+                "--device",
+                "cpu",
+                "--no-refiner",
+                "--no-amp",
+                "--warmup",
+                "1",
+                "--time-runs",
+                "2",
+            ]
+        )
         out = capsys.readouterr().out
         assert "Training summary" in out
         assert "Loss decreased" in out or "Loss did not decrease" in out
 
     def test_main_writes_csv(self, tmp_path):
         out = str(tmp_path / "distill.csv")
-        pd.main(["--img-size", "32", "--steps", "3", "--device", "cpu",
-                 "--no-refiner", "--no-amp", "--warmup", "1", "--time-runs", "2",
-                 "--output", out])
+        pd.main(
+            [
+                "--img-size",
+                "32",
+                "--steps",
+                "3",
+                "--device",
+                "cpu",
+                "--no-refiner",
+                "--no-amp",
+                "--warmup",
+                "1",
+                "--time-runs",
+                "2",
+                "--output",
+                out,
+            ]
+        )
         rows = list(csv.DictReader(StringIO(Path(out).read_text())))
         assert len(rows) == 3
 
     def test_main_shows_model_comparison(self, capsys):
-        pd.main(["--img-size", "32", "--steps", "3", "--device", "cpu",
-                 "--no-refiner", "--no-amp", "--warmup", "1", "--time-runs", "2"])
+        pd.main(
+            [
+                "--img-size",
+                "32",
+                "--steps",
+                "3",
+                "--device",
+                "cpu",
+                "--no-refiner",
+                "--no-amp",
+                "--warmup",
+                "1",
+                "--time-runs",
+                "2",
+            ]
+        )
         out = capsys.readouterr().out
         assert "Model comparison" in out
         assert "GreenFormer" in out

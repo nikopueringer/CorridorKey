@@ -391,14 +391,13 @@ def print_comparison(teacher_rec: SpeedRecord, student_rec: SpeedRecord) -> None
     print(f"  Student is {size_ratio:.2f}× smaller  |  {speedup:.2f}× faster inference")
     if teacher_rec.vram_gb > 0 and student_rec.vram_gb > 0:
         vram_save = teacher_rec.vram_gb - student_rec.vram_gb
-        print(f"  VRAM saved: {vram_save:.2f} GB  "
-              f"({vram_save / teacher_rec.vram_gb * 100:.0f}% reduction)")
+        print(f"  VRAM saved: {vram_save:.2f} GB  ({vram_save / teacher_rec.vram_gb * 100:.0f}% reduction)")
 
 
 def print_training_header() -> None:
     _header("Distillation training — per-step losses")
     print(f"  {'step':>6}  {'task_loss':>12}  {'kd_loss':>12}  {'total':>12}  {'Δtotal':>10}")
-    print(f"  {'─'*6}  {'─'*12}  {'─'*12}  {'─'*12}  {'─'*10}")
+    print(f"  {'─' * 6}  {'─' * 12}  {'─' * 12}  {'─' * 12}  {'─' * 10}")
 
 
 def print_step(rec: StepRecord, prev_total: float | None) -> None:
@@ -406,10 +405,7 @@ def print_step(rec: StepRecord, prev_total: float | None) -> None:
     if prev_total is not None:
         diff = rec.total_loss - prev_total
         delta = f"{diff:+.6f}"
-    print(
-        f"  {rec.step:>6}  {rec.task_loss:>12.6f}  {rec.kd_loss:>12.6f}"
-        f"  {rec.total_loss:>12.6f}  {delta:>10}"
-    )
+    print(f"  {rec.step:>6}  {rec.task_loss:>12.6f}  {rec.kd_loss:>12.6f}  {rec.total_loss:>12.6f}  {delta:>10}")
 
 
 def print_training_summary(records: list[StepRecord]) -> None:
@@ -450,32 +446,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--img-size", type=int, default=64, metavar="N",
-                   help="Square resolution for synthetic tensors (default: 64)")
-    p.add_argument("--steps", type=int, default=20, metavar="N",
-                   help="Number of distillation optimiser steps (default: 20)")
-    p.add_argument("--batch-size", type=int, default=1, metavar="N",
-                   help="Synthetic mini-batch size (default: 1)")
-    p.add_argument("--lr", type=float, default=1e-4,
-                   help="Student learning rate (default: 1e-4)")
-    p.add_argument("--task-weight", type=float, default=1.0,
-                   help="Weight for the GT task loss (default: 1.0)")
-    p.add_argument("--kd-weight", type=float, default=0.5,
-                   help="Weight for the teacher KD loss (default: 0.5)")
-    p.add_argument("--device", default="auto",
-                   help="cpu | cuda | auto  (default: auto)")
-    p.add_argument("--no-refiner", action="store_true",
-                   help="Disable CNN refiner in both models")
-    p.add_argument("--no-amp", action="store_true",
-                   help="Disable automatic mixed-precision on CUDA")
-    p.add_argument("--warmup", type=int, default=2, metavar="N",
-                   help="Warmup passes for speed benchmark (default: 2)")
-    p.add_argument("--time-runs", type=int, default=5, metavar="N",
-                   help="Timed passes per model for speed comparison (default: 5)")
-    p.add_argument("--output", metavar="FILE",
-                   help="Write per-step CSV to FILE (optional)")
-    p.add_argument("--log-every", type=int, default=1, metavar="N",
-                   help="Print loss every N steps (default: 1)")
+    p.add_argument(
+        "--img-size", type=int, default=64, metavar="N", help="Square resolution for synthetic tensors (default: 64)"
+    )
+    p.add_argument(
+        "--steps", type=int, default=20, metavar="N", help="Number of distillation optimiser steps (default: 20)"
+    )
+    p.add_argument("--batch-size", type=int, default=1, metavar="N", help="Synthetic mini-batch size (default: 1)")
+    p.add_argument("--lr", type=float, default=1e-4, help="Student learning rate (default: 1e-4)")
+    p.add_argument("--task-weight", type=float, default=1.0, help="Weight for the GT task loss (default: 1.0)")
+    p.add_argument("--kd-weight", type=float, default=0.5, help="Weight for the teacher KD loss (default: 0.5)")
+    p.add_argument("--device", default="auto", help="cpu | cuda | auto  (default: auto)")
+    p.add_argument("--no-refiner", action="store_true", help="Disable CNN refiner in both models")
+    p.add_argument("--no-amp", action="store_true", help="Disable automatic mixed-precision on CUDA")
+    p.add_argument("--warmup", type=int, default=2, metavar="N", help="Warmup passes for speed benchmark (default: 2)")
+    p.add_argument(
+        "--time-runs", type=int, default=5, metavar="N", help="Timed passes per model for speed comparison (default: 5)"
+    )
+    p.add_argument("--output", metavar="FILE", help="Write per-step CSV to FILE (optional)")
+    p.add_argument("--log-every", type=int, default=1, metavar="N", help="Print loss every N steps (default: 1)")
     return p.parse_args(argv)
 
 
@@ -529,8 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     t_params = _count_params(teacher)
     s_params = _count_params(student)
     print(f"  Teacher params : {t_params:,}  ({t_params / 1e6:.1f} M)")
-    print(f"  Student params : {s_params:,}  ({s_params / 1e6:.1f} M)  "
-          f"[{t_params / s_params:.2f}× smaller]")
+    print(f"  Student params : {s_params:,}  ({s_params / 1e6:.1f} M)  [{t_params / s_params:.2f}× smaller]")
 
     # ── Distillation loop ─────────────────────────────────────────────────────
     print_training_header()

@@ -307,10 +307,7 @@ def _query_gpu_info() -> Optional[str]:
         parts = [p.strip() for p in lines[0].split(",")]
         if len(parts) >= 5:
             name, pl, pd, sm, mem = parts[:5]
-            return (
-                f"{name}  |  power_limit={pl} W  power_draw={pd} W  "
-                f"sm_clock={sm} MHz  vram={mem} MiB"
-            )
+            return f"{name}  |  power_limit={pl} W  power_draw={pd} W  sm_clock={sm} MHz  vram={mem} MiB"
         return lines[0]
     except Exception:  # noqa: BLE001
         return None
@@ -415,10 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             f"  Largest fitting size  : {recommended.size}×{recommended.size}  "
             f"({recommended.vram_gb:.2f} GB peak VRAM,  {recommended.fps:.3f} FPS)"
         )
-        print(
-            f"  Total VRAM headroom   : {max_vram:.2f} GB used  "
-            f"(24 GB 3090 → ~{24.0 - max_vram:.1f} GB free)"
-        )
+        print(f"  Total VRAM headroom   : {max_vram:.2f} GB used  (24 GB 3090 → ~{24.0 - max_vram:.1f} GB free)")
         if ok_results[-1].speedup > 1.0:
             fastest = min(ok_results, key=lambda r: r.mean_ms)
             print(
