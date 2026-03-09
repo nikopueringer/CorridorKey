@@ -11,12 +11,15 @@ _load_frames_for_videomama, _load_mask_frames_for_videomama).
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import cv2
 import numpy as np
 
 from .validators import normalize_mask_channels, normalize_mask_dtype
+
+logger = logging.getLogger(__name__)
 
 # EXR write flags — PXR24 half-float (smallest working compression)
 EXR_WRITE_FLAGS = [
@@ -43,6 +46,7 @@ def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray 
     if is_exr:
         img = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
         if img is None:
+            logger.warning("Could not read frame: %s", fpath)
             return None
         # Strip alpha channel from BGRA EXR
         if img.ndim == 3 and img.shape[2] == 4:
@@ -55,6 +59,7 @@ def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray 
     else:
         img = cv2.imread(fpath)
         if img is None:
+            logger.warning("Could not read frame: %s", fpath)
             return None
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img_rgb.astype(np.float32) / 255.0

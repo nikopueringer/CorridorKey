@@ -1,8 +1,11 @@
 """Centralized cross-platform device selection for CorridorKey."""
 
+import logging
 import os
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 DEVICE_ENV_VAR = "CORRIDORKEY_DEVICE"
 VALID_DEVICES = ("auto", "cuda", "mps", "cpu")
@@ -11,10 +14,13 @@ VALID_DEVICES = ("auto", "cuda", "mps", "cpu")
 def detect_best_device() -> str:
     """Auto-detect best available device: CUDA > MPS > CPU."""
     if torch.cuda.is_available():
-        return "cuda"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    logger.info("Auto-selected device: %s", device)
+    return device
 
 
 def resolve_device(requested: str | None = None) -> str:
