@@ -16,6 +16,9 @@ dependencies = [
     "opencv-python",
     "tqdm",
     "setuptools",
+    # Triton fix for Windows 
+    # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
+    "triton-windows==3.6.0.post25 ; sys_platform == 'win32'",
 
     # GVM alpha hint generator
     "diffusers",
@@ -88,9 +91,11 @@ omit = [
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu126"
+url = "https://download.pytorch.org/whl/cu128" # CUDA 12.6 doesn't support RTX 5000 Series
 explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch" }
 torchvision = { index = "pytorch" }
+# Use Hiera fix in order to utilize the FlashAttention Kernel
+timm = { git = "https://github.com/Raiden129/pytorch-image-models-fix", branch = "fix/hiera-flash-attention-global-4d" }
