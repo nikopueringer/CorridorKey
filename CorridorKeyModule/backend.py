@@ -160,6 +160,7 @@ class _MLXEngineAdapter:
 
     def __init__(self, raw_engine):
         self._engine = raw_engine
+        logger.info("MLX adapter active: despill and despeckle are handled by the adapter layer, not native MLX")
 
     def process_frame(
         self,

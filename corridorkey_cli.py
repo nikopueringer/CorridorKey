@@ -291,7 +291,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
     parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
+    parser.add_argument("--win_path", help="Shot folder or video file to process (wizard mode)", default=None)
     parser.add_argument(
         "--device",
         choices=["auto", "cuda", "mps", "cpu"],

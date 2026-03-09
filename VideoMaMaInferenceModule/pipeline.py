@@ -854,7 +854,7 @@ class VideoInferencePipeline:
             device (str): The device to run models on ('cuda' or 'cpu').
             weight_dtype (torch.dtype): The precision for model weights (float16 or bfloat16).
         """
-        print("--- Initializing Inference Pipeline and Loading Models ---")
+        logger.info("--- Initializing Inference Pipeline and Loading Models ---")
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.weight_dtype = weight_dtype
 
@@ -876,7 +876,7 @@ class VideoInferencePipeline:
         self.vae.to(self.device, dtype=torch.float32).eval()
         self.unet.to(self.device, dtype=self.weight_dtype).eval()
 
-        print(f"--- Models Loaded Successfully on {self.device} ---")
+        logger.info("--- Models Loaded Successfully on %s ---", self.device)
 
     def run(self, cond_frames, mask_frames, seed=42, mask_cond_mode="vae", fps=7, motion_bucket_id=127,
             noise_aug_strength=0.0):
@@ -911,7 +911,7 @@ class VideoInferencePipeline:
             # Run CLIP in FP32
             image_embeddings = self.image_encoder(pixel_values.to(self.device, dtype=torch.float32)).image_embeds
             
-            print(f"DEBUG: CLIP Embeds Max: {image_embeddings.max().item():.4f}, Mean: {image_embeddings.mean().item():.4f}")
+            logger.debug("CLIP Embeds Max: %.4f, Mean: %.4f", image_embeddings.max().item(), image_embeddings.mean().item())
 
             # Setup for UNet which uses weight_dtype (likely FP16)
             image_embeddings = image_embeddings.to(dtype=self.weight_dtype)
@@ -922,7 +922,7 @@ class VideoInferencePipeline:
             cond_video_tensor_fp32 = cond_video_tensor.to(dtype=torch.float32)
             cond_latents = self._tensor_to_vae_latent(cond_video_tensor_fp32)
             
-            print(f"DEBUG: Cond Latents Max: {cond_latents.max().item():.4f}, Mean: {cond_latents.mean().item():.4f}")
+            logger.debug("Cond Latents Max: %.4f, Mean: %.4f", cond_latents.max().item(), cond_latents.mean().item())
 
             # Cast back to weight_dtype (FP16) for UNet
             cond_latents = cond_latents.to(dtype=self.weight_dtype)
@@ -931,7 +931,7 @@ class VideoInferencePipeline:
             if mask_cond_mode == "vae":
                 mask_video_tensor_fp32 = mask_video_tensor.to(dtype=torch.float32)
                 mask_latents = self._tensor_to_vae_latent(mask_video_tensor_fp32)
-                print(f"DEBUG: Mask Latents Max: {mask_latents.max().item():.4f}, Mean: {mask_latents.mean().item():.4f}")
+                logger.debug("Mask Latents Max: %.4f, Mean: %.4f", mask_latents.max().item(), mask_latents.mean().item())
                 mask_latents = mask_latents.to(dtype=self.weight_dtype)
                 mask_latents = mask_latents / self.vae.config.scaling_factor
             elif mask_cond_mode == "interpolate":
@@ -954,7 +954,7 @@ class VideoInferencePipeline:
             unet_input = torch.cat([noisy_latents, cond_latents, mask_latents], dim=2)
             pred_latents = self.unet(unet_input, timesteps, encoder_hidden_states, added_time_ids=added_time_ids).sample
             
-            print(f"DEBUG: Pred Latents Max: {pred_latents.max().item():.4f}, Mean: {pred_latents.mean().item():.4f}")
+            logger.debug("Pred Latents Max: %.4f, Mean: %.4f", pred_latents.max().item(), pred_latents.mean().item())
 
             # --- 5. Decode Latents to Video Frames ---
             pred_latents = (1 / self.vae.config.scaling_factor) * pred_latents.squeeze(0)
@@ -969,7 +969,7 @@ class VideoInferencePipeline:
                 frames.append(decoded_chunk)
 
             video_tensor = torch.cat(frames, dim=0)
-            print(f"DEBUG: Video Tensor (Pre-Clamp) Max: {video_tensor.max().item():.4f}, Mean: {video_tensor.mean().item():.4f}")
+            logger.debug("Video Tensor (Pre-Clamp) Max: %.4f, Mean: %.4f", video_tensor.max().item(), video_tensor.mean().item())
             video_tensor = (video_tensor / 2.0 + 0.5).clamp(0, 1).mean(dim=1, keepdim=True).repeat(1, 3, 1, 1)
 
             # Return a list of PIL images
