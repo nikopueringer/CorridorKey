@@ -253,7 +253,7 @@ class CorridorKeyEngine:
         # A power curve (gamma=0.4) sharpens the blend weight so the "model
         # FG zone" is a narrow band at the edges.  This tightens the matte
         # for blending purposes only — the saved alpha EXR is untouched.
-        #   0.3 → 0.79,  0.5 → 0.87,  0.8 → 0.96,  0.9 → 0.98
+        #   0.1 → 0.79,  0.3 → 0.89,  0.5 → 0.93,  0.8 → 0.98
         if self.tiler is not None:
             if input_is_linear:
                 orig_srgb = cu.linear_to_srgb(image)
@@ -262,7 +262,7 @@ class CorridorKeyEngine:
             orig_despilled = cu.despill(orig_srgb, green_limit_mode="average", strength=despill_strength)
 
             # Sharpen the blend weight — push fractional alpha toward 1.0
-            blend_alpha = np.power(np.clip(processed_alpha, 0.0, 1.0), 0.2)
+            blend_alpha = np.power(np.clip(processed_alpha, 0.0, 1.0), 0.1)
             fg_despilled = fg_despilled * (1.0 - blend_alpha) + orig_despilled * blend_alpha
 
         # C. Premultiply (for EXR Output)
