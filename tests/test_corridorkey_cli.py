@@ -43,7 +43,7 @@ class TestInteractiveWizard:
         monkeypatch.setattr("os.path.exists", lambda path: "/mnt/project" in path)
         monkeypatch.setattr("corridorkey_cli.map_path", lambda _: "/mnt/project")
         monkeypatch.setattr("os.listdir", lambda _: [])
-        monkeypatch.setattr("builtins.input", lambda _: "q")
+        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
 
         interactive_wizard("Z:/Work/Shot01")
 
@@ -70,7 +70,7 @@ class TestInteractiveWizard:
         """
         shot_path = tmp_path / "shot_01"
         (shot_path / "Input").mkdir(parents=True)
-        monkeypatch.setattr("builtins.input", lambda _: "q")
+        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
 
         interactive_wizard(str(shot_path))
 
@@ -88,7 +88,7 @@ class TestInteractiveWizard:
             (shot_dir / "Input" / "video.mp4").touch()
 
         (tmp_path / "Output").mkdir()
-        monkeypatch.setattr("builtins.input", lambda _: "q")
+        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
 
         interactive_wizard(str(tmp_path))
 
@@ -106,7 +106,7 @@ class TestInteractiveWizard:
         (tmp_path / "notes.txt").touch()
         (tmp_path / ".DS_Store").touch()
         (tmp_path / "Output").mkdir()
-        monkeypatch.setattr("builtins.input", lambda _: "q")
+        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
 
         interactive_wizard(str(tmp_path))
 
