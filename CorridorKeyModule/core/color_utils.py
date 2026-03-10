@@ -294,6 +294,75 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
 
     return result_alpha
 
+def guided_filter_alpha(
+    guide: np.ndarray,
+    alpha: np.ndarray,
+    radius: int = 16,
+    eps: float = 1e-4,
+) -> np.ndarray:
+    """Refine *alpha* using the original image as an edge-aware guide.
+
+    Implements He et al.'s guided filter using box filters (O(N) per pixel,
+    independent of radius).  The guide image's edges steer the output alpha
+    to snap to real luminance boundaries — tightening soft mattes from
+    lower-resolution model passes without inventing detail that wasn't there.
+
+    Parameters
+    ----------
+    guide:
+        Original full-resolution image, ``[H, W, 3]`` float32 0-1 (sRGB OK).
+        Converted to grayscale internally.
+    alpha:
+        Coarse alpha matte, ``[H, W]`` or ``[H, W, 1]`` float32 0-1.
+    radius:
+        Box filter radius in pixels.  Larger = smoother guide influence.
+        16 is a good default for 2K–4K images.
+    eps:
+        Regularization.  Smaller = sharper edges (more aggressive snap).
+        1e-4 is a good starting point; 1e-3 is gentler.
+
+    Returns
+    -------
+    np.ndarray
+        Refined alpha, same shape as input *alpha*, clipped to [0, 1].
+    """
+    is_3d = False
+    if alpha.ndim == 3:
+        is_3d = True
+        alpha = alpha[:, :, 0]
+
+    # Grayscale guide
+    if guide.ndim == 3:
+        I = cv2.cvtColor(guide.astype(np.float32), cv2.COLOR_RGB2GRAY)
+    else:
+        I = guide.astype(np.float32)
+
+    p = alpha.astype(np.float32)
+    ksize = (2 * radius + 1, 2 * radius + 1)
+
+    mean_I = cv2.boxFilter(I, ddepth=-1, ksize=ksize)
+    mean_p = cv2.boxFilter(p, ddepth=-1, ksize=ksize)
+    mean_Ip = cv2.boxFilter(I * p, ddepth=-1, ksize=ksize)
+    mean_II = cv2.boxFilter(I * I, ddepth=-1, ksize=ksize)
+
+    cov_Ip = mean_Ip - mean_I * mean_p
+    var_I = mean_II - mean_I * mean_I
+
+    a = cov_Ip / (var_I + eps)
+    b = mean_p - a * mean_I
+
+    mean_a = cv2.boxFilter(a, ddepth=-1, ksize=ksize)
+    mean_b = cv2.boxFilter(b, ddepth=-1, ksize=ksize)
+
+    result = mean_a * I + mean_b
+    result = np.clip(result, 0.0, 1.0)
+
+    if is_3d:
+        result = result[:, :, np.newaxis]
+
+    return result
+
+
 
 def create_checkerboard(
     width: int, height: int, checker_size: int = 64, color1: float = 0.2, color2: float = 0.4

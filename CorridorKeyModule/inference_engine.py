@@ -232,6 +232,16 @@ class CorridorKeyEngine:
 
         # --- ADVANCED COMPOSITING ---
 
+        # A0. Guided-filter matte refinement
+        # Use the original full-res image edges to snap the upscaled alpha
+        # to real luminance boundaries.  This tightens soft edges (especially
+        # hair) that get blurred by the model's resize round-trip.
+        if input_is_linear:
+            guide_img = cu.linear_to_srgb(image)
+        else:
+            guide_img = image
+        res_alpha = cu.guided_filter_alpha(guide_img, res_alpha, radius=16, eps=1e-4)
+
         # A. Clean Matte (Auto-Despeckle)
         if auto_despeckle:
             processed_alpha = cu.clean_matte(res_alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
@@ -242,28 +252,29 @@ class CorridorKeyEngine:
         # res_fg is sRGB.
         fg_despilled = cu.despill(res_fg, green_limit_mode="average", strength=despill_strength)
 
-        # B2. Alpha-biased original pixel restoration (tiling only)
-        # After the full pipeline (model FG + despill + despeckle), blend the
-        # despilled original image back in using the processed alpha as the
-        # blend weight.  Where alpha is high (solid subject), bias toward the
-        # original — full detail, correct brightness.  Where alpha is low
-        # (edges, transparency), bias toward the model's despilled FG — the
-        # learned reconstruction matters there.
+        # B2. Alpha-biased original pixel restoration
+        # The model squishes the input to 2048×2048 and stretches it back —
+        # that resize round-trip loses detail.  Blend the despilled original
+        # full-res pixels back in using the processed alpha as the weight.
         #
-        # A power curve (gamma=0.4) sharpens the blend weight so the "model
-        # FG zone" is a narrow band at the edges.  This tightens the matte
-        # for blending purposes only — the saved alpha EXR is untouched.
-        #   0.5 → 0.70,  0.8 → 0.87,  0.9 → 0.94,  0.95 → 0.97
-        if self.tiler is not None:
-            if input_is_linear:
-                orig_srgb = cu.linear_to_srgb(image)
-            else:
-                orig_srgb = image
-            orig_despilled = cu.despill(orig_srgb, green_limit_mode="average", strength=despill_strength)
+        # Where alpha is high (solid subject) → original pixels (full detail,
+        # correct brightness, no resize artifacts).
+        # Where alpha is low (edges, transparency) → model's learned FG
+        # reconstruction (handles green spill, semi-transparent regions).
+        #
+        # A power curve (gamma=0.6) sharpens the blend weight so the "model
+        # FG zone" is a narrow band right at the edges.  The saved alpha EXR
+        # is untouched — this only affects the FG color channel.
+        #   0.5 → 0.66,  0.8 → 0.86,  0.9 → 0.93,  0.95 → 0.97
+        if input_is_linear:
+            orig_srgb = cu.linear_to_srgb(image)
+        else:
+            orig_srgb = image
+        orig_despilled = cu.despill(orig_srgb, green_limit_mode="average", strength=despill_strength)
 
-            # Sharpen the blend weight — push fractional alpha toward 1.0
-            blend_alpha = np.power(np.clip(processed_alpha, 0.0, 1.0), 0.6)
-            fg_despilled = fg_despilled * (1.0 - blend_alpha) + orig_despilled * blend_alpha
+        # Sharpen the blend weight — push fractional alpha toward 1.0
+        blend_alpha = np.power(np.clip(processed_alpha, 0.0, 1.0), 0.6)
+        fg_despilled = fg_despilled * (1.0 - blend_alpha) + orig_despilled * blend_alpha
 
         # C. Premultiply (for EXR Output)
         # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
