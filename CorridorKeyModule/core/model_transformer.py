@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import logging
+import sys
 
 import timm
 import torch
