@@ -159,7 +159,7 @@ class TestProcessFramePostProcessing:
 
         rgb = processed[:, :, :3]
         alpha = processed[:, :, 3:4]
-        expected_premul = (0.6 ** 2.2) * 0.8
+        expected_premul = (0.6**2.2) * 0.8
         np.testing.assert_allclose(alpha, 0.8, atol=1e-5)
         np.testing.assert_allclose(rgb, expected_premul, atol=1e-2)
 
@@ -175,9 +175,11 @@ class TestProcessFramePostProcessing:
         # Both should produce the same output
         np.testing.assert_allclose(result_2d["alpha"], result_3d["alpha"], atol=1e-5)
 
+
 # ---------------------------------------------------------------------------
 # NVIDIA Specific GPU test
 # ---------------------------------------------------------------------------
+
 
 class TestNvidiaGPUProcess:
     @pytest.mark.gpu
