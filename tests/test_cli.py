@@ -60,11 +60,6 @@ class TestInvalidArgs:
         result = runner.invoke(app, ["nonexistent"])
         assert result.exit_code != 0
 
-    def test_invalid_device(self):
-        # typer won't reject arbitrary strings for --device since it's typed as str,
-        # but resolve_device will raise for truly invalid values
-        pass
-
 
 # ---------------------------------------------------------------------------
 # InferenceSettings defaults
@@ -112,21 +107,26 @@ class TestCallbackProtocol:
         result = runner.invoke(app, ["run-inference"])
         assert result.exit_code == 0
 
-        if mock_run.called:
-            _, kwargs = mock_run.call_args
-            assert "on_clip_start" in kwargs
-            assert "on_frame_complete" in kwargs
-            assert callable(kwargs["on_clip_start"])
-            assert callable(kwargs["on_frame_complete"])
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert "on_clip_start" in kwargs
+        assert "on_frame_complete" in kwargs
+        assert callable(kwargs["on_clip_start"])
+        assert callable(kwargs["on_frame_complete"])
 
     def test_callback_signatures(self):
         """Callbacks accept the documented (name, count) / (idx, total) args."""
-        from corridorkey_cli import _on_clip_start, _on_frame_complete
+        from corridorkey_cli import ProgressContext
 
-        # Should not raise
-        _on_clip_start("test_clip", 100)
-        _on_frame_complete(0, 100)
-        _on_frame_complete(99, 100)
+        ctx = ProgressContext()
+        ctx.__enter__()
+        try:
+            # Should not raise
+            ctx.on_clip_start("test_clip", 100)
+            ctx.on_frame_complete(0, 100)
+            ctx.on_frame_complete(99, 100)
+        finally:
+            ctx.__exit__(None, None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -171,14 +171,14 @@ class TestNonInteractiveFlags:
         )
         assert result.exit_code == 0
 
-        if mock_run.called:
-            _, kwargs = mock_run.call_args
-            settings = kwargs["settings"]
-            assert settings.input_is_linear is True
-            assert settings.despill_strength == 0.7
-            assert settings.auto_despeckle is True
-            assert settings.despeckle_size == 200
-            assert settings.refiner_scale == 1.5
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        settings = kwargs["settings"]
+        assert settings.input_is_linear is True
+        assert settings.despill_strength == 0.7
+        assert settings.auto_despeckle is True
+        assert settings.despeckle_size == 200
+        assert settings.refiner_scale == 1.5
 
     @patch("corridorkey_cli.scan_clips")
     @patch("corridorkey_cli.run_inference")
@@ -200,11 +200,11 @@ class TestNonInteractiveFlags:
         )
         assert result.exit_code == 0
 
-        if mock_run.called:
-            _, kwargs = mock_run.call_args
-            settings = kwargs["settings"]
-            assert settings.input_is_linear is False
-            assert settings.auto_despeckle is False
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        settings = kwargs["settings"]
+        assert settings.input_is_linear is False
+        assert settings.auto_despeckle is False
 
     @patch("corridorkey_cli.scan_clips")
     @patch("corridorkey_cli.run_inference")
@@ -226,14 +226,12 @@ class TestNonInteractiveFlags:
         )
         assert result.exit_code == 0
 
-        if mock_run.called:
-            _, kwargs = mock_run.call_args
-            settings = kwargs["settings"]
-            assert settings.despill_strength == 1.0  # clamped 15→10, then /10
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        settings = kwargs["settings"]
+        assert settings.despill_strength == 1.0  # clamped 15→10, then /10
 
-    @patch("corridorkey_cli.scan_clips")
-    @patch("corridorkey_cli.run_inference")
-    def test_run_inference_help_shows_flags(self, mock_run, mock_scan):
+    def test_run_inference_help_shows_flags(self):
         """run-inference --help lists the settings flags."""
         result = runner.invoke(app, ["run-inference", "--help"])
         assert result.exit_code == 0

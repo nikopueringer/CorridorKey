@@ -547,6 +547,7 @@ def run_inference(
 
     logger.info(f"Found {len(ready_clips)} clips ready for inference.")
 
+    # Backward compat for callers that don't pass settings
     if settings is None:
         settings = InferenceSettings()
 
@@ -728,7 +729,6 @@ def run_inference(
             if on_frame_complete:
                 on_frame_complete(i, num_frames)
 
-        print("")
         if input_cap:
             input_cap.release()
         if alpha_cap:

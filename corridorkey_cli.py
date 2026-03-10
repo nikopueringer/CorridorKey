@@ -75,39 +75,51 @@ def _configure_environment() -> None:
 # Progress helpers (callback protocol → rich.progress)
 # ---------------------------------------------------------------------------
 
-_progress: Progress | None = None
-_frame_task_id: TaskID | None = None
+
+class ProgressContext:
+    """Context manager bridging clip_manager callbacks to Rich progress bars.
+
+    clip_manager's callback protocol doesn't know about Rich, so this class
+    owns the Progress instance and exposes bound methods as callbacks.
+    ``__exit__`` always cleans up, even if inference raises.
+    """
+
+    def __init__(self) -> None:
+        self._progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        self._frame_task_id: TaskID | None = None
+
+    def __enter__(self) -> "ProgressContext":
+        self._progress.__enter__()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._progress.__exit__(*exc)
+
+    def on_clip_start(self, clip_name: str, num_frames: int) -> None:
+        """Callback: reset the progress bar for a new clip."""
+        if self._frame_task_id is not None:
+            self._progress.remove_task(self._frame_task_id)
+        self._frame_task_id = self._progress.add_task(f"[cyan]{clip_name}", total=num_frames)
+
+    def on_frame_complete(self, frame_idx: int, num_frames: int) -> None:
+        """Callback: advance the progress bar by one frame."""
+        if self._frame_task_id is not None:
+            self._progress.advance(self._frame_task_id)
 
 
-def _make_progress() -> Progress:
-    return Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    )
+def _on_clip_start_log_only(clip_name: str, total_clips: int) -> None:
+    """Clip-level callback for generate-alphas.
 
-
-def _on_clip_start(clip_name: str, num_frames: int) -> None:
-    """Callback: reset the progress bar for a new clip."""
-    global _frame_task_id
-    if _progress is not None:
-        # Remove old task if any
-        if _frame_task_id is not None:
-            _progress.remove_task(_frame_task_id)
-        _frame_task_id = _progress.add_task(f"[cyan]{clip_name}", total=num_frames)
-
-
-def _on_frame_complete(frame_idx: int, num_frames: int) -> None:
-    """Callback: advance the progress bar by one frame."""
-    if _progress is not None and _frame_task_id is not None:
-        _progress.advance(_frame_task_id)
-
-
-def _on_clip_start_simple(clip_name: str, total_clips: int) -> None:
-    """Callback for clip-level progress (generate-alphas)."""
+    Unlike ProgressContext.on_clip_start (frame-level granularity with a Rich
+    task per clip), GVM has no per-frame progress so we just log.
+    """
     console.print(f"  Processing [bold]{clip_name}[/bold] ({total_clips} total)")
 
 
@@ -127,7 +139,6 @@ def _prompt_inference_settings(
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
 
-    # 1. Gamma
     if default_linear is not None:
         input_is_linear = default_linear
     else:
@@ -138,7 +149,6 @@ def _prompt_inference_settings(
         )
         input_is_linear = gamma_choice == "linear"
 
-    # 2. Despill
     if default_despill is not None:
         despill_int = max(0, min(10, default_despill))
     else:
@@ -149,7 +159,6 @@ def _prompt_inference_settings(
         despill_int = max(0, min(10, despill_int))
     despill_strength = despill_int / 10.0
 
-    # 3. Auto-despeckle
     if default_despeckle is not None:
         auto_despeckle = default_despeckle
     else:
@@ -166,7 +175,6 @@ def _prompt_inference_settings(
         )
         despeckle_size = max(0, despeckle_size)
 
-    # 4. Refiner strength
     if default_refiner is not None:
         refiner_scale = default_refiner
     else:
@@ -205,7 +213,7 @@ def app_callback(
     _configure_environment()
     ctx.ensure_object(dict)
     ctx.obj["device"] = resolve_device(device)
-    logger.info(f"Using device: {ctx.obj['device']}")
+    logger.info("Using device: %s", ctx.obj["device"])
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +232,7 @@ def generate_alphas_cmd(ctx: typer.Context) -> None:
     """Generate coarse alpha hints via GVM for clips missing them."""
     clips = scan_clips()
     with console.status("[bold green]Loading GVM model..."):
-        generate_alphas(clips, device=ctx.obj["device"], on_clip_start=_on_clip_start_simple)
+        generate_alphas(clips, device=ctx.obj["device"], on_clip_start=_on_clip_start_log_only)
     console.print("[bold green]Alpha generation complete.")
 
 
@@ -267,16 +275,17 @@ def run_inference_cmd(
     """
     clips = scan_clips()
 
-    # If all settings provided via flags, skip prompts entirely
-    all_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
-    if all_flags_set:
-        despill_clamped = max(0, min(10, despill))  # type: ignore[arg-type]
+    # despeckle_size excluded — sensible default even in headless mode
+    required_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
+    if required_flags_set:
+        assert linear is not None and despill is not None and despeckle is not None and refiner is not None
+        despill_clamped = max(0, min(10, despill))
         settings = InferenceSettings(
-            input_is_linear=linear,  # type: ignore[arg-type]
+            input_is_linear=linear,
             despill_strength=despill_clamped / 10.0,
-            auto_despeckle=despeckle,  # type: ignore[arg-type]
+            auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
-            refiner_scale=refiner,  # type: ignore[arg-type]
+            refiner_scale=refiner,
         )
     else:
         settings = _prompt_inference_settings(
@@ -287,22 +296,17 @@ def run_inference_cmd(
             default_refiner=refiner,
         )
 
-    global _progress
-    progress = _make_progress()
-    _progress = progress
-
-    with progress:
+    with ProgressContext() as ctx_progress:
         run_inference(
             clips,
             device=ctx.obj["device"],
             backend=backend,
             max_frames=max_frames,
             settings=settings,
-            on_clip_start=_on_clip_start,
-            on_frame_complete=_on_frame_complete,
+            on_clip_start=ctx_progress.on_clip_start,
+            on_frame_complete=ctx_progress.on_frame_complete,
         )
 
-    _progress = None
     console.print("[bold green]Inference complete.")
 
 
@@ -326,7 +330,6 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
     # 1. Resolve Path
     console.print(f"Windows Path: {win_path}")
 
-    # Check if we are running locally where the Windows path exists
     if os.path.exists(win_path):
         process_path = win_path
         console.print(f"Running locally: [bold]{process_path}[/bold]")
@@ -347,6 +350,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         target_is_shot = True
 
     work_dirs: list[str] = []
+    # Pipeline output dirs, not clip sources
     excluded_dirs = {"Output", "AlphaHint", "VideoMamaMaskHint", ".ipynb_checkpoints"}
     if target_is_shot:
         work_dirs = [process_path]
@@ -359,7 +363,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
     console.print(f"\nFound [bold]{len(work_dirs)}[/bold] potential clip folders.")
 
-    # Check for loose videos (exclude files already named Input.*)
+    # Files already named Input/AlphaHint/etc are organized, not "loose"
     known_names = {"input", "alphahint", "videomamamaskhint"}
     loose_videos = [
         f
@@ -369,7 +373,6 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         and os.path.splitext(f)[0].lower() not in known_names
     ]
 
-    # Check folders needing organization
     dirs_needing_org = []
     for d in work_dirs:
         has_input = os.path.exists(os.path.join(d, "Input")) or glob.glob(os.path.join(d, "Input.*"))
@@ -455,7 +458,6 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             else:
                 raw.append(entry)
 
-        # Status table
         table = Table(title="Status Report", show_lines=True)
         table.add_column("Category", style="bold")
         table.add_column("Count", justify="right")
@@ -478,7 +480,6 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         )
         console.print(table)
 
-        # Actions
         missing_alpha = masked + raw
         actions: list[str] = []
 
@@ -510,18 +511,14 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             console.print(Panel("Corridor Key Inference", style="magenta"))
             try:
                 settings = _prompt_inference_settings()
-                global _progress
-                progress = _make_progress()
-                _progress = progress
-                with progress:
+                with ProgressContext() as ctx_progress:
                     run_inference(
                         ready,
                         device=device,
                         settings=settings,
-                        on_clip_start=_on_clip_start,
-                        on_frame_complete=_on_frame_complete,
+                        on_clip_start=ctx_progress.on_clip_start,
+                        on_frame_complete=ctx_progress.on_frame_complete,
                     )
-                _progress = None
             except (RuntimeError, FileNotFoundError) as e:
                 console.print(f"[bold red]Inference failed:[/bold red] {e}")
             Prompt.ask("Inference batch complete. Press Enter to re-scan")
