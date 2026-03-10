@@ -29,10 +29,11 @@ Naturally, I have not tested everything. If you encounter errors, please conside
 
 ## Hardware Requirements
 
-This project was designed and built on a Linux workstation (Puget Systems PC) equipped with an NVIDIA RTX Pro 6000 with 96GB of VRAM. This project is not yet optimized for sub 24 gig VRAM systems, but with the help of the community, maybe we can make that happen.
+This project was designed and built on a Linux workstation (Puget Systems PC) equipped with an NVIDIA RTX Pro 6000 with 96GB of VRAM. The community is ACTIVELY optimizing it for consumer GPUS.
 
-*   **CorridorKey:** Running inference natively at 2048x2048 requires approximately **22.7 GB of VRAM**. You will need at least a 24GB GPU (such as a 3090, 4090, 5090, etc). It is highly recommended to run this on a secondary GPU that is not driving your OS/displays, or on a rented cloud instance (like Runpod or Google Colab) to avoid Out-Of-Memory errors.
-    *   **Windows Users:** To run GPU acceleration natively on Windows, your system MUST have NVIDIA drivers that support **CUDA 12.6 or higher** installed. If your drivers only support older CUDA versions, the installer will likely fallback to the CPU.
+The most recent build should work on computers with 6-8 gig of VRAM, and it can run on most Mac systems with unified memory. Yes, it might even work on your old Macbook pro. Let us know on the Discord!
+
+*   **Windows Users:** To run GPU acceleration natively on Windows, your system MUST have NVIDIA drivers that support **CUDA 12.8 or higher** installed. If your drivers only support older CUDA versions, the installer will likely fallback to the CPU.
 *   **GVM (Optional):** Requires approximately **80 GB of VRAM** and utilizes massive Stable Video Diffusion models.
 *   **VideoMaMa (Optional):** Natively requires a massive chunk of VRAM as well (originally 80GB+). While the community has tweaked the architecture to run at less than 24GB, those extreme memory optimizations have not yet been fully implemented in this repository.
 
@@ -157,7 +158,33 @@ Auto mode prefers MLX on Apple Silicon when available.
    ```bash
    uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git
    ```
-2. Place converted weights in `CorridorKeyModule/checkpoints/`:
+2. Obtain the MLX weights (`.safetensors`) — pick **one** option:
+
+   **Option A — Download pre-converted weights (simplest):**
+   ```bash
+   # Download weights from GitHub Releases into a local cache directory
+   uv run python -m corridorkey_mlx weights download
+
+   # Print the cached path, then copy to the checkpoints folder
+   WEIGHTS=$(uv run python -m corridorkey_mlx weights download --print-path)
+   cp "$WEIGHTS" CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
+   ```
+
+   **Option B — Convert from an existing `.pth` checkpoint:**
+   ```bash
+   # Clone the MLX repo (contains the conversion script)
+   git clone https://github.com/nikopueringer/corridorkey-mlx.git
+   cd corridorkey-mlx
+   uv sync
+
+   # Convert (point --checkpoint at your CorridorKey.pth)
+   uv run python scripts/convert_weights.py \
+       --checkpoint ../CorridorKeyModule/checkpoints/CorridorKey_v1.0.pth \
+       --output ../CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
+   cd ..
+   ```
+
+   Either way the final file must be at:
    ```
    CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
    ```

@@ -304,6 +304,20 @@ class TestDespill:
         result_t = cu.despill(img_t, green_limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result_np, result_t.numpy(), atol=1e-5)
 
+    def test_green_below_limit_unchanged_numpy(self):
+        """spill_amount is clamped to zero when G < (R+B)/2 — pixel is returned unchanged.
+
+        When a pixel has less green than the luminance limit ((R+B)/2) it
+        carries no green spill.  The max(..., 0) clamp on spill_amount ensures
+        the pixel is left untouched.  Without that clamp despill would
+        *increase* green and *decrease* red/blue, corrupting non-spill regions.
+        """
+        # G=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
+        # spill_amount = max(0.3 - 0.7, 0) = 0  →  output equals input
+        img = _to_np([[0.8, 0.3, 0.6]])
+        result = cu.despill(img, green_limit_mode="average", strength=1.0)
+        np.testing.assert_allclose(result, img, atol=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # clean_matte

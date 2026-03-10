@@ -9,22 +9,13 @@ import pytest
 import torch
 
 
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line("markers", "gpu: requires CUDA or MPS GPU (skipped when unavailable)")
-    config.addinivalue_line("markers", "slow: long-running test")
-    config.addinivalue_line("markers", "mlx: requires Apple Silicon with MLX installed")
-
-
 def _has_gpu():
     """Check if any GPU backend (CUDA or MPS) is available."""
-    try:
-        if torch.cuda.is_available():
-            return True
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return True
-    except ImportError:
-        pass
+    if torch.cuda.is_available():
+        return True
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return True
+
     return False
 
 
@@ -146,8 +137,8 @@ def mock_greenformer():
     def fake_forward(x):
         b, c, h, w = x.shape
         return {
-            "alpha": torch.full((b, 1, h, w), 0.8),
-            "fg": torch.full((b, 3, h, w), 0.6),
+            "alpha": torch.full((b, 1, h, w), 0.8, device=x.device),
+            "fg": torch.full((b, 3, h, w), 0.6, device=x.device),
         }
 
     model = MagicMock()

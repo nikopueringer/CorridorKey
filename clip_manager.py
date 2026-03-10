@@ -16,6 +16,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
+from backend.frame_io import EXR_WRITE_FLAGS
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -690,27 +691,18 @@ def run_inference(
             pred_fg = res["fg"]  # sRGB
             pred_alpha = res["alpha"]  # Linear
 
-            # 4. Save (EXR DWAB Half-Float)
-
-            # Compression Params
-            exr_flags = [
-                cv2.IMWRITE_EXR_TYPE,
-                cv2.IMWRITE_EXR_TYPE_HALF,
-                # DWAB fails. PXR24 verified as smallest working format (46KB vs ZIP 56KB vs B44A 688KB)
-                cv2.IMWRITE_EXR_COMPRESSION,
-                cv2.IMWRITE_EXR_COMPRESSION_PXR24,
-            ]
+            # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
 
             # Save FG
             # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
             fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, exr_flags)
+            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
 
             # Save Matte
             if pred_alpha.ndim == 3:
                 pred_alpha = pred_alpha[:, :, 0]
             # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, exr_flags)
+            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
             # 5. Generate Reference Comp
             comp_srgb = res["comp"]
@@ -724,7 +716,7 @@ def run_inference(
                 proc_rgba = res["processed"]
                 # Convert to BGRA for OpenCV
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, exr_flags)
+                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
 
             if on_frame_complete:
                 on_frame_complete(i, num_frames)
