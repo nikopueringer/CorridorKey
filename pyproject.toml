@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov", "ruff"]
+dev = ["pytest", "pytest-cov", "ruff", "hypothesis"]
 docs = ["zensical>=0.0.24"]
 
 [project.scripts]
