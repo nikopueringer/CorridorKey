@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 
@@ -10,6 +11,8 @@ import torch.nn.functional as F
 
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
+
+logger = logging.getLogger(__name__)
 
 
 class CorridorKeyEngine:
@@ -27,7 +30,7 @@ class CorridorKeyEngine:
         self.model = self._load_model()
 
     def _load_model(self) -> GreenFormer:
-        print(f"Loading CorridorKey from {self.checkpoint_path}...")
+        logger.info("Loading CorridorKey from %s", self.checkpoint_path)
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
             encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
@@ -216,7 +219,7 @@ class CorridorKeyEngine:
 
         comp_srgb = cu.linear_to_srgb(comp_lin)
 
-        return {
+        return {  # type: ignore[return-value]  # cu.* returns ndarray|Tensor but inputs are always ndarray here
             "alpha": res_alpha,  # Linear, Raw Prediction
             "fg": res_fg,  # sRGB, Raw Prediction (Straight)
             "comp": comp_srgb,  # sRGB, Composite

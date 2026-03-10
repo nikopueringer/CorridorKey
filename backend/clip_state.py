@@ -86,6 +86,8 @@ class ClipAsset:
                 cap = cv2.VideoCapture(self.path)
                 if cap.isOpened():
                     self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    if self.frame_count == 0:
+                        logger.warning(f"Video reports 0 frames, file may be corrupted: {self.path}")
                 cap.release()
             except Exception as e:
                 logger.debug(f"Video frame count detection failed for {self.path}: {e}")
