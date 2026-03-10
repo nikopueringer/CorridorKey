@@ -725,6 +725,43 @@ def run_inference(
             input_cap.release()
         if alpha_cap:
             alpha_cap.release()
+
+        # 7. Stitch comp frames into MP4 (if input was video)
+        if clip.input_asset and clip.input_asset.type == "video":
+            try:
+                from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
+
+                if find_ffmpeg():
+                    # Get source fps
+                    try:
+                        video_info = probe_video(clip.input_asset.path)
+                        fps = video_info.get("fps", 24.0)
+                    except Exception:
+                        fps = 24.0
+
+                    comp_video_path = os.path.join(clip_out_root, f"{clip.name}_comp.mp4")
+
+                    # Detect frame pattern from saved files
+                    comp_files = sorted(f for f in os.listdir(comp_dir) if f.endswith(".png"))
+                    if comp_files:
+                        # Frames are named {input_stem}.png — e.g. 00000.png
+                        # Build ffmpeg pattern from first file
+                        first = comp_files[0]
+                        stem = os.path.splitext(first)[0]
+                        if stem.isdigit():
+                            pattern = f"%0{len(stem)}d.png"
+                        else:
+                            pattern = "frame_%06d.png"
+
+                        logger.info(f"Stitching comp video: {comp_dir} -> {comp_video_path} @ {fps} fps")
+                        stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
+                    else:
+                        logger.warning(f"No comp frames found in {comp_dir}, skipping video stitch.")
+                else:
+                    logger.info("ffmpeg not found — skipping comp video stitch.")
+            except Exception as e:
+                logger.warning(f"Comp video stitch failed (non-fatal): {e}")
+
         logger.info(f"Clip {clip.name} Complete.")
 
 
