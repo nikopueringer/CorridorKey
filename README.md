@@ -59,7 +59,9 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     ```
 3.  Install all dependencies (uv will download Python 3.10+ automatically if needed):
     ```bash
-    uv sync
+    uv sync                  # CPU/MPS (default — works everywhere)
+    uv sync --extra cuda     # CUDA GPU acceleration (Linux/Windows)
+    uv sync --extra mlx      # Apple Silicon MLX acceleration
     ```
 4.  **Download the Models:** You must manually download these open-source foundational models and place them in their exact respective folders:
     *   **CorridorKey v1.0 Model (~300MB):** [Download CorridorKey_v1.0.pth](https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth) 
@@ -209,7 +211,7 @@ Auto mode prefers MLX on Apple Silicon when available.
 
 1. Install the MLX backend:
    ```bash
-   uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git
+   uv sync --extra mlx
    ```
 2. Obtain the MLX weights (`.safetensors`) — pick **one** option:
 
@@ -250,7 +252,7 @@ MLX uses img_size=2048 by default (same as Torch).
 
 ### Troubleshooting
 - **"No .safetensors checkpoint found"** — place MLX weights in `CorridorKeyModule/checkpoints/`
-- **"corridorkey_mlx not installed"** — run `uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git`
+- **"corridorkey_mlx not installed"** — run `uv sync --extra mlx`
 - **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
 - **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
 
