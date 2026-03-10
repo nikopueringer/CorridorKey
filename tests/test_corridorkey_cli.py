@@ -35,15 +35,25 @@ from corridorkey_cli import interactive_wizard, main
 
 
 class TestInteractiveWizard:
+
+    def setup_mock_input(self, monkeypatch, inputs):
+        answers = iter(inputs)
+        def _mock(*args, **kwargs):
+            try:
+                return next(answers)
+            except StopIteration:
+                return "q"
+        monkeypatch.setattr("builtins.input", _mock)
+
     def test_path_resolution(self, monkeypatch, capsys):
         """
         Scenario: User provides a Windows path that must fallback to a mapped Linux mount.
         Expected: Wizard maps path via map_path and prints the Linux/Remote result.
         """
         monkeypatch.setattr("os.path.exists", lambda path: "/mnt/project" in path)
-        monkeypatch.setattr("corridorkey_cli.map_path", lambda _: "/mnt/project")
-        monkeypatch.setattr("os.listdir", lambda _: [])
-        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
+        monkeypatch.setattr("corridorkey_cli.map_path", lambda *args, **kwargs: "/mnt/project")
+        monkeypatch.setattr("os.listdir", lambda *args, **kwargs: [])
+        self.setup_mock_input(monkeypatch, ["q"])
 
         interactive_wizard("Z:/Work/Shot01")
 
@@ -55,8 +65,8 @@ class TestInteractiveWizard:
         Scenario: User provides a path that exists neither on Windows nor the mapped Linux mount.
         Expected: Wizard prints an [ERROR] message and exits the function immediately.
         """
-        monkeypatch.setattr("os.path.exists", lambda _: False)
-        monkeypatch.setattr("corridorkey_cli.map_path", lambda _: "/invalid/path")
+        monkeypatch.setattr("os.path.exists", lambda *args, **kwargs: False)
+        monkeypatch.setattr("corridorkey_cli.map_path", lambda *args, **kwargs: "/invalid/path")
 
         interactive_wizard("Z:/Missing/Path")
 
@@ -70,7 +80,7 @@ class TestInteractiveWizard:
         """
         shot_path = tmp_path / "shot_01"
         (shot_path / "Input").mkdir(parents=True)
-        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
+        self.setup_mock_input(monkeypatch, ["q"])
 
         interactive_wizard(str(shot_path))
 
@@ -88,7 +98,7 @@ class TestInteractiveWizard:
             (shot_dir / "Input" / "video.mp4").touch()
 
         (tmp_path / "Output").mkdir()
-        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
+        self.setup_mock_input(monkeypatch, ["q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -106,7 +116,7 @@ class TestInteractiveWizard:
         (tmp_path / "notes.txt").touch()
         (tmp_path / ".DS_Store").touch()
         (tmp_path / "Output").mkdir()
-        monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "q")
+        self.setup_mock_input(monkeypatch, ["q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -126,9 +136,9 @@ class TestInteractiveWizard:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         out_vid.write(frame)
         out_vid.release()
+        
+        self.setup_mock_input(monkeypatch, ["y","q"])
 
-        answers = iter(["y", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
         interactive_wizard(str(tmp_path))
 
         expected_folder = tmp_path / "clip_01"
@@ -150,8 +160,7 @@ class TestInteractiveWizard:
         (tmp_path / "clip.mp4").touch()
         (tmp_path / "clip").mkdir()
 
-        answers = iter(["y", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["y","q"])
 
         with caplog.at_level(logging.WARNING):
             interactive_wizard(str(tmp_path))
@@ -172,8 +181,7 @@ class TestInteractiveWizard:
 
         monkeypatch.setattr("os.makedirs", mock_explode)
 
-        answers = iter(["y", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["y","q"])
 
         with caplog.at_level(logging.ERROR):
             interactive_wizard(str(tmp_path))
@@ -189,8 +197,7 @@ class TestInteractiveWizard:
         for i in range(11):
             (tmp_path / f"shot_{i}").mkdir()
 
-        answers = iter(["n", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n","q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -222,8 +229,7 @@ class TestInteractiveWizard:
         raw_dir = tmp_path / "shot_raw"
         create_valid_input(raw_dir)
 
-        answers = iter(["n", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n","q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -243,10 +249,9 @@ class TestInteractiveWizard:
         (shot_dir / "Input").mkdir()
         (shot_dir / "videomamamaskhint.mp4").touch()
 
-        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda _: None)
+        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda *args, **kwargs: None)
 
-        answers = iter(["n", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n","q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -269,8 +274,7 @@ class TestInteractiveWizard:
             print("MOCK: GVM Pipeline Triggered")
 
         monkeypatch.setattr("corridorkey_cli.generate_alphas", mock_generate_alphas)
-        answers = iter(["n", "g", "y", "", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "g", "y", "", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -285,7 +289,7 @@ class TestInteractiveWizard:
         Expected: Wizard skips generate_alphas and returns to the main action loop.
         """
         (tmp_path / "raw_shot").mkdir()
-        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda _: None)
+        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda *args, **kwargs: None)
         call_tracker = {"called": False}
 
         def mock_gvm(clips, device=None):
@@ -293,8 +297,7 @@ class TestInteractiveWizard:
 
         monkeypatch.setattr("corridorkey_cli.generate_alphas", mock_gvm)
 
-        answers = iter(["n", "g", "n", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "g", "n", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -316,9 +319,8 @@ class TestInteractiveWizard:
             print("MOCK: VideoMaMa Triggered")
 
         monkeypatch.setattr("corridorkey_cli.run_videomama", mock_videomama)
-
-        answers = iter(["n", "v", "", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        
+        self.setup_mock_input(monkeypatch, ["n", "v", "", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -349,8 +351,8 @@ class TestInteractiveWizard:
         captured_args = []
         monkeypatch.setattr("corridorkey_cli.run_inference", lambda clips, device=None: captured_args.append(clips))
 
-        answers = iter(["n", "i", "", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "i", "", "q"])
+
 
         interactive_wizard(str(tmp_path))
 
@@ -378,8 +380,7 @@ class TestInteractiveWizard:
 
         monkeypatch.setattr("corridorkey_cli.run_inference", mock_crash)
 
-        answers = iter(["n", "i", "", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "i", "", "q"])
 
         with caplog.at_level(logging.ERROR):
             interactive_wizard(str(tmp_path))
@@ -392,10 +393,9 @@ class TestInteractiveWizard:
         Expected: Wizard prints 'Invalid selection.' and continues the loop (Lines 283-284).
         """
         (tmp_path / "shot").mkdir()
-        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda _: None)
+        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda *args, **kwargs: None)
 
-        answers = iter(["n", "z", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "a", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -409,10 +409,9 @@ class TestInteractiveWizard:
         """
         shot_dir = tmp_path / "shot_a"
         (shot_dir / "Input").mkdir(parents=True)
-        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda _: None)
+        monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda *args, **kwargs: None)
 
-        answers = iter(["n", "r", "q"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
+        self.setup_mock_input(monkeypatch, ["n", "r", "q"])
 
         interactive_wizard(str(tmp_path))
 
