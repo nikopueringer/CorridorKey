@@ -157,7 +157,33 @@ Auto mode prefers MLX on Apple Silicon when available.
    ```bash
    uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git
    ```
-2. Place converted weights in `CorridorKeyModule/checkpoints/`:
+2. Obtain the MLX weights (`.safetensors`) — pick **one** option:
+
+   **Option A — Download pre-converted weights (simplest):**
+   ```bash
+   # Download weights from GitHub Releases into a local cache directory
+   uv run python -m corridorkey_mlx weights download
+
+   # Print the cached path, then copy to the checkpoints folder
+   WEIGHTS=$(uv run python -m corridorkey_mlx weights download --print-path)
+   cp "$WEIGHTS" CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
+   ```
+
+   **Option B — Convert from an existing `.pth` checkpoint:**
+   ```bash
+   # Clone the MLX repo (contains the conversion script)
+   git clone https://github.com/nikopueringer/corridorkey-mlx.git
+   cd corridorkey-mlx
+   uv sync
+
+   # Convert (point --checkpoint at your CorridorKey.pth)
+   uv run python scripts/convert_weights.py \
+       --checkpoint ../CorridorKeyModule/checkpoints/CorridorKey_v1.0.pth \
+       --output ../CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
+   cd ..
+   ```
+
+   Either way the final file must be at:
    ```
    CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
    ```
