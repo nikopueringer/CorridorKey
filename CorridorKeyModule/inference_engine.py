@@ -230,14 +230,15 @@ class CorridorKeyEngine:
         if res_alpha.ndim == 2:
             res_alpha = res_alpha[:, :, np.newaxis]
 
-        # --- ALPHA-GUIDED FG BLENDING ---
-        # In solid subject regions (alpha ≈ 1.0), use the original image with
-        # post-process despill — this preserves full input detail and avoids
-        # any tiling artifacts or resolution loss from the model's FG output.
-        # In semi-transparent edge regions (hair, motion blur, translucent
-        # fabric), use the model's learned FG reconstruction — this is where
-        # the neural network's color correction actually matters because green
-        # screen is mixing with subject at a sub-pixel level.
+        # --- ALPHA-GUIDED FG BLENDING (with green spill detection) ---
+        # Use TWO signals to decide original vs model FG:
+        #   1. Alpha matte — semi-transparent edges need the model's FG
+        #   2. Green spill — pixels with green bounce need the model's FG
+        #      even if alpha is high (solid subject with green contamination)
+        #
+        # Result: solid interior WITHOUT green spill → original pixels (full detail)
+        #         solid interior WITH green spill    → model's learned reconstruction
+        #         semi-transparent edges             → model's learned reconstruction
         if self.tiler is not None:
             # Prepare the original image in sRGB for blending
             if input_is_linear:
@@ -248,13 +249,28 @@ class CorridorKeyEngine:
             # Despill the original — simple math, no neural network needed
             orig_despilled = cu.despill(orig_srgb, green_limit_mode="average", strength=despill_strength)
 
-            # Smooth blend ramp: alpha 0.85 → 0.95 maps to t 0.0 → 1.0
-            # t=1 means "use original", t=0 means "use model FG"
+            # Signal 1: Alpha-based blend (edges vs solid)
+            # t_alpha=1 means "solid subject", t_alpha=0 means "edge/transparent"
             EDGE_LOW = 0.85
             EDGE_HIGH = 0.95
-            t = np.clip((res_alpha - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW), 0.0, 1.0)
+            t_alpha = np.clip((res_alpha - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW), 0.0, 1.0)
 
-            # Blend: solid interior gets original, edges get model reconstruction
+            # Signal 2: Green spill detection on the original image
+            # spill = how much green exceeds the average of red and blue
+            r, g, b = orig_srgb[..., 0], orig_srgb[..., 1], orig_srgb[..., 2]
+            spill = np.maximum(g - (r + b) / 2.0, 0.0)
+
+            # Normalize spill to 0-1 range; SPILL_THRESHOLD is the level
+            # above which we fully trust the model's FG reconstruction
+            SPILL_THRESHOLD = 0.05
+            t_spill = 1.0 - np.clip(spill / SPILL_THRESHOLD, 0.0, 1.0)
+            if t_spill.ndim == 2:
+                t_spill = t_spill[..., np.newaxis]
+
+            # Combined: use original only where alpha is solid AND spill is low
+            t = t_alpha * t_spill
+
+            # Blend: clean interior gets original, spill/edge regions get model FG
             res_fg = res_fg * (1.0 - t) + orig_despilled * t
 
         # --- ADVANCED COMPOSITING ---
