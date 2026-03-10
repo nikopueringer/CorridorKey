@@ -88,6 +88,16 @@ omit = [
     "test_vram.py",               # manual GPU smoke test, not part of the pytest suite
 ]
 
+[tool.uv]
+# Guard against transitive deps (diffusers, imageio, PIMS) silently pulling in
+# opencv-python-headless, which conflicts with opencv-python at the file level
+# (both install into the same cv2/ directory). If any future dep requests
+# opencv-python-headless, uv resolution will fail explicitly rather than
+# corrupting the environment.
+constraint-dependencies = [
+    "opencv-python-headless==99999",
+]
+
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu128" # CUDA 12.6 doesn't support RTX 5000 Series

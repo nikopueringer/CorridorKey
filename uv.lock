@@ -10,6 +10,9 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform == 'darwin'",
 ]
 
+[manifest]
+constraints = [{ name = "opencv-python-headless", specifier = "==99999" }]
+
 [[package]]
 name = "accelerate"
 version = "1.12.0"
