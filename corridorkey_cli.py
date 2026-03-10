@@ -34,14 +34,14 @@ from clip_manager import (
     ClipEntry,
     InferenceSettings,
     generate_alphas,
+    get_birefnet_usage_options,
     is_video_file,
     map_path,
     organize_target,
+    run_birefnet,
     run_inference,
     run_videomama,
     scan_clips,
-    get_birefnet_usage_options,
-    run_birefnet,
 )
 from device_utils import resolve_device
 

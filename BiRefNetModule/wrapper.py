@@ -1,15 +1,14 @@
 import logging
-from typing import Dict, List, Any, Tuple
-from pathlib import Path
 import os
-import requests
-from io import BytesIO
+from pathlib import Path
+from typing import Tuple
+
 import cv2
 import numpy as np
-from PIL import Image
 import torch
-from torchvision import transforms
 from huggingface_hub import snapshot_download
+from PIL import Image
+from torchvision import transforms
 from transformers import AutoModelForImageSegmentation
 
 torch.set_float32_matmul_precision(["high", "highest"][0])
