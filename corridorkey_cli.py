@@ -24,6 +24,7 @@ from typing import Annotated, Optional
 
 import typer
 from rich.console import Console
+from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
@@ -67,7 +68,7 @@ def _configure_environment() -> None:
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True)],
+        handlers=[RichHandler(console=console, rich_tracebacks=True, markup=False, highlighter=NullHighlighter())],
     )
 
 
