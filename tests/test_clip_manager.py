@@ -9,7 +9,9 @@ No GPU, model weights, or interactive input required.
 
 from __future__ import annotations
 
+import logging
 import os
+from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
@@ -18,10 +20,13 @@ import pytest
 from clip_manager import (
     ClipAsset,
     ClipEntry,
+    generate_alphas,
     is_image_file,
     is_video_file,
     map_path,
+    organize_clips,
     organize_target,
+    scan_clips,
 )
 
 # ---------------------------------------------------------------------------
@@ -290,3 +295,191 @@ class TestOrganizeTarget:
         assert len(input_files) == 2
         # Original loose files should be gone
         assert not (shot / "frame_0000.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# generate_alphas
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateAlphas:
+    """generate_alphas() runs GVM on clips that are missing an AlphaHint."""
+
+    def test_no_op_when_all_clips_have_alpha(self, tmp_clip_dir):
+        """All clips already have alpha → GVM is never invoked."""
+        entry = ClipEntry("shot_a", str(tmp_clip_dir / "shot_a"))
+        entry.find_assets()
+        assert entry.alpha_asset is not None
+
+        with patch("clip_manager.get_gvm_processor") as mock_gvm:
+            generate_alphas([entry])
+
+        mock_gvm.assert_not_called()
+
+    def test_calls_process_sequence_for_missing_alpha(self, tmp_clip_dir):
+        """Clips with alpha_asset=None trigger a GVM process_sequence call."""
+        entry = ClipEntry("shot_b", str(tmp_clip_dir / "shot_b"))
+        entry.find_assets()
+        assert entry.alpha_asset is None
+
+        mock_proc = MagicMock()
+        mock_proc.process_sequence.return_value = None
+
+        with patch("clip_manager.get_gvm_processor", return_value=mock_proc):
+            generate_alphas([entry])
+
+        mock_proc.process_sequence.assert_called_once()
+
+    def test_import_error_is_logged_not_raised(self, tmp_clip_dir, caplog):
+        """ImportError from get_gvm_processor must not propagate — log only."""
+        entry = ClipEntry("shot_b", str(tmp_clip_dir / "shot_b"))
+        entry.find_assets()
+
+        with patch("clip_manager.get_gvm_processor", side_effect=ImportError("GVM not installed")):
+            with caplog.at_level(logging.ERROR, logger="clip_manager"):
+                generate_alphas([entry])  # must not raise
+
+        assert "GVM" in caplog.text
+
+    def test_renames_output_to_match_input_stems(self, tmp_clip_dir):
+        """Generated PNGs are renamed to {input_stem}_alphaHint_{i:04d}.png."""
+        entry = ClipEntry("shot_b", str(tmp_clip_dir / "shot_b"))
+        entry.find_assets()
+        # shot_b has one input frame: frame_0000.png → expected stem: frame_0000
+
+        def fake_process_sequence(*args, **kwargs):
+            # Simulate GVM writing a mask PNG with an arbitrary name
+            out_dir = kwargs["direct_output_dir"]
+            open(os.path.join(out_dir, "gvm_0000.png"), "wb").close()
+
+        mock_proc = MagicMock()
+        mock_proc.process_sequence.side_effect = fake_process_sequence
+
+        with patch("clip_manager.get_gvm_processor", return_value=mock_proc):
+            generate_alphas([entry])
+
+        alpha_dir = str(tmp_clip_dir / "shot_b" / "AlphaHint")
+        files = sorted(os.listdir(alpha_dir))
+        assert files == ["frame_0000_alphaHint_0000.png"]
+
+
+# ---------------------------------------------------------------------------
+# organize_clips
+# ---------------------------------------------------------------------------
+
+
+class TestOrganizeClips:
+    """organize_clips() structures a batch directory of shots."""
+
+    def test_missing_directory_returns_cleanly(self, tmp_path, caplog):
+        """Non-existent clips_dir logs a warning and does not raise."""
+        missing = str(tmp_path / "does_not_exist")
+        with caplog.at_level(logging.WARNING, logger="clip_manager"):
+            organize_clips(missing)
+        assert "Clips directory" in caplog.text
+
+    def test_loose_video_moved_to_named_subdir(self, tmp_path):
+        """A loose .mp4 in the clips dir is moved to {name}/Input.mp4."""
+        (tmp_path / "my_shot.mp4").write_bytes(b"\x00" * 16)
+
+        organize_clips(str(tmp_path))
+
+        assert (tmp_path / "my_shot").is_dir()
+        assert (tmp_path / "my_shot" / "Input.mp4").is_file()
+        assert not (tmp_path / "my_shot.mp4").exists()
+
+    def test_hint_dirs_created_for_organized_video(self, tmp_path):
+        """AlphaHint and VideoMamaMaskHint dirs are created alongside a moved video."""
+        (tmp_path / "clip_a.mp4").write_bytes(b"\x00")
+
+        organize_clips(str(tmp_path))
+
+        assert (tmp_path / "clip_a" / "AlphaHint").is_dir()
+        assert (tmp_path / "clip_a" / "VideoMamaMaskHint").is_dir()
+
+    def test_ignored_clips_and_output_dirs_skipped(self, tmp_path):
+        """IgnoredClips and Output subdirs are not passed to organize_target."""
+        (tmp_path / "IgnoredClips").mkdir()
+        (tmp_path / "Output").mkdir()
+
+        with patch("clip_manager.organize_target") as mock_ot:
+            organize_clips(str(tmp_path))
+            called_paths = [call.args[0] for call in mock_ot.call_args_list]
+
+        assert not any("IgnoredClips" in p for p in called_paths)
+        assert not any("Output" in p for p in called_paths)
+
+    def test_calls_organize_target_on_shot_subdirs(self, tmp_clip_dir):
+        """Existing shot subdirs are each passed through organize_target."""
+        with patch("clip_manager.organize_target") as mock_ot:
+            organize_clips(str(tmp_clip_dir))
+            called_paths = [call.args[0] for call in mock_ot.call_args_list]
+
+        shot_paths = {str(tmp_clip_dir / "shot_a"), str(tmp_clip_dir / "shot_b")}
+        assert shot_paths.issubset(set(called_paths))
+
+
+# ---------------------------------------------------------------------------
+# scan_clips
+# ---------------------------------------------------------------------------
+
+
+class TestScanClips:
+    """scan_clips() discovers clip entries from CLIPS_DIR (monkeypatched)."""
+
+    def test_creates_clips_dir_and_returns_empty_if_missing(self, tmp_path, monkeypatch):
+        """A missing CLIPS_DIR is created automatically and [] is returned."""
+        import clip_manager
+
+        missing = str(tmp_path / "ClipsForInference")
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", missing)
+
+        result = scan_clips()
+
+        assert result == []
+        assert os.path.isdir(missing)
+
+    def test_returns_clips_with_valid_input(self, tmp_clip_dir, monkeypatch):
+        """Clips whose Input directories exist are included in the result."""
+        import clip_manager
+
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert "shot_a" in names
+        assert "shot_b" in names  # valid input even without alpha
+
+    def test_excludes_frame_count_mismatch(self, tmp_clip_dir, monkeypatch):
+        """A clip with mismatched Input/AlphaHint frame counts is excluded."""
+        import clip_manager
+
+        mismatch = tmp_clip_dir / "mismatch_shot"
+        (mismatch / "Input").mkdir(parents=True)
+        (mismatch / "AlphaHint").mkdir()
+        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
+        tiny_mask = np.zeros((4, 4), dtype=np.uint8)
+        for i in range(3):
+            cv2.imwrite(str(mismatch / "Input" / f"frame_{i:04d}.png"), tiny)
+        cv2.imwrite(str(mismatch / "AlphaHint" / "frame_0000.png"), tiny_mask)
+
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert "mismatch_shot" not in names
+        assert "shot_a" in names  # valid shot still found
+
+    def test_skips_hidden_and_underscore_dirs(self, tmp_clip_dir, monkeypatch):
+        """Directories starting with '.' or '_' are never returned."""
+        import clip_manager
+
+        (tmp_clip_dir / ".hidden").mkdir()
+        (tmp_clip_dir / "_temp").mkdir()
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert ".hidden" not in names
+        assert "_temp" not in names
