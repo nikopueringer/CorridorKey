@@ -240,7 +240,7 @@ class CorridorKeyEngine:
             guide_img = cu.linear_to_srgb(image)
         else:
             guide_img = image
-        res_alpha = cu.guided_filter_alpha(guide_img, res_alpha, radius=8, eps=1e-3)
+        res_alpha = cu.guided_filter_alpha(guide_img, res_alpha, radius=32, eps=1e-4)
 
         # A. Clean Matte (Auto-Despeckle)
         if auto_despeckle:
