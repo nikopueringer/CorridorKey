@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Ensure script stops on error
 set -e
@@ -12,7 +12,7 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 echo "Starting CorridorKey Inference..."
 echo "Scanning ClipsForInference for Ready Clips (Input + Alpha)..."
 
-# Run Manager (uv handles the virtual environment automatically)
-uv run python "${SCRIPT_DIR}/corridorkey_cli.py" --action run_inference
+# Run via uv entry point (handles the virtual environment automatically)
+uv run corridorkey run-inference
 
 echo "Inference Complete."

@@ -26,8 +26,8 @@ if "%WIN_PATH:~-1%"=="\" set "WIN_PATH=%WIN_PATH:~0,-1%"
 echo Starting Corridor Key locally...
 echo Target: "%WIN_PATH%"
 
-REM Run the python script via uv (handles the virtual environment automatically)
+REM Run via uv entry point (handles the virtual environment automatically)
 cd /d "%SCRIPT_DIR%"
-uv run python "%LOCAL_SCRIPT%" --action wizard --win_path "%WIN_PATH%"
+uv run corridorkey wizard "%WIN_PATH%"
 
 pause

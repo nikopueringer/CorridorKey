@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Ensure script stops on error
 set -e
@@ -12,7 +12,7 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 echo "Starting Coarse Alpha Generation..."
 echo "Scanning ClipsForInference..."
 
-# Run Manager (uv handles the virtual environment automatically)
-uv run python "${SCRIPT_DIR}/corridorkey_cli.py" --action generate_alphas
+# Run via uv entry point (handles the virtual environment automatically)
+uv run corridorkey generate-alphas
 
 echo "Done."
