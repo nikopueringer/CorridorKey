@@ -626,7 +626,7 @@ class TestVideoMaMa:
         """
         caplog.set_level("ERROR")
         path = stage_shot("shot_fail")
-        
+
         input_dir = path / "Input"
         mask_dir = path / "VideoMamaMaskHint"
         input_dir.mkdir(parents=True, exist_ok=True)
@@ -645,6 +645,7 @@ class TestVideoMaMa:
 
         assert "VideoMaMa failed" in caplog.text
         assert "GPU OOM" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # organize_target
