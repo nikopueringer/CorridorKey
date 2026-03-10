@@ -35,14 +35,15 @@ from corridorkey_cli import interactive_wizard, main
 
 
 class TestInteractiveWizard:
-
     def setup_mock_input(self, monkeypatch, inputs):
         answers = iter(inputs)
+
         def _mock(*args, **kwargs):
             try:
                 return next(answers)
             except StopIteration:
                 return "q"
+
         monkeypatch.setattr("builtins.input", _mock)
 
     def test_path_resolution(self, monkeypatch, capsys):
@@ -136,8 +137,8 @@ class TestInteractiveWizard:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         out_vid.write(frame)
         out_vid.release()
-        
-        self.setup_mock_input(monkeypatch, ["y","q"])
+
+        self.setup_mock_input(monkeypatch, ["y", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -160,7 +161,7 @@ class TestInteractiveWizard:
         (tmp_path / "clip.mp4").touch()
         (tmp_path / "clip").mkdir()
 
-        self.setup_mock_input(monkeypatch, ["y","q"])
+        self.setup_mock_input(monkeypatch, ["y", "q"])
 
         with caplog.at_level(logging.WARNING):
             interactive_wizard(str(tmp_path))
@@ -181,7 +182,7 @@ class TestInteractiveWizard:
 
         monkeypatch.setattr("os.makedirs", mock_explode)
 
-        self.setup_mock_input(monkeypatch, ["y","q"])
+        self.setup_mock_input(monkeypatch, ["y", "q"])
 
         with caplog.at_level(logging.ERROR):
             interactive_wizard(str(tmp_path))
@@ -197,7 +198,7 @@ class TestInteractiveWizard:
         for i in range(11):
             (tmp_path / f"shot_{i}").mkdir()
 
-        self.setup_mock_input(monkeypatch, ["n","q"])
+        self.setup_mock_input(monkeypatch, ["n", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -229,7 +230,7 @@ class TestInteractiveWizard:
         raw_dir = tmp_path / "shot_raw"
         create_valid_input(raw_dir)
 
-        self.setup_mock_input(monkeypatch, ["n","q"])
+        self.setup_mock_input(monkeypatch, ["n", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -251,7 +252,7 @@ class TestInteractiveWizard:
 
         monkeypatch.setattr("clip_manager.ClipEntry.find_assets", lambda *args, **kwargs: None)
 
-        self.setup_mock_input(monkeypatch, ["n","q"])
+        self.setup_mock_input(monkeypatch, ["n", "q"])
 
         interactive_wizard(str(tmp_path))
 
@@ -319,7 +320,7 @@ class TestInteractiveWizard:
             print("MOCK: VideoMaMa Triggered")
 
         monkeypatch.setattr("corridorkey_cli.run_videomama", mock_videomama)
-        
+
         self.setup_mock_input(monkeypatch, ["n", "v", "", "q"])
 
         interactive_wizard(str(tmp_path))
@@ -352,7 +353,6 @@ class TestInteractiveWizard:
         monkeypatch.setattr("corridorkey_cli.run_inference", lambda clips, device=None: captured_args.append(clips))
 
         self.setup_mock_input(monkeypatch, ["n", "i", "", "q"])
-
 
         interactive_wizard(str(tmp_path))
 
