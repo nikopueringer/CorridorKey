@@ -165,16 +165,20 @@ def mock_greenformer():
     model.use_refiner = False
     return model
 
+
 # ---------------------------------------------------------------------------
 # VideoMaMa Backend & Staging Fixtures (used by clip_manager tests)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def silent_backend_injection():
     """Mock the inference module globally to prevent real AI loading."""
     mock_mod = ModuleType("VideoMaMaInferenceModule.inference")
 
-    def fake_load(device=None): return "fake_handle"
+    def fake_load(device=None):
+        return "fake_handle"
+
     def fake_run(pipeline, input_frames, mask_frames, **kwargs):
         yield [np.full_like(f, 255) for f in input_frames]
 
@@ -189,6 +193,7 @@ def silent_backend_injection():
     sys.modules.pop("VideoMaMaInferenceModule.inference", None)
     sys.modules.pop("VideoMaMaInferenceModule", None)
 
+
 @pytest.fixture
 def stage_shot(tmp_path):
     """
@@ -196,6 +201,7 @@ def stage_shot(tmp_path):
     Ensures ClipEntry finds its folders regardless of casing/regex.
     """
     import cv2
+
     def _stage(shot_name, create_alpha=False):
         shot_path = tmp_path / shot_name
         shot_path.mkdir(parents=True, exist_ok=True)
@@ -210,17 +216,18 @@ def stage_shot(tmp_path):
         for mask_variant in ["VideoMamaMaskHint", "videomamamaskhint"]:
             mask_dir = shot_path / mask_variant
             mask_dir.mkdir(exist_ok=True)
-            cv2.imwrite(str(mask_dir / "mask_0000.png"), np.zeros((4,4), np.uint8))
-            cv2.imwrite(str(mask_dir / "mask_0001.png"), np.zeros((4,4), np.uint8))
+            cv2.imwrite(str(mask_dir / "mask_0000.png"), np.zeros((4, 4), np.uint8))
+            cv2.imwrite(str(mask_dir / "mask_0001.png"), np.zeros((4, 4), np.uint8))
 
         if create_alpha:
             a_dir = shot_path / "AlphaHint"
             a_dir.mkdir(exist_ok=True)
-            cv2.imwrite(str(a_dir / "frame_0000.png"), np.zeros((4,4), np.uint8))
+            cv2.imwrite(str(a_dir / "frame_0000.png"), np.zeros((4, 4), np.uint8))
 
         return shot_path
 
     return _stage
+
 
 @pytest.fixture(autouse=True)
 def sandbox_clip_manager(tmp_path):
@@ -230,7 +237,7 @@ def sandbox_clip_manager(tmp_path):
     """
     import clip_manager
 
-    sandbox = tmp_path / "Clips"
+    sandbox = tmp_path.parent / "clip_sandbox_root" / "Clips"
     sandbox.mkdir(parents=True, exist_ok=True)
 
     orig_clips_dir = clip_manager.CLIPS_DIR

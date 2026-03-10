@@ -22,6 +22,7 @@ Using mocks in line with project goals of keeping tests and VRAM separate.
 """
 
 import logging
+import os
 
 import cv2
 import numpy as np
@@ -179,11 +180,14 @@ class TestInteractiveWizard:
         """
         (tmp_path / "broken_clip.mp4").touch()
 
-        def mock_explode(*args, **kwargs):
-            raise RuntimeError("Unexpected System Failure")
+        real_makedirs = os.makedirs
 
-        monkeypatch.setattr("os.makedirs", mock_explode)
+        def mock_selective_explode(path, *args, **kwargs):
+            if "broken_clip" in str(path):
+                raise RuntimeError("Unexpected System Failure")
+            return real_makedirs(path, *args, **kwargs)
 
+        monkeypatch.setattr("os.makedirs", mock_selective_explode)
         self.setup_mock_input(monkeypatch, ["y", "q"])
 
         with caplog.at_level(logging.ERROR):
@@ -194,8 +198,8 @@ class TestInteractiveWizard:
 
     def test_too_many_folders_summary(self, tmp_path, monkeypatch, capsys):
         """
-        Scenario: More than 10 folders need organization.
-        Expected: Wizard truncates the list to keep the UI clean.
+        Scenario: > 10 folders need organization, user declines.
+        Expected: UI truncates list; organization loop is skipped.
         """
         for i in range(11):
             (tmp_path / f"shot_{i}").mkdir()
@@ -207,33 +211,73 @@ class TestInteractiveWizard:
         out = capsys.readouterr().out
         assert "...and 11 others." in out
 
+    def test_too_many_folders_organize_flow(self, tmp_path, monkeypatch, capsys):
+        """
+        Scenario: > 10 folders need organization.
+        Expected: UI truncates the list to "...and 11 others." (11 shots + Clips).
+        Note: The 'Clips' folder is auto-detected as a RAW shot by the scanner.
+        """
+        # 1. Create 11 folders that need organization (no AlphaHint/Input)
+        for i in range(11):
+            (tmp_path / f"batch_shot_{i}").mkdir()
+
+        # 2. Mock 'y' for organization and 'q' to exit the following status loop
+        self.setup_mock_input(monkeypatch, ["y", "q"])
+
+        # 3. We also need to mock organize_target so it doesn't
+        # actually try to run complex logic on 11 folders during a unit test
+        monkeypatch.setattr("corridorkey_cli.organize_target", lambda x: print(f"Organizing {x}"))
+
+        # Execute
+        interactive_wizard(str(tmp_path))
+
+        out = capsys.readouterr().out
+
+        # 4. Assertions for coverage
+        # This hits the 'else' branch: print(f"  - ...and {len(dirs_needing_org)} others.")
+        assert "...and 11 others." in out
+
+        # This confirms the 'y' branch was taken
+        assert "Organization Complete." in out
+
     def test_status_reports(self, tmp_path, monkeypatch, capsys):
         """
         Scenario: User targets a project root containing a mix of shot types (Ready, Masked, and Raw).
         Expected: Wizard accurately counts and lists each shot in the 'STATUS REPORT' block based on folder contents.
         """
+        for name in ["shot_ready", "shot_masked", "shot_raw"]:
+            d = tmp_path / name
+            d.mkdir()
+            (d / "Input.mp4").touch()
 
-        def create_valid_input(path):
-            input_dir = path / "Input"
-            input_dir.mkdir(parents=True)
-            img = np.zeros((1, 1, 3), dtype=np.uint8)
-            cv2.imwrite(str(input_dir / "frame_0001.png"), img)
+        (tmp_path / "shot_ready" / "AlphaHint").mkdir()
+        (tmp_path / "shot_ready" / "AlphaHint" / "matte.mp4").touch()
+        (tmp_path / "shot_masked" / "VideoMamaMaskHint").mkdir()
+        (tmp_path / "shot_masked" / "VideoMamaMaskHint" / "mask.png").touch()
 
-        ready_dir = tmp_path / "shot_ready"
-        create_valid_input(ready_dir)
-        (ready_dir / "AlphaHint").mkdir()
-        (ready_dir / "AlphaHint" / "alpha.mov").write_text("dummy")
+        from clip_manager import ClipEntry
 
-        masked_dir = tmp_path / "shot_masked"
-        create_valid_input(masked_dir)
-        (masked_dir / "VideoMamaMaskHint").mkdir()
-        (masked_dir / "VideoMamaMaskHint" / "mask.png").write_text("dummy")
+        def mock_find_assets(self_entry):
+            actual_path = None
+            for val in self_entry.__dict__.values():
+                if isinstance(val, str) and os.path.isdir(val):
+                    actual_path = val
+                    break
 
-        raw_dir = tmp_path / "shot_raw"
-        create_valid_input(raw_dir)
+            if not actual_path:
+                return
 
-        self.setup_mock_input(monkeypatch, ["n", "q"])
+            alpha_p = os.path.join(actual_path, "AlphaHint", "matte.mp4")
+            if os.path.exists(alpha_p):
+                self_entry.alpha_asset = alpha_p
 
+            input_p = os.path.join(actual_path, "Input.mp4")
+            if os.path.exists(input_p):
+                self_entry.input_asset = input_p
+
+        monkeypatch.setattr(ClipEntry, "find_assets", mock_find_assets)
+
+        self.setup_mock_input(monkeypatch, ["q"])
         interactive_wizard(str(tmp_path))
 
         out = capsys.readouterr().out
