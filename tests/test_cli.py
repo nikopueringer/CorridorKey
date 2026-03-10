@@ -102,7 +102,7 @@ class TestCallbackProtocol:
     def test_run_inference_passes_callbacks(self, mock_prompt, mock_run, mock_scan):
         """run-inference subcommand passes on_clip_start and on_frame_complete."""
         mock_scan.return_value = []
-        mock_prompt.return_value = InferenceSettings()
+        mock_prompt.return_value = (InferenceSettings(), 0)
 
         result = runner.invoke(app, ["run-inference"])
         assert result.exit_code == 0

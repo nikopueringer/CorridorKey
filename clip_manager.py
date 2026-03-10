@@ -382,12 +382,14 @@ def run_videomama(
         input_frames = []
         if clip.input_asset.type == "video":
             cap = cv2.VideoCapture(clip.input_asset.path)
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                input_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            cap.release()
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    input_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            finally:
+                cap.release()
         else:
             files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
             for f in files:
@@ -444,16 +446,18 @@ def run_videomama(
         elif os.path.isfile(mask_hint_path):
             # Handle Video File
             cap = cv2.VideoCapture(mask_hint_path)
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                # Convert to Grayscale
-                m = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                # Force Binary Thresholding
-                _, m = cv2.threshold(m, 10, 255, cv2.THRESH_BINARY)
-                mask_frames.append(m)
-            cap.release()
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    # Convert to Grayscale
+                    m = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # Force Binary Thresholding
+                    _, m = cv2.threshold(m, 10, 255, cv2.THRESH_BINARY)
+                    mask_frames.append(m)
+            finally:
+                cap.release()
 
         # Validate Lengths
         num_frames = min(len(input_frames), len(mask_frames))
@@ -607,124 +611,128 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
-        for i in range(num_frames):
-            # 1. Read Input
-            img_srgb = None
-            input_stem = f"{i:05d}"
-
-            # Use the settings-defined gamma
-            input_is_linear = settings.input_is_linear
-
-            if input_cap:
-                ret, frame = input_cap.read()
-                if not ret:
-                    break
-                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img_srgb = img_rgb.astype(np.float32) / 255.0
+        try:
+            for i in range(num_frames):
+                # 1. Read Input
+                img_srgb = None
                 input_stem = f"{i:05d}"
-            else:
-                fpath = os.path.join(clip.input_asset.path, input_files[i])
-                input_stem = os.path.splitext(input_files[i])[0]
 
-                is_exr = fpath.lower().endswith(".exr")
-                if is_exr:
-                    img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
-                    if img_linear is None:
-                        continue
-                    img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
-                    # Support overriding EXR behavior if user picked 's'
-                    img_srgb = np.maximum(img_linear_rgb, 0.0)
-                else:
-                    img_bgr = cv2.imread(fpath)
-                    if img_bgr is None:
-                        continue
-                    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                # Use the settings-defined gamma
+                input_is_linear = settings.input_is_linear
+
+                if input_cap:
+                    ret, frame = input_cap.read()
+                    if not ret:
+                        break
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     img_srgb = img_rgb.astype(np.float32) / 255.0
+                    input_stem = f"{i:05d}"
+                else:
+                    fpath = os.path.join(clip.input_asset.path, input_files[i])
+                    input_stem = os.path.splitext(input_files[i])[0]
 
-            # 2. Read Alpha (Mask)
-            mask_linear = None
-            if alpha_cap:
-                ret, frame = alpha_cap.read()
-                if not ret:
-                    break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
-            else:
-                fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
-                mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
+                    is_exr = fpath.lower().endswith(".exr")
+                    if is_exr:
+                        img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
+                        if img_linear is None:
+                            if on_frame_complete:
+                                on_frame_complete(i, num_frames)
+                            continue
+                        img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
+                        # Support overriding EXR behavior if user picked 's'
+                        img_srgb = np.maximum(img_linear_rgb, 0.0)
+                    else:
+                        img_bgr = cv2.imread(fpath)
+                        if img_bgr is None:
+                            if on_frame_complete:
+                                on_frame_complete(i, num_frames)
+                            continue
+                        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                        img_srgb = img_rgb.astype(np.float32) / 255.0
 
-                if mask_in is None:
-                    continue
+                # 2. Read Alpha (Mask)
+                mask_linear = None
+                if alpha_cap:
+                    ret, frame = alpha_cap.read()
+                    if not ret:
+                        break
+                    mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+                else:
+                    fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
+                    mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
 
-                if mask_in.ndim == 3:
-                    if mask_in.shape[2] == 3:
+                    if mask_in is None:
+                        if on_frame_complete:
+                            on_frame_complete(i, num_frames)
+                        continue
+
+                    if mask_in.ndim == 3:
                         mask_linear = mask_in[:, :, 0]
                     else:
                         mask_linear = mask_in
-                else:
-                    mask_linear = mask_in
 
-                if mask_linear.dtype == np.uint8:
-                    mask_linear = mask_linear.astype(np.float32) / 255.0
-                elif mask_linear.dtype == np.uint16:
-                    mask_linear = mask_linear.astype(np.float32) / 65535.0
-                else:
-                    mask_linear = mask_linear.astype(np.float32)
+                    if mask_linear.dtype == np.uint8:
+                        mask_linear = mask_linear.astype(np.float32) / 255.0
+                    elif mask_linear.dtype == np.uint16:
+                        mask_linear = mask_linear.astype(np.float32) / 65535.0
+                    else:
+                        mask_linear = mask_linear.astype(np.float32)
 
-            if mask_linear.shape[:2] != img_srgb.shape[:2]:
-                mask_linear = cv2.resize(
-                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                if mask_linear.shape[:2] != img_srgb.shape[:2]:
+                    mask_linear = cv2.resize(
+                        mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                    )
+
+                # 3. Process
+                USE_STRAIGHT_MODEL = True
+                res = engine.process_frame(
+                    img_srgb,
+                    mask_linear,
+                    input_is_linear=input_is_linear,
+                    fg_is_straight=USE_STRAIGHT_MODEL,
+                    despill_strength=settings.despill_strength,
+                    auto_despeckle=settings.auto_despeckle,
+                    despeckle_size=settings.despeckle_size,
+                    refiner_scale=settings.refiner_scale,
                 )
 
-            # 3. Process
-            USE_STRAIGHT_MODEL = True
-            res = engine.process_frame(
-                img_srgb,
-                mask_linear,
-                input_is_linear=input_is_linear,
-                fg_is_straight=USE_STRAIGHT_MODEL,
-                despill_strength=settings.despill_strength,
-                auto_despeckle=settings.auto_despeckle,
-                despeckle_size=settings.despeckle_size,
-                refiner_scale=settings.refiner_scale,
-            )
+                pred_fg = res["fg"]  # sRGB
+                pred_alpha = res["alpha"]  # Linear
 
-            pred_fg = res["fg"]  # sRGB
-            pred_alpha = res["alpha"]  # Linear
+                # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
 
-            # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
+                # Save FG
+                # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
+                fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
 
-            # Save FG
-            # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
-            fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
+                # Save Matte
+                if pred_alpha.ndim == 3:
+                    pred_alpha = pred_alpha[:, :, 0]
+                # Matte is single channel linear float
+                cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
-            # Save Matte
-            if pred_alpha.ndim == 3:
-                pred_alpha = pred_alpha[:, :, 0]
-            # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
+                # 5. Generate Reference Comp
+                comp_srgb = res["comp"]
+                # Save Comp (PNG 8-bit)
+                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
-            # 5. Generate Reference Comp
-            comp_srgb = res["comp"]
-            # Save Comp (PNG 8-bit)
-            comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+                # 6. Save Processed (RGBA EXR)
+                if "processed" in res:
+                    # Result is RGBA
+                    proc_rgba = res["processed"]
+                    # Convert to BGRA for OpenCV
+                    proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
+                    cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
 
-            # 6. Save Processed (RGBA EXR)
-            if "processed" in res:
-                # Result is RGBA
-                proc_rgba = res["processed"]
-                # Convert to BGRA for OpenCV
-                proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
-
-            if on_frame_complete:
-                on_frame_complete(i, num_frames)
-
-        if input_cap:
-            input_cap.release()
-        if alpha_cap:
-            alpha_cap.release()
+                if on_frame_complete:
+                    on_frame_complete(i, num_frames)
+        finally:
+            if input_cap:
+                input_cap.release()
+            if alpha_cap:
+                alpha_cap.release()
         logger.info(f"Clip {clip.name} Complete.")
 
 
@@ -861,14 +869,14 @@ def scan_clips() -> list[ClipEntry]:
             invalid_clips.append((d, f"Unexpected error: {e}"))
 
     if invalid_clips:
-        print("\n" + "=" * 60)
-        print(" INVALID OR SKIPPED CLIPS")
-        print("=" * 60)
+        logger.warning("=" * 60)
+        logger.warning(" INVALID OR SKIPPED CLIPS")
+        logger.warning("=" * 60)
         for name, reason in invalid_clips:
-            print(f"- {name}: {reason}")
-        print("=" * 60 + "\n")
+            logger.warning("- %s: %s", name, reason)
+        logger.warning("=" * 60)
     else:
-        print("\nAll clip folders appear valid.\n")
+        logger.info("All clip folders appear valid.")
 
     return valid_clips
 
