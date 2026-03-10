@@ -536,6 +536,8 @@ def run_inference(
     backend=None,
     max_frames=None,
     settings: InferenceSettings | None = None,
+    tile_size: str | int | None = "auto",
+    overlap: int = 128,
     *,
     on_clip_start: Callable[[str, int], None] | None = None,
     on_frame_complete: Callable[[int, int], None] | None = None,
@@ -562,7 +564,7 @@ def run_inference(
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(backend=backend, device=device, tile_size=tile_size, overlap=overlap)
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")

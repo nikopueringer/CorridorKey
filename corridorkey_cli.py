@@ -135,8 +135,13 @@ def _prompt_inference_settings(
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
     default_refiner: float | None = None,
-) -> InferenceSettings:
-    """Interactively prompt for inference settings, skipping any pre-filled values."""
+    default_tile_size: str | None = None,
+) -> tuple[InferenceSettings, str, int]:
+    """Interactively prompt for inference settings, skipping any pre-filled values.
+
+    Returns (settings, tile_size_str, overlap) where tile_size_str is
+    "auto", "off", or a numeric string.
+    """
     console.print(Panel("Inference Settings", style="bold cyan"))
 
     if default_linear is not None:
@@ -187,13 +192,33 @@ def _prompt_inference_settings(
         except ValueError:
             refiner_scale = 1.0
 
-    return InferenceSettings(
+    # Tiling settings
+    if default_tile_size is not None:
+        tile_size_str = default_tile_size
+    else:
+        console.print(
+            "\n[bold]Tile size[/bold] — controls VRAM usage. Smaller tiles = less VRAM.\n"
+            "  [dim]auto[/dim]  = pick based on your GPU's VRAM\n"
+            "  [dim]off[/dim]   = no tiling (full 2048 pass, needs ~22 GB)\n"
+            "  [dim]672[/dim]   = ~1 GB VRAM  |  [dim]896[/dim] = ~2 GB  |  [dim]1344[/dim] = ~8 GB\n"
+            "  [dim]Must be a multiple of 224[/dim]"
+        )
+        tile_size_str = Prompt.ask(
+            "Tile size",
+            default="auto",
+        )
+
+    overlap = 128
+
+    settings = InferenceSettings(
         input_is_linear=input_is_linear,
         despill_strength=despill_strength,
         auto_despeckle=auto_despeckle,
         despeckle_size=despeckle_size,
         refiner_scale=refiner_scale,
     )
+
+    return settings, tile_size_str, overlap
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +292,14 @@ def run_inference_cmd(
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
     ] = None,
+    tile_size: Annotated[
+        str,
+        typer.Option("--tile-size", help="Tile size: auto, off, or pixels (multiple of 224)"),
+    ] = "auto",
+    overlap: Annotated[
+        int,
+        typer.Option("--overlap", help="Overlap pixels between tiles"),
+    ] = 128,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
@@ -287,13 +320,15 @@ def run_inference_cmd(
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
         )
+        tile_str = tile_size
     else:
-        settings = _prompt_inference_settings(
+        settings, tile_str, overlap = _prompt_inference_settings(
             default_linear=linear,
             default_despill=despill,
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,
             default_refiner=refiner,
+            default_tile_size=tile_size if tile_size != "auto" else None,
         )
 
     with ProgressContext() as ctx_progress:
@@ -303,6 +338,8 @@ def run_inference_cmd(
             backend=backend,
             max_frames=max_frames,
             settings=settings,
+            tile_size=tile_str,
+            overlap=overlap,
             on_clip_start=ctx_progress.on_clip_start,
             on_frame_complete=ctx_progress.on_frame_complete,
         )
@@ -510,12 +547,14 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         elif choice == "i":
             console.print(Panel("Corridor Key Inference", style="magenta"))
             try:
-                settings = _prompt_inference_settings()
+                settings, tile_size_str, overlap = _prompt_inference_settings()
                 with ProgressContext() as ctx_progress:
                     run_inference(
                         ready,
                         device=device,
                         settings=settings,
+                        tile_size=tile_size_str,
+                        overlap=overlap,
                         on_clip_start=ctx_progress.on_clip_start,
                         on_frame_complete=ctx_progress.on_frame_complete,
                     )

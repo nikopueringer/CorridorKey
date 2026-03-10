@@ -40,6 +40,8 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     engine.model = mock_greenformer
     engine.model_precision = torch.float32
     engine.mixed_precision = True
+    engine.tiler = None
+    engine._model_size = img_size
     return engine
 
 

@@ -211,15 +211,15 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
-    tile_size: int | None = DEFAULT_MLX_TILE_SIZE,
-    overlap: int = DEFAULT_MLX_TILE_OVERLAP,
+    tile_size: int | str | None = "auto",
+    overlap: int = 128,
 ):
     """Factory: returns an engine with process_frame() matching the Torch contract.
 
     Args:
-        tile_size: MLX only — tile size for tiled inference (default 512).
-            Set to None to disable tiling and use full-frame inference.
-        overlap: MLX only — overlap pixels between tiles (default 64).
+        tile_size: Tile size in pixels, "auto" (VRAM-based), "off"/None to disable.
+            For MLX, defaults to 512. For Torch, "auto" queries VRAM.
+        overlap: Overlap pixels between tiles (default 128).
     """
     backend = resolve_backend(backend)
 
@@ -227,13 +227,53 @@ def create_engine(
         ckpt = _discover_checkpoint(MLX_EXT)
         from corridorkey_mlx import CorridorKeyMLXEngine  # type: ignore[import-not-found]
 
-        raw_engine = CorridorKeyMLXEngine(str(ckpt), img_size=img_size, tile_size=tile_size, overlap=overlap)
-        mode = f"tiled (tile={tile_size}, overlap={overlap})" if tile_size else "full-frame"
+        mlx_tile = tile_size if isinstance(tile_size, int) else DEFAULT_MLX_TILE_SIZE
+        mlx_overlap = overlap if overlap != 128 else DEFAULT_MLX_TILE_OVERLAP
+        raw_engine = CorridorKeyMLXEngine(str(ckpt), img_size=img_size, tile_size=mlx_tile, overlap=mlx_overlap)
+        mode = f"tiled (tile={mlx_tile}, overlap={mlx_overlap})" if mlx_tile else "full-frame"
         logger.info("MLX engine loaded: %s [%s]", ckpt.name, mode)
         return _MLXEngineAdapter(raw_engine)
     else:
         ckpt = _discover_checkpoint(TORCH_EXT)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        # Resolve tile_size for Torch backend
+        resolved_tile: int | None = None
+        if isinstance(tile_size, str):
+            if tile_size.lower() == "auto":
+                import torch
+
+                from .tiled_inference import VRAMDetector
+
+                dev = torch.device(device or "cpu")
+                resolved_tile = VRAMDetector.recommend_tile_size(dev, img_size)
+            elif tile_size.lower() == "off":
+                resolved_tile = None
+            else:
+                try:
+                    resolved_tile = int(tile_size)
+                except ValueError:
+                    resolved_tile = None
+        elif isinstance(tile_size, int):
+            resolved_tile = tile_size if tile_size > 0 else None
+        else:
+            resolved_tile = None
+
+        if resolved_tile is not None:
+            logger.info(
+                "Torch engine loaded: %s (device=%s, tile_size=%d, overlap=%d)",
+                ckpt.name,
+                device,
+                resolved_tile,
+                overlap,
+            )
+        else:
+            logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
+
+        return CorridorKeyEngine(
+            checkpoint_path=str(ckpt),
+            device=device or "cpu",
+            img_size=img_size,
+            tile_size=resolved_tile,
+            overlap_size=overlap,
+        )
