@@ -509,7 +509,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             if Confirm.ask("Proceed with GVM?", default=False):
                 generate_alphas(raw, device=device)
                 Prompt.ask("GVM batch complete. Press Enter to re-scan")
-        
+
         elif choice == "b":
             console.print(Panel("BiRefNet Auto-Matte", style="magenta"))
             usage_list = get_birefnet_usage_options()
@@ -525,12 +525,12 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
                 if Confirm.ask(f"Proceed with {selected_usage}?", default=True):
                     with ProgressContext() as ctx_progress:
                         run_birefnet(
-                            raw, 
-                            device=device, 
-                            usage=selected_usage, 
+                            raw,
+                            device=device,
+                            usage=selected_usage,
                             dilate_radius=dilate,
                             on_clip_start=ctx_progress.on_clip_start,
-                            on_frame_complete=ctx_progress.on_frame_complete
+                            on_frame_complete=ctx_progress.on_frame_complete,
                         )
                     Prompt.ask("BiRefNet batch complete. Press Enter to re-scan")
             except IndexError:

@@ -14,65 +14,68 @@ from transformers import AutoModelForImageSegmentation
 
 torch.set_float32_matmul_precision(["high", "highest"][0])
 
-class ImagePreprocessor():
+
+class ImagePreprocessor:
     def __init__(self, resolution: Tuple[int, int] = (1024, 1024)) -> None:
-        self.transform_image = transforms.Compose([
-            transforms.Resize(resolution),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
+        self.transform_image = transforms.Compose(
+            [
+                transforms.Resize(resolution),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
 
     def proc(self, image: Image.Image) -> torch.Tensor:
         image = self.transform_image(image)
         return image
 
+
 usage_to_weights_file = {
-    'General': 'BiRefNet',
-    'General-HR': 'BiRefNet_HR',
-    'General-Lite': 'BiRefNet_lite',
-    'General-Lite-2K': 'BiRefNet_lite-2K',
-    'General-reso_512': 'BiRefNet-reso_512',
-    'Matting': 'BiRefNet-matting',
-    'Matting-HR': 'BiRefNet_HR-Matting',
-    'Portrait': 'BiRefNet-portrait',
-    'DIS': 'BiRefNet-DIS5K',
-    'HRSOD': 'BiRefNet-HRSOD',
-    'COD': 'BiRefNet-COD',
-    'DIS-TR_TEs': 'BiRefNet-DIS5K-TR_TEs',
-    'General-legacy': 'BiRefNet-legacy'
+    "General": "BiRefNet",
+    "General-HR": "BiRefNet_HR",
+    "General-Lite": "BiRefNet_lite",
+    "General-Lite-2K": "BiRefNet_lite-2K",
+    "General-reso_512": "BiRefNet-reso_512",
+    "Matting": "BiRefNet-matting",
+    "Matting-HR": "BiRefNet_HR-Matting",
+    "Portrait": "BiRefNet-portrait",
+    "DIS": "BiRefNet-DIS5K",
+    "HRSOD": "BiRefNet-HRSOD",
+    "COD": "BiRefNet-COD",
+    "DIS-TR_TEs": "BiRefNet-DIS5K-TR_TEs",
+    "General-legacy": "BiRefNet-legacy",
 }
 
 half_precision = True
 
 base_folder = os.path.join(os.path.dirname(__file__), "checkpoints")
 
-class BiRefNetHandler():
-    def __init__(self, device='cpu', usage='General'):
+
+class BiRefNetHandler:
+    def __init__(self, device="cpu", usage="General"):
         self.device = device
 
         # Set resolution
-        if usage in ['General-Lite-2K']:
+        if usage in ["General-Lite-2K"]:
             self.resolution = (2560, 1440)
-        elif usage in ['General-reso_512']:
+        elif usage in ["General-reso_512"]:
             self.resolution = (512, 512)
-        elif usage in ['General-HR', 'Matting-HR']:
+        elif usage in ["General-HR", "Matting-HR"]:
             self.resolution = (2048, 2048)
         else:
-            self.resolution = (1024, 1024) 
+            self.resolution = (1024, 1024)
 
         repo_name = usage_to_weights_file[usage]
         repo_id = f"ZhengPeng7/{repo_name}"
         model_local_dir = os.path.join(base_folder, repo_name)
 
         snapshot_download(
-            repo_id=repo_id, 
+            repo_id=repo_id,
             local_dir=model_local_dir,
-            local_dir_use_symlinks=False # Ensures actual files are downloaded, not just symlinks to the cache
+            local_dir_use_symlinks=False,  # Ensures actual files are downloaded, not just symlinks to the cache
         )
 
-        self.birefnet = AutoModelForImageSegmentation.from_pretrained(
-                    model_local_dir, trust_remote_code=True
-                )
+        self.birefnet = AutoModelForImageSegmentation.from_pretrained(model_local_dir, trust_remote_code=True)
 
         self.birefnet.to(device)
         self.birefnet.eval()
@@ -82,30 +85,31 @@ class BiRefNetHandler():
     def cleanup(self):
         """Explicitly clear model and release GPU memory."""
         # Delete the model reference
-        if hasattr(self, 'birefnet'):
+        if hasattr(self, "birefnet"):
             del self.birefnet
-        
+
         # Clear Python garbage
         import gc
+
         gc.collect()
-        
+
         # Clear PyTorch CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
 
-    def process(self, input_path, alpha_output_dir = None, dilate_radius=10, on_frame_complete=None):
+    def process(self, input_path, alpha_output_dir=None, dilate_radius=10, on_frame_complete=None):
         """
         Process a single video or directory of images.
         """
         input_path = Path(input_path)
         file_name = input_path.stem
-        is_video = input_path.suffix.lower() in ['.mp4', '.mkv', '.gif', '.mov', '.avi']
+        is_video = input_path.suffix.lower() in [".mp4", ".mkv", ".gif", ".mov", ".avi"]
 
         image_preprocessor = ImagePreprocessor(resolution=tuple(self.resolution))
 
         def get_frames():
-            """ Yields tuples of (image_numpy_array, output_file_name) """
+            """Yields tuples of (image_numpy_array, output_file_name)"""
             if is_video:
                 cap = cv2.VideoCapture(str(input_path))
                 count = 0
@@ -117,11 +121,17 @@ class BiRefNetHandler():
                     count += 1
                 cap.release()
             else:
-                image_files = sorted([f for f in input_path.iterdir() if f.is_file() and f.suffix.lower() in ['.jpg', '.png', '.jpeg', '.exr']])
+                image_files = sorted(
+                    [
+                        f
+                        for f in input_path.iterdir()
+                        if f.is_file() and f.suffix.lower() in [".jpg", ".png", ".jpeg", ".exr"]
+                    ]
+                )
                 if not image_files:
                     logging.warning(f"No images found in {input_path}")
                     return
-                
+
                 # Setup EXR support once if needed
                 if "OPENCV_IO_ENABLE_OPENEXR" not in os.environ:
                     os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -157,10 +167,10 @@ class BiRefNetHandler():
             # Inference
             with torch.no_grad():
                 preds = self.birefnet(image_proc)[-1].sigmoid().cpu()
-            
+
             pred = preds[0].squeeze()
             pred_pil = transforms.ToPILImage()(pred.float())
-            
+
             # Post-Process
             target_size = (image.shape[1], image.shape[0])
             mask = pred_pil.resize(target_size)
@@ -179,6 +189,6 @@ class BiRefNetHandler():
             if alpha_output_dir:
                 save_path = os.path.join(alpha_output_dir, out_name)
                 cv2.imwrite(save_path, mask_np)
-            
+
             if on_frame_complete:
                 on_frame_complete(count, 0)

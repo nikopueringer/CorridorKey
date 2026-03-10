@@ -308,7 +308,7 @@ def run_birefnet(
 
     if device is None:
         device = resolve_device()
-    
+
     logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
 
     logger.info(f"Initializing BiRefNet ({usage}) on {device}...")
@@ -333,17 +333,18 @@ def run_birefnet(
 
             try:
                 handler.process(
-                    input_path=clip.input_asset.path, 
-                    alpha_output_dir=alpha_output_dir, 
+                    input_path=clip.input_asset.path,
+                    alpha_output_dir=alpha_output_dir,
                     dilate_radius=dilate_radius,
-                    on_frame_complete=on_frame_complete
+                    on_frame_complete=on_frame_complete,
                 )
                 logger.info(f"BiRefNet complete for {clip.name}")
             except Exception as e:
                 logger.error(f"BiRefNet failed for {clip.name}: {e}")
                 import traceback
+
                 traceback.print_exc()
-    
+
     finally:
         handler.cleanup()
 
