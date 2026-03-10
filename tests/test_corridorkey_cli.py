@@ -51,16 +51,11 @@ class TestInteractiveWizard:
         Scenario: User provides a Windows path that must fallback to a mapped Linux mount.
         Expected: Wizard maps path via map_path and prints the Linux/Remote result.
         """
-        def mock_exists(path, *args, **kwargs):
-            path_str = str(path)
-            if "Z:" in path_str:
-                return False
-            if "/mnt/project" in path_str:
-                return True
-            return False
-        monkeypatch.setattr("os.path.exists", mock_exists)
+        monkeypatch.setattr("os.path.exists", lambda path, *a, **k: "/mnt/project" in str(path))
         monkeypatch.setattr("corridorkey_cli.map_path", lambda *args, **kwargs: "/mnt/project")
         monkeypatch.setattr("os.listdir", lambda *args, **kwargs: [])
+        monkeypatch.setattr("cv2.imread", lambda *args, **kwargs: np.zeros((1, 1, 3)))
+
         self.setup_mock_input(monkeypatch, ["q"])
 
         interactive_wizard("Z:/Work/Shot01")
