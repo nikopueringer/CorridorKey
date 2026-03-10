@@ -618,79 +618,97 @@ class CorridorKeyService:
             frame_indices = range(num_frames)
             range_count = num_frames
 
+        from device_utils import RuntimeThreadPool
+
+        def _process_single_frame(progress_i: int, i: int):
+            """Inner worker function mapped inside the thread pool."""
+            if job and job.is_cancelled:
+                return ('cancel', FrameResult(i, f"{i:05d}", False, "cancelled"), None)
+
+            try:
+                # 1. IO: Read input
+                img, input_stem, is_linear = self._read_input_frame(
+                    clip, i, input_files, input_cap, params.input_is_linear
+                )
+                if img is None:
+                    return ('error', FrameResult(i, f"{i:05d}", False, "video read failed"), "video read failed")
+
+                # Resume tracking
+                if input_stem in skip_stems:
+                    return ('skip', FrameResult(i, input_stem, True, "resumed (skipped)"), None)
+
+                # 2. IO: Read alpha mask and resize
+                mask = self._read_alpha_frame(clip, i, alpha_files, alpha_cap)
+                if mask is None:
+                    return ('error', FrameResult(i, input_stem, False, "alpha read failed"), "alpha read failed")
+
+                if mask.shape[:2] != img.shape[:2]:
+                    mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+
+                # 3. Pre-process mapping (CPU)
+                t_frame = time.monotonic()
+                inp_t, h, w = engine.preprocess(img, mask, input_is_linear=is_linear)
+
+                # 4. Infer (GPU locked)
+                with self._gpu_lock:
+                    pred_alpha, pred_fg = engine.infer(inp_t, refiner_scale=params.refiner_scale)
+
+                # 5. Post-process mapping (CPU)
+                res = engine.postprocess(
+                    pred_alpha, pred_fg, h, w,
+                    fg_is_straight=True,
+                    despill_strength=params.despill_strength,
+                    auto_despeckle=params.auto_despeckle,
+                    despeckle_size=params.despeckle_size
+                )
+                logger.debug(f"Clip '{clip.name}' frame {i}: process/infer {time.monotonic() - t_frame:.3f}s")
+
+                # 6. IO: Write outputs
+                self._write_outputs(res, dirs, input_stem, clip.name, i, cfg)
+                return ('success', FrameResult(i, input_stem, True), None)
+
+            except FrameReadError as e:
+                return ('warning', FrameResult(i, f"{i:05d}", False, str(e)), str(e))
+            except WriteFailureError as e:
+                return ('error', FrameResult(i, f"{i:05d}", False, str(e)), str(e))
+
         try:
-            for progress_i, i in enumerate(frame_indices):
-                # Check cancellation between frames
-                if job and job.is_cancelled:
-                    raise JobCancelledError(clip.name, i)
+            is_video = bool(input_cap or alpha_cap)
+            with RuntimeThreadPool(is_video) as executor:
+                from concurrent.futures import as_completed
+                futures = {}
 
-                # Report progress every frame (enables responsive cancel + timer)
-                if on_progress:
-                    on_progress(clip.name, progress_i, range_count)
+                for progress_i, i in enumerate(frame_indices):
+                    fut = executor.submit(_process_single_frame, progress_i, i)
+                    futures[fut] = (progress_i, i)
 
-                try:
-                    # Read input
-                    img, input_stem, is_linear = self._read_input_frame(
-                        clip,
-                        i,
-                        input_files,
-                        input_cap,
-                        params.input_is_linear,
-                    )
-                    if img is None:
+                processed_count = 0
+                for fut in as_completed(futures):
+                    progress_i, i = futures[fut]
+
+                    # Fast cancellation check
+                    if job and job.is_cancelled:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise JobCancelledError(clip.name, i)
+
+                    # Accumulate parsed results
+                    status, frame_res, msg = fut.result()
+
+                    if status in ('error', 'warning'):
                         skipped.append(i)
-                        results.append(FrameResult(i, f"{i:05d}", False, "video read failed"))
-                        continue
+                        results.append(frame_res)
+                        if msg:
+                            logger.warning(msg)
+                            if on_warning:
+                                on_warning(msg)
+                    elif status in ('success', 'skip'):
+                        results.append(frame_res)
 
-                    # Resume: skip frames that already have outputs
-                    if input_stem in skip_stems:
-                        results.append(FrameResult(i, input_stem, True, "resumed (skipped)"))
-                        continue
+                    # Update internal tracking
+                    processed_count += 1
+                    if on_progress:
+                        on_progress(clip.name, processed_count, range_count)
 
-                    # Read alpha
-                    mask = self._read_alpha_frame(clip, i, alpha_files, alpha_cap)
-                    if mask is None:
-                        skipped.append(i)
-                        results.append(FrameResult(i, input_stem, False, "alpha read failed"))
-                        continue
-
-                    # Resize mask if dimensions don't match input
-                    if mask.shape[:2] != img.shape[:2]:
-                        mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
-
-                    # Process (GPU-locked — process_frame mutates model hooks)
-                    t_frame = time.monotonic()
-                    with self._gpu_lock:
-                        res = engine.process_frame(
-                            img,
-                            mask,
-                            input_is_linear=is_linear,
-                            fg_is_straight=True,
-                            despill_strength=params.despill_strength,
-                            auto_despeckle=params.auto_despeckle,
-                            despeckle_size=params.despeckle_size,
-                            refiner_scale=params.refiner_scale,
-                        )
-                    logger.debug(f"Clip '{clip.name}' frame {i}: process_frame {time.monotonic() - t_frame:.3f}s")
-
-                    # Write outputs
-                    self._write_outputs(res, dirs, input_stem, clip.name, i, cfg)
-                    results.append(FrameResult(i, input_stem, True))
-
-                except FrameReadError as e:
-                    logger.warning(str(e))
-                    skipped.append(i)
-                    results.append(FrameResult(i, f"{i:05d}", False, str(e)))
-                    if on_warning:
-                        on_warning(str(e))
-
-                except WriteFailureError as e:
-                    logger.error(str(e))
-                    results.append(FrameResult(i, f"{i:05d}", False, str(e)))
-                    if on_warning:
-                        on_warning(str(e))
-
-            # Final progress
             if on_progress:
                 on_progress(clip.name, range_count, range_count)
 
