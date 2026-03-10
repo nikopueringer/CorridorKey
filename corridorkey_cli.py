@@ -16,6 +16,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import re
 import shutil
 import sys
 import warnings
@@ -23,10 +24,10 @@ from typing import Annotated, Optional
 
 import typer
 from rich.console import Console
+from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
-from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 from clip_manager import (
@@ -67,8 +68,30 @@ def _configure_environment() -> None:
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True)],
+        handlers=[RichHandler(console=console, rich_tracebacks=True, markup=False, highlighter=NullHighlighter())],
     )
+
+
+# ---------------------------------------------------------------------------
+# Readline-safe input helper
+# ---------------------------------------------------------------------------
+
+_ANSI_RE = re.compile(r"(\x1b\[[0-9;]*m)")
+
+
+def _readline_input(markup: str, *, suffix: str = ": ") -> str:
+    """Prompt with Rich markup, safe for readline/backspace.
+
+    Renders *markup* to an ANSI string, wraps escape sequences in
+    readline ignore markers (``\\x01``/``\\x02``), then passes the
+    result to :func:`input`.  This lets readline track cursor position
+    correctly so backspace never erases the prompt text.
+    """
+    with console.capture() as cap:
+        console.print(markup, end="")
+    ansi = cap.get() + suffix
+    safe = _ANSI_RE.sub(lambda m: "\x01" + m.group(1) + "\x02", ansi)
+    return input(safe)
 
 
 # ---------------------------------------------------------------------------
@@ -135,65 +158,150 @@ def _prompt_inference_settings(
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
     default_refiner: float | None = None,
-) -> InferenceSettings:
-    """Interactively prompt for inference settings, skipping any pre-filled values."""
-    console.print(Panel("Inference Settings", style="bold cyan"))
+) -> tuple[InferenceSettings | None, int]:
+    """Interactively prompt for inference settings, skipping any pre-filled values.
 
-    if default_linear is not None:
-        input_is_linear = default_linear
-    else:
-        gamma_choice = Prompt.ask(
-            "Input colorspace",
-            choices=["linear", "srgb"],
-            default="srgb",
-        )
-        input_is_linear = gamma_choice == "linear"
+    Returns (settings, lines_printed). *lines_printed* counts terminal lines
+    produced so the caller can erase them on cancel.
+    """
+    lines = 0
+    with console.capture() as cap_hdr:
+        console.print(Panel("Inference Settings", style="bold cyan"))
+    hdr = cap_hdr.get()
+    lines += hdr.count("\n")
+    sys.stdout.write(hdr)
+    sys.stdout.flush()
 
-    if default_despill is not None:
-        despill_int = max(0, min(10, default_despill))
-    else:
-        despill_int = IntPrompt.ask(
-            "Despill strength (0–10, 10 = max despill)",
-            default=5,
-        )
-        despill_int = max(0, min(10, despill_int))
-    despill_strength = despill_int / 10.0
+    try:
+        if default_linear is not None:
+            input_is_linear = default_linear
+        else:
+            while True:
+                gamma_choice = _readline_input(
+                    "Input colorspace"
+                    " [bold magenta]\\[[/bold magenta]"
+                    "[bold magenta]l[/bold magenta][magenta]inear[/magenta]"
+                    "[bold magenta]/[/bold magenta]"
+                    "[bold magenta]s[/bold magenta][magenta]rgb[/magenta]"
+                    "[bold magenta]][/bold magenta]"
+                    " [cyan](srgb)[/cyan]",
+                )
+                val = gamma_choice.strip().lower()
+                if not val:
+                    input_is_linear = False
+                    lines += 1
+                    break
+                elif val in ("l", "linear"):
+                    input_is_linear = True
+                    lines += 1
+                    break
+                elif val in ("s", "srgb"):
+                    input_is_linear = False
+                    lines += 1
+                    break
 
-    if default_despeckle is not None:
-        auto_despeckle = default_despeckle
-    else:
-        auto_despeckle = Confirm.ask(
-            "Enable auto-despeckle (removes tracking dots)?",
-            default=True,
-        )
+        if default_despill is not None:
+            despill_int = max(0, min(10, default_despill))
+        else:
+            while True:
+                raw = _readline_input(
+                    "Despill strength [cyan](0–10, 10 = max despill)[/cyan]"
+                    " [cyan](5)[/cyan]",
+                )
+                val = raw.strip()
+                if not val:
+                    despill_int = 5
+                    lines += 1
+                    break
+                try:
+                    despill_int = int(val)
+                    despill_int = max(0, min(10, despill_int))
+                    lines += 1
+                    break
+                except ValueError:
+                    if console.is_terminal:
+                        sys.stdout.write("\033[A\r\033[J")
+                        sys.stdout.flush()
+        despill_strength = despill_int / 10.0
 
-    despeckle_size = default_despeckle_size if default_despeckle_size is not None else 400
-    if auto_despeckle and default_despeckle_size is None and default_despeckle is None:
-        despeckle_size = IntPrompt.ask(
-            "Despeckle size (min pixels for a spot)",
-            default=400,
-        )
-        despeckle_size = max(0, despeckle_size)
+        if default_despeckle is not None:
+            auto_despeckle = default_despeckle
+        else:
+            while True:
+                raw = _readline_input(
+                    "Enable auto-despeckle (removes tracking dots)?"
+                    " [bold magenta]\\[[/bold magenta]"
+                    "[bold magenta]y[/bold magenta][magenta]es[/magenta]"
+                    "[bold magenta]/[/bold magenta]"
+                    "[bold magenta]n[/bold magenta][magenta]o[/magenta]"
+                    "[bold magenta]][/bold magenta]"
+                    " [cyan](yes)[/cyan]",
+                )
+                val = raw.strip().lower()
+                if not val or val in ("y", "yes"):
+                    auto_despeckle = True
+                    lines += 1
+                    break
+                elif val in ("n", "no"):
+                    auto_despeckle = False
+                    lines += 1
+                    break
+                if console.is_terminal:
+                    sys.stdout.write("\033[A\r\033[J")
+                    sys.stdout.flush()
 
-    if default_refiner is not None:
-        refiner_scale = default_refiner
-    else:
-        refiner_val = Prompt.ask(
-            "Refiner strength multiplier [dim](experimental)[/dim]",
-            default="1.0",
-        )
-        try:
-            refiner_scale = float(refiner_val)
-        except ValueError:
-            refiner_scale = 1.0
+        despeckle_size = default_despeckle_size if default_despeckle_size is not None else 400
+        if auto_despeckle and default_despeckle_size is None and default_despeckle is None:
+            while True:
+                raw = _readline_input(
+                    "Despeckle size [cyan](min pixels for a spot)[/cyan]"
+                    " [cyan](400)[/cyan]",
+                )
+                val = raw.strip()
+                if not val:
+                    despeckle_size = 400
+                    lines += 1
+                    break
+                try:
+                    despeckle_size = max(0, int(val))
+                    lines += 1
+                    break
+                except ValueError:
+                    if console.is_terminal:
+                        sys.stdout.write("\033[A\r\033[J")
+                        sys.stdout.flush()
 
-    return InferenceSettings(
-        input_is_linear=input_is_linear,
-        despill_strength=despill_strength,
-        auto_despeckle=auto_despeckle,
-        despeckle_size=despeckle_size,
-        refiner_scale=refiner_scale,
-    )
+        if default_refiner is not None:
+            refiner_scale = default_refiner
+        else:
+            while True:
+                raw = _readline_input(
+                    "Refiner strength multiplier [dim](experimental)[/dim]"
+                    " [cyan](1.0)[/cyan]",
+                )
+                val = raw.strip()
+                if not val:
+                    refiner_scale = 1.0
+                    lines += 1
+                    break
+                try:
+                    refiner_scale = float(val)
+                    lines += 1
+                    break
+                except ValueError:
+                    if console.is_terminal:
+                        sys.stdout.write("\033[A\r\033[J")
+                        sys.stdout.flush()
+
+        return InferenceSettings(
+            input_is_linear=input_is_linear,
+            despill_strength=despill_strength,
+            auto_despeckle=auto_despeckle,
+            despeckle_size=despeckle_size,
+            refiner_scale=refiner_scale,
+        ), lines
+    except EOFError:
+        return None, lines
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +339,11 @@ def list_clips_cmd(ctx: typer.Context) -> None:
 def generate_alphas_cmd(ctx: typer.Context) -> None:
     """Generate coarse alpha hints via GVM for clips missing them."""
     clips = scan_clips()
-    with console.status("[bold green]Loading GVM model..."):
+    try:
         generate_alphas(clips, device=ctx.obj["device"], on_clip_start=_on_clip_start_log_only)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Alpha generation interrupted.[/yellow]")
+        return
     console.print("[bold green]Alpha generation complete.")
 
 
@@ -288,24 +399,35 @@ def run_inference_cmd(
             refiner_scale=refiner,
         )
     else:
-        settings = _prompt_inference_settings(
-            default_linear=linear,
-            default_despill=despill,
-            default_despeckle=despeckle,
-            default_despeckle_size=despeckle_size,
-            default_refiner=refiner,
-        )
+        try:
+            settings, _ = _prompt_inference_settings(
+                default_linear=linear,
+                default_despill=despill,
+                default_despeckle=despeckle,
+                default_despeckle_size=despeckle_size,
+                default_refiner=refiner,
+            )
+        except EOFError:
+            console.print("[yellow]Aborted.[/yellow]")
+            return
+        if settings is None:
+            console.print("[yellow]Aborted.[/yellow]")
+            return
 
-    with ProgressContext() as ctx_progress:
-        run_inference(
-            clips,
-            device=ctx.obj["device"],
-            backend=backend,
-            max_frames=max_frames,
-            settings=settings,
-            on_clip_start=ctx_progress.on_clip_start,
-            on_frame_complete=ctx_progress.on_frame_complete,
-        )
+    try:
+        with ProgressContext() as ctx_progress:
+            run_inference(
+                clips,
+                device=ctx.obj["device"],
+                backend=backend,
+                max_frames=max_frames,
+                settings=settings,
+                on_clip_start=ctx_progress.on_clip_start,
+                on_frame_complete=ctx_progress.on_frame_complete,
+            )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Inference interrupted.[/yellow]")
+        return
 
     console.print("[bold green]Inference complete.")
 
@@ -396,7 +518,16 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
                 console.print(f"  …and {len(dirs_needing_org) - display_limit} others.")
 
         # 3. Organize
-        if Confirm.ask("\nOrganize clips & create hint folders?", default=False):
+        organize = _readline_input(
+            "\nOrganize clips & create hint folders?"
+            " [bold magenta]\\[[/bold magenta]"
+            "[bold magenta]y[/bold magenta][magenta]es[/magenta]"
+            "[bold magenta]/[/bold magenta]"
+            "[bold magenta]n[/bold magenta][magenta]o[/magenta]"
+            "[bold magenta]][/bold magenta]"
+            " [cyan](no)[/cyan]",
+        ).strip().lower()
+        if organize in ("y", "yes"):
             for v in loose_videos:
                 clip_name = os.path.splitext(v)[0]
                 ext = os.path.splitext(v)[1]
@@ -428,106 +559,215 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
                 ]
 
     # 4. Status Check Loop
-    while True:
-        ready: list[ClipEntry] = []
-        masked: list[ClipEntry] = []
-        raw: list[ClipEntry] = []
+    _erase_lines = 0  # Lines to erase before next menu draw
 
-        for d in work_dirs:
-            entry = ClipEntry(os.path.basename(d), d)
-            try:
-                entry.find_assets()
-            except (FileNotFoundError, ValueError, OSError):
-                pass
+    def _erase_menu() -> None:
+        nonlocal _erase_lines
+        if _erase_lines > 0 and console.is_terminal:
+            # Move cursor up N lines and clear from cursor to end of screen
+            sys.stdout.write(f"\033[{_erase_lines}F\033[J")
+            sys.stdout.flush()
+        _erase_lines = 0
 
-            has_mask = False
-            mask_dir = os.path.join(d, "VideoMamaMaskHint")
-            if os.path.isdir(mask_dir) and len(os.listdir(mask_dir)) > 0:
-                has_mask = True
-            if not has_mask:
-                for f in os.listdir(d):
-                    stem, _ = os.path.splitext(f)
-                    if stem.lower() == "videomamamaskhint" and is_video_file(f):
+    try:
+        while True:
+            ready: list[ClipEntry] = []
+            masked: list[ClipEntry] = []
+            raw: list[ClipEntry] = []
+
+            for d in work_dirs:
+                entry = ClipEntry(os.path.basename(d), d)
+                try:
+                    entry.find_assets()
+                except (FileNotFoundError, ValueError, OSError):
+                    pass
+
+                has_mask = False
+                try:
+                    mask_dir = os.path.join(d, "VideoMamaMaskHint")
+                    if os.path.isdir(mask_dir) and len(os.listdir(mask_dir)) > 0:
                         has_mask = True
-                        break
+                    if not has_mask:
+                        for f in os.listdir(d):
+                            stem, _ = os.path.splitext(f)
+                            if stem.lower() == "videomamamaskhint" and is_video_file(f):
+                                has_mask = True
+                                break
+                except OSError:
+                    pass
 
-            if entry.alpha_asset:
-                ready.append(entry)
-            elif has_mask:
-                masked.append(entry)
-            else:
-                raw.append(entry)
+                if entry.alpha_asset:
+                    ready.append(entry)
+                elif has_mask:
+                    masked.append(entry)
+                else:
+                    raw.append(entry)
 
-        table = Table(title="Status Report", show_lines=True)
-        table.add_column("Category", style="bold")
-        table.add_column("Count", justify="right")
-        table.add_column("Clips")
+            missing_alpha = masked + raw
 
-        table.add_row(
-            "[green]Ready[/green] (AlphaHint)",
-            str(len(ready)),
-            ", ".join(c.name for c in ready) or "—",
-        )
-        table.add_row(
-            "[yellow]Masked[/yellow] (VideoMaMaMaskHint)",
-            str(len(masked)),
-            ", ".join(c.name for c in masked) or "—",
-        )
-        table.add_row(
-            "[red]Raw[/red] (Input only)",
-            str(len(raw)),
-            ", ".join(c.name for c in raw) or "—",
-        )
-        console.print(table)
+            # Build menu renderables
+            table = Table(show_lines=True)
+            table.add_column("Category", style="bold")
+            table.add_column("Count", justify="right")
+            table.add_column("Clips")
 
-        missing_alpha = masked + raw
-        actions: list[str] = []
+            table.add_row(
+                "[green]Ready[/green] (AlphaHint)",
+                str(len(ready)),
+                ", ".join(c.name for c in ready) or "—",
+            )
+            table.add_row(
+                "[yellow]Masked[/yellow] (VideoMaMaMaskHint)",
+                str(len(masked)),
+                ", ".join(c.name for c in masked) or "—",
+            )
+            table.add_row(
+                "[red]Raw[/red] (Input only)",
+                str(len(raw)),
+                ", ".join(c.name for c in raw) or "—",
+            )
 
-        if missing_alpha:
-            actions.append(f"[bold]v[/bold] — Run VideoMaMa ({len(masked)} with masks)")
-            actions.append(f"[bold]g[/bold] — Run GVM (auto-matte {len(raw)} clips)")
-        if ready:
-            actions.append(f"[bold]i[/bold] — Run Inference ({len(ready)} ready clips)")
-        actions.append("[bold]r[/bold] — Re-scan folders")
-        actions.append("[bold]q[/bold] — Quit")
+            actions: list[str] = []
+            if missing_alpha:
+                actions.append(f"[bold]v[/bold] — Run VideoMaMa ({len(masked)} with masks)")
+                actions.append(f"[bold]g[/bold] — Run GVM (auto-matte {len(raw)} clips)")
+            if ready:
+                actions.append(f"[bold]i[/bold] — Run Inference ({len(ready)} ready clips)")
+            actions.append("[bold]r[/bold] — Re-scan folders")
+            actions.append("[bold]q[/bold] — Quit [dim](ctrl+d)[/dim]")
 
-        console.print(Panel("\n".join(actions), title="Actions", style="blue"))
+            actions_panel = Panel("\n".join(actions), title="Actions", style="blue")
 
-        choice = Prompt.ask("Select action", choices=["v", "g", "i", "r", "q"], default="q")
+            # Erase previous menu, then render new one
+            _erase_menu()
+            with console.capture() as cap:
+                console.print(table)
+                console.print(actions_panel)
+            menu_output = cap.get()
+            menu_line_count = menu_output.count("\n")
+            sys.stdout.write(menu_output)
+            sys.stdout.flush()
 
-        if choice == "v":
-            console.print(Panel("VideoMaMa", style="magenta"))
-            run_videomama(missing_alpha, chunk_size=50, device=device)
-            Prompt.ask("VideoMaMa batch complete. Press Enter to re-scan")
+            # Prompt on a separate line with readline-safe input
+            while True:
+                try:
+                    choice = _readline_input("Select action")
+                except EOFError:
+                    choice = "q"
+                    break
+                choice = choice.strip().lower()
+                if choice in ("v", "g", "i", "r", "q"):
+                    break
+                # Invalid or empty — erase the prompt line and re-prompt
+                if console.is_terminal:
+                    sys.stdout.write("\033[A\r\033[J")
+                    sys.stdout.flush()
 
-        elif choice == "g":
-            console.print(Panel("GVM Auto-Matte", style="magenta"))
-            console.print(f"Will generate alphas for {len(raw)} clips without mask hints.")
-            if Confirm.ask("Proceed with GVM?", default=False):
-                generate_alphas(raw, device=device)
-                Prompt.ask("GVM batch complete. Press Enter to re-scan")
+            if choice == "v":
+                _erase_lines = menu_line_count + 2
+                _erase_menu()
+                with console.capture() as cap_v:
+                    console.print(Panel("VideoMaMa", style="magenta"))
+                v_hdr = cap_v.get()
+                v_hdr_lines = v_hdr.count("\n")
+                sys.stdout.write(v_hdr)
+                sys.stdout.flush()
+                try:
+                    run_videomama(missing_alpha, chunk_size=50, device=device)
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Interrupted.[/yellow]")
+                try:
+                    _readline_input("Press Enter to return to menu", suffix="")
+                except EOFError:
+                    _erase_lines = v_hdr_lines + 3
+                    continue
 
-        elif choice == "i":
-            console.print(Panel("Corridor Key Inference", style="magenta"))
-            try:
-                settings = _prompt_inference_settings()
-                with ProgressContext() as ctx_progress:
-                    run_inference(
-                        ready,
-                        device=device,
-                        settings=settings,
-                        on_clip_start=ctx_progress.on_clip_start,
-                        on_frame_complete=ctx_progress.on_frame_complete,
-                    )
-            except (RuntimeError, FileNotFoundError) as e:
-                console.print(f"[bold red]Inference failed:[/bold red] {e}")
-            Prompt.ask("Inference batch complete. Press Enter to re-scan")
+            elif choice == "g":
+                _erase_lines = menu_line_count + 2
+                _erase_menu()
+                with console.capture() as cap_g:
+                    console.print(Panel("GVM Auto-Matte", style="magenta"))
+                g_hdr = cap_g.get()
+                g_lines = g_hdr.count("\n")
+                sys.stdout.write(g_hdr)
+                sys.stdout.flush()
+                with console.capture() as cap_g2:
+                    console.print(f"Will generate alphas for {len(raw)} clips without mask hints.")
+                g_info = cap_g2.get()
+                g_lines += g_info.count("\n")
+                sys.stdout.write(g_info)
+                sys.stdout.flush()
+                try:
+                    gvm_yes = _readline_input(
+                        "Proceed with GVM?"
+                        " [bold magenta]\\[[/bold magenta]"
+                        "[bold magenta]y[/bold magenta][magenta]es[/magenta]"
+                        "[bold magenta]/[/bold magenta]"
+                        "[bold magenta]n[/bold magenta][magenta]o[/magenta]"
+                        "[bold magenta]][/bold magenta]"
+                        " [cyan](no)[/cyan]",
+                    ).strip().lower()
+                    if gvm_yes in ("y", "yes"):
+                        try:
+                            generate_alphas(raw, device=device)
+                        except KeyboardInterrupt:
+                            console.print("\n[yellow]Interrupted.[/yellow]")
+                        try:
+                            _readline_input("Press Enter to return to menu", suffix="")
+                        except EOFError:
+                            pass
+                    else:
+                        # Declined — erase the sub-menu
+                        _erase_lines = g_lines + 3
+                        continue
+                except EOFError:
+                    _erase_lines = g_lines + 2
+                    continue
 
-        elif choice == "r":
-            console.print("Re-scanning…")
+            elif choice == "i":
+                # Erase the menu before showing inference settings
+                _erase_lines = menu_line_count + 2
+                _erase_menu()
+                with console.capture() as cap_i:
+                    console.print(Panel("Corridor Key Inference", style="magenta"))
+                i_hdr = cap_i.get()
+                i_hdr_lines = i_hdr.count("\n")
+                sys.stdout.write(i_hdr)
+                sys.stdout.flush()
+                try:
+                    settings, settings_lines = _prompt_inference_settings()
+                    if settings is None:
+                        _erase_lines = i_hdr_lines + settings_lines + 2
+                        continue
+                    with ProgressContext() as ctx_progress:
+                        run_inference(
+                            ready,
+                            device=device,
+                            settings=settings,
+                            on_clip_start=ctx_progress.on_clip_start,
+                            on_frame_complete=ctx_progress.on_frame_complete,
+                        )
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Interrupted.[/yellow]")
+                except Exception as e:
+                    console.print(f"[bold red]Inference failed:[/bold red] {e}")
+                try:
+                    _readline_input("Press Enter to return to menu", suffix="")
+                except EOFError:
+                    pass
 
-        elif choice == "q":
-            break
+            elif choice == "r":
+                # Erase menu + prompt line, redraw with fresh scan
+                _erase_lines = menu_line_count + 2
+                continue
+
+            elif choice == "q":
+                # Erase menu + prompt line before goodbye
+                _erase_lines = menu_line_count + 2
+                _erase_menu()
+                break
+    except KeyboardInterrupt:
+        pass  # Fall through to goodbye message
 
     console.print("[bold green]Wizard complete. Goodbye![/bold green]")
 
