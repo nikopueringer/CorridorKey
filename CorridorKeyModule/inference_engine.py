@@ -230,21 +230,6 @@ class CorridorKeyEngine:
         if res_alpha.ndim == 2:
             res_alpha = res_alpha[:, :, np.newaxis]
 
-        # --- ORIGINAL PIXEL RESTORATION (tiling only) ---
-        # Where alpha == 1.0, the model says "100% subject, zero green screen."
-        # At small tile sizes the model's FG can be brightened due to pos_embed
-        # interpolation, but the original pixels are perfect here — no green
-        # mixing to reconstruct.  Hard swap (no ramp) avoids transition halos.
-        # The downstream despill pass handles any green bounce uniformly.
-        if self.tiler is not None:
-            if input_is_linear:
-                orig_srgb = cu.linear_to_srgb(image)
-            else:
-                orig_srgb = image
-
-            solid_mask = (res_alpha >= 1.0).astype(np.float32)
-            res_fg = res_fg * (1.0 - solid_mask) + orig_srgb * solid_mask
-
         # --- ADVANCED COMPOSITING ---
 
         # A. Clean Matte (Auto-Despeckle)
@@ -256,6 +241,22 @@ class CorridorKeyEngine:
         # B. Despill FG
         # res_fg is sRGB.
         fg_despilled = cu.despill(res_fg, green_limit_mode="average", strength=despill_strength)
+
+        # B2. Alpha-biased original pixel restoration (tiling only)
+        # After the full pipeline (model FG + despill + despeckle), blend the
+        # despilled original image back in using the processed alpha as the
+        # blend weight.  Where alpha is high (solid subject), bias toward the
+        # original — full detail, correct brightness.  Where alpha is low
+        # (edges, transparency), bias toward the model's despilled FG — the
+        # learned reconstruction matters there.  The alpha IS the blend ramp,
+        # so the transition is exactly as smooth as the matte itself.
+        if self.tiler is not None:
+            if input_is_linear:
+                orig_srgb = cu.linear_to_srgb(image)
+            else:
+                orig_srgb = image
+            orig_despilled = cu.despill(orig_srgb, green_limit_mode="average", strength=despill_strength)
+            fg_despilled = fg_despilled * (1.0 - processed_alpha) + orig_despilled * processed_alpha
 
         # C. Premultiply (for EXR Output)
         # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
