@@ -236,21 +236,17 @@ class CorridorKeyEngine:
         # The model processes tiles at tile_size and upscales back to img_size.
         # This softens the alpha transition zone proportionally to the
         # downscale ratio.  We compensate with:
-        #   1. Threshold clip — kill the faint halo fringe (alpha < threshold → 0)
-        #   2. Morphological erosion — pull the remaining soft edge inward
-        #   3. Gaussian re-feather — smooth the hard cut
-        # All three scale with blur_excess = 1 - (tile_size / img_size).
+        #   1. Morphological erosion — pull the soft edge inward
+        #   2. Gaussian re-feather — smooth the hard cut
+        # Both scale with blur_excess = 1 - (tile_size / img_size).
         # At full resolution (tile == img_size), blur_excess = 0 → no-op.
         if self.tiler is not None and self.tiler.tile_size < self.img_size:
             scale_factor = self.tiler.tile_size / self.img_size
             blur_excess = 1.0 - scale_factor  # 0.0 at 2048, 0.67 at 672, 0.78 at 448
 
-            # 1. Threshold clip — remove faint halo fringe
-            alpha_threshold = blur_excess * 0.15
             alpha_2d = res_alpha[:, :, 0] if res_alpha.ndim == 3 else res_alpha
-            alpha_2d = np.where(alpha_2d < alpha_threshold, 0.0, alpha_2d).astype(np.float32)
 
-            # 2. Erosion — scale from 0px at 2048 to ~4px at 448
+            # 1. Erosion — scale from 0px at 2048 to ~4px at 448
             max_erode = 4
             erode_px = max(1, round(blur_excess * max_erode))
             kernel = cv2.getStructuringElement(
@@ -258,7 +254,7 @@ class CorridorKeyEngine:
             )
             alpha_2d = cv2.erode(alpha_2d, kernel)
 
-            # 3. Re-feather — wider blur for more erosion
+            # 2. Re-feather — wider blur for more erosion
             blur_k = max(3, erode_px * 2 + 1)
             if blur_k % 2 == 0:
                 blur_k += 1
@@ -267,8 +263,8 @@ class CorridorKeyEngine:
             res_alpha = alpha_2d[:, :, np.newaxis]
 
             logger.info(
-                "Matte tightening: scale=%.2f, threshold=%.3f, erode=%dpx, blur=%d",
-                scale_factor, alpha_threshold, erode_px, blur_k,
+                "Matte tightening: scale=%.2f, erode=%dpx, blur=%d",
+                scale_factor, erode_px, blur_k,
             )
 
         # A. Clean Matte (Auto-Despeckle)
