@@ -205,6 +205,8 @@ MLX uses img_size=2048 by default (same as Torch).
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.
 
+You can also explore the full, auto-generated codebase documentation on [DeepWiki](https://deepwiki.com/nikopueringer/CorridorKey).
+
 ### Running Tests
 
 The project includes unit tests for the color math and compositing pipeline. No GPU or model weights required — tests run in a few seconds on any machine.
