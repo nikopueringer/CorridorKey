@@ -40,6 +40,8 @@ from clip_manager import (
     run_inference,
     run_videomama,
     scan_clips,
+    get_birefnet_usage_options,
+    run_birefnet,
 )
 from device_utils import resolve_device
 
@@ -486,6 +488,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
         if missing_alpha:
             actions.append(f"[bold]v[/bold] — Run VideoMaMa ({len(masked)} with masks)")
             actions.append(f"[bold]g[/bold] — Run GVM (auto-matte {len(raw)} clips)")
+            actions.append(f"[bold]b[/bold] — Run BiRefNet (auto-matte {len(raw)} clips)")
         if ready:
             actions.append(f"[bold]i[/bold] — Run Inference ({len(ready)} ready clips)")
         actions.append("[bold]r[/bold] — Re-scan folders")
@@ -493,7 +496,7 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
         console.print(Panel("\n".join(actions), title="Actions", style="blue"))
 
-        choice = Prompt.ask("Select action", choices=["v", "g", "i", "r", "q"], default="q")
+        choice = Prompt.ask("Select action", choices=["v", "g", "b", "i", "r", "q"], default="q")
 
         if choice == "v":
             console.print(Panel("VideoMaMa", style="magenta"))
@@ -506,6 +509,32 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             if Confirm.ask("Proceed with GVM?", default=False):
                 generate_alphas(raw, device=device)
                 Prompt.ask("GVM batch complete. Press Enter to re-scan")
+        
+        elif choice == "b":
+            console.print(Panel("BiRefNet Auto-Matte", style="magenta"))
+            usage_list = get_birefnet_usage_options()
+            for i, name in enumerate(usage_list, 1):
+                console.print(f"[[bold]{i}[/bold]] {name}")
+
+            idx = IntPrompt.ask("Select Model ID", default=1)
+            try:
+                selected_usage = usage_list[idx - 1]
+                dilate = IntPrompt.ask("Enter dilation radius (0-50)", default=0)
+
+                console.print(f"Starting BiRefNet ({selected_usage}, Radius={dilate}) for {len(raw)} clips...")
+                if Confirm.ask(f"Proceed with {selected_usage}?", default=True):
+                    with ProgressContext() as ctx_progress:
+                        run_birefnet(
+                            raw, 
+                            device=device, 
+                            usage=selected_usage, 
+                            dilate_radius=dilate,
+                            on_clip_start=ctx_progress.on_clip_start,
+                            on_frame_complete=ctx_progress.on_frame_complete
+                        )
+                    Prompt.ask("BiRefNet batch complete. Press Enter to re-scan")
+            except IndexError:
+                console.print("[red]Invalid ID selected![/red]")
 
         elif choice == "i":
             console.print(Panel("Corridor Key Inference", style="magenta"))

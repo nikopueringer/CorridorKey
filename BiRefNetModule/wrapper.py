@@ -43,21 +43,22 @@ usage_to_weights_file = {
 }
 
 half_precision = True
-resolution = (1024, 1024)
 
 base_folder = os.path.join(os.path.dirname(__file__), "checkpoints")
 
 class BiRefNetHandler():
     def __init__(self, device='cpu', usage='General'):
+        self.device = device
+
         # Set resolution
         if usage in ['General-Lite-2K']:
-            resolution = (2560, 1440)
+            self.resolution = (2560, 1440)
         elif usage in ['General-reso_512']:
-            resolution = (512, 512)
+            self.resolution = (512, 512)
         elif usage in ['General-HR', 'Matting-HR']:
-            resolution = (2048, 2048)
+            self.resolution = (2048, 2048)
         else:
-            resolution = (1024, 1024) 
+            self.resolution = (1024, 1024) 
 
         repo_name = usage_to_weights_file[usage]
         repo_id = f"ZhengPeng7/{repo_name}"
@@ -73,13 +74,27 @@ class BiRefNetHandler():
                     model_local_dir, trust_remote_code=True
                 )
 
-        self.device = device
         self.birefnet.to(device)
         self.birefnet.eval()
         if half_precision:
             self.birefnet.half()
 
-    def process(self, input_path, alpha_output_dir = None, dilate_radius=10):
+    def cleanup(self):
+        """Explicitly clear model and release GPU memory."""
+        # Delete the model reference
+        if hasattr(self, 'birefnet'):
+            del self.birefnet
+        
+        # Clear Python garbage
+        import gc
+        gc.collect()
+        
+        # Clear PyTorch CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+    def process(self, input_path, alpha_output_dir = None, dilate_radius=10, on_frame_complete=None):
         """
         Process a single video or directory of images.
         """
@@ -87,9 +102,7 @@ class BiRefNetHandler():
         file_name = input_path.stem
         is_video = input_path.suffix.lower() in ['.mp4', '.mkv', '.gif', '.mov', '.avi']
 
-        image_preprocessor = ImagePreprocessor(resolution=tuple(resolution))
-
-        count, success = 0, True
+        image_preprocessor = ImagePreprocessor(resolution=tuple(self.resolution))
 
         def get_frames():
             """ Yields tuples of (image_numpy_array, output_file_name) """
@@ -119,7 +132,8 @@ class BiRefNetHandler():
                         continue
                     # Keep original filename for image sequences
                     yield img, f"alphaSeq_{img_path.stem}.png"
-    
+
+        count = 0
         for image, out_name in get_frames():
             # Ensure correct conversion to RGB regardless of input format (EXR/PNG/JPG)
             if len(image.shape) == 2:
@@ -165,3 +179,6 @@ class BiRefNetHandler():
             if alpha_output_dir:
                 save_path = os.path.join(alpha_output_dir, out_name)
                 cv2.imwrite(save_path, mask_np)
+            
+            if on_frame_complete:
+                on_frame_complete(count, 0)
