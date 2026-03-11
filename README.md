@@ -16,7 +16,7 @@ No more fighting with garbage mattes or agonizing over "core" vs "edge" keys. Gi
 
 This is a brand new release, I'm sure you will discover many ways it can be improved! I invite everyone to help. Join us on the "Corridor Creates" Discord to share ideas, work, forks, etc! https://discord.gg/zvwUrdWXJm
 
-Also, if you are a novice at using python scripts much like I was, consider downloading a smart IDE like Antigravity (from google, it's free), downloading this repository, and then asking Antigravity to help you get up and running. I even made a LLM Handover doc in the docs/ directory. This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies — it handles Python installation, virtual environments, and packages all in one step, so you don't need to worry about any of that.
+Also, if you are a novice at using python scripts much like I was, consider downloading a smart IDE like Antigravity (from google, it's free), downloading this repository, and then asking Antigravity to help you get up and running. I even made a LLM Handover doc in the docs/ directory. This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies  it handles Python installation, virtual environments, and packages all in one step, so you don't need to worry about any of that.
 
 Naturally, I have not tested everything. If you encounter errors, please consider patching the code as needed and submitting a pull request.
 
@@ -43,7 +43,7 @@ Because GVM and VideoMaMa have huge model file sizes and extreme hardware requir
 
 ### 1. Installation
 
-This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all dependencies. uv is a fast, modern replacement for pip that automatically handles Python versions, virtual environments, and package installation in a single step. You do **not** need to install Python yourself — uv does it for you.
+This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all dependencies. uv is a fast, modern replacement for pip that automatically handles Python versions, virtual environments, and package installation in a single step. You do **not** need to install Python yourself  uv does it for you.
 
 **For Windows Users (Automated):**
 1.  Clone or download this repository to your local machine.
@@ -146,8 +146,8 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 ## Backend Selection
 
 CorridorKey supports two inference backends:
-- **Torch** (default on Linux/Windows) — CUDA, MPS, or CPU
-- **MLX** (Apple Silicon) — native Metal acceleration, no Torch overhead
+- **Torch** (default on Linux/Windows): CUDA, MPS, or CPU
+- **MLX** (Apple Silicon): native Metal acceleration, no Torch overhead
 
 Resolution: `--backend` flag > `CORRIDORKEY_BACKEND` env var > auto-detect.
 Auto mode prefers MLX on Apple Silicon when available.
@@ -158,9 +158,9 @@ Auto mode prefers MLX on Apple Silicon when available.
    ```bash
    uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git
    ```
-2. Obtain the MLX weights (`.safetensors`) — pick **one** option:
+2. Obtain the MLX weights (`.safetensors`) pick **one** option:
 
-   **Option A — Download pre-converted weights (simplest):**
+   **Option A: Download pre-converted weights (simplest):**
    ```bash
    # Download weights from GitHub Releases into a local cache directory
    uv run python -m corridorkey_mlx weights download
@@ -170,7 +170,7 @@ Auto mode prefers MLX on Apple Silicon when available.
    cp "$WEIGHTS" CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
    ```
 
-   **Option B — Convert from an existing `.pth` checkpoint:**
+   **Option B: Convert from an existing `.pth` checkpoint:**
    ```bash
    # Clone the MLX repo (contains the conversion script)
    git clone https://github.com/nikopueringer/corridorkey-mlx.git
@@ -196,10 +196,19 @@ Auto mode prefers MLX on Apple Silicon when available.
 MLX uses img_size=2048 by default (same as Torch).
 
 ### Troubleshooting
-- **"No .safetensors checkpoint found"** — place MLX weights in `CorridorKeyModule/checkpoints/`
-- **"corridorkey_mlx not installed"** — run `uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git`
-- **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
-- **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
+
+- **No `.safetensors` checkpoint found**  
+  Make sure the MLX weights are inside `CorridorKeyModule/checkpoints/`.
+
+- **`corridorkey_mlx` not installed**  
+  Install it with:
+  `uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git`
+
+- **"MLX requires Apple Silicon" error**  
+  MLX currently only works on Macs with M1 or newer chips.
+
+- **Torch backend selected automatically**  
+  If this happens, set `CORRIDORKEY_BACKEND=mlx` manually.
 
 ## Advanced Usage
 
@@ -207,7 +216,7 @@ For developers looking for more details on the specifics of what is happening in
 
 ### Running Tests
 
-The project includes unit tests for the color math and compositing pipeline. No GPU or model weights required — tests run in a few seconds on any machine.
+The project includes unit tests for the color math and compositing pipeline. No GPU or model weights required  tests run in a few seconds on any machine.
 
 ```bash
 uv sync --group dev   # install test dependencies (pytest)
