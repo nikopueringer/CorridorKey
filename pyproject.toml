@@ -9,8 +9,8 @@ authors = [{ name = "Corridor Digital" }]
 
 dependencies = [
     # Core inference
-    "torch==2.10.0",
-    "torchvision==0.25.0",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
     "timm==1.0.24",
     "numpy",
     "opencv-python",
@@ -18,7 +18,7 @@ dependencies = [
     "setuptools",
     # Triton fix for Windows
     # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
-    "triton-windows==3.6.0.post25 ; sys_platform == 'win32'",
+    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
 
     # GVM alpha hint generator
     "diffusers",
