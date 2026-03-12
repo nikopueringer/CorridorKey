@@ -668,6 +668,7 @@ def run_inference(
                 input_stem = os.path.splitext(input_files[i])[0]
 
             if img_srgb is None:
+                logger.info(f"Frame {i} img_srgb is None")
                 continue
 
             # 2. Read Alpha (Mask)
