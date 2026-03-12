@@ -670,18 +670,33 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
-        for i in range(num_frames):
+        # Unpack settings for easier access in the worker function
+        user_input_is_linear = settings.input_is_linear
+        despill_strength = settings.despill_strength
+        auto_despeckle = settings.auto_despeckle
+        despeckle_size = settings.despeckle_size
+        refiner_scale = settings.refiner_scale
+
+        # Create a lock for GPU operations to ensure thread-safe inference
+        import threading
+        _gpu_lock = threading.Lock()
+
+        from device_utils import RuntimeThreadPool
+
+        def _process_single_frame(i: int):
+            if i % 10 == 0:
+                print(f"  Frame {i}/{num_frames}...", end="\r")
+
             # 1. Read Input
             img_srgb = None
             input_stem = f"{i:05d}"
+            input_is_linear = user_input_is_linear
 
-            # Use the settings-defined gamma
-            input_is_linear = settings.input_is_linear
-
+            # IO is strictly locked to prevent scramble if using VideoCapture
             if input_cap:
                 ret, frame = input_cap.read()
                 if not ret:
-                    break
+                    return False
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img_srgb = img_rgb.astype(np.float32) / 255.0
                 input_stem = f"{i:05d}"
@@ -693,14 +708,13 @@ def run_inference(
                 if is_exr:
                     img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
                     if img_linear is None:
-                        continue
+                        return False
                     img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
-                    # Support overriding EXR behavior if user picked 's'
                     img_srgb = np.maximum(img_linear_rgb, 0.0)
                 else:
                     img_bgr = cv2.imread(fpath)
                     if img_bgr is None:
-                        continue
+                        return False
                     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
                     img_srgb = img_rgb.astype(np.float32) / 255.0
 
@@ -709,14 +723,14 @@ def run_inference(
             if alpha_cap:
                 ret, frame = alpha_cap.read()
                 if not ret:
-                    break
+                    return False
                 mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
             else:
                 fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
                 mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
 
                 if mask_in is None:
-                    continue
+                    return False
 
                 if mask_in.ndim == 3:
                     if mask_in.shape[2] == 3:
@@ -738,14 +752,18 @@ def run_inference(
                     mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
                 )
 
-            # 3. Process
+            # 3. Pre-process mapping (CPU)
             USE_STRAIGHT_MODEL = True
-            res = engine.process_frame(
-                img_srgb,
-                mask_linear,
-                input_is_linear=input_is_linear,
+            inp_t, h, w = engine.preprocess(img_srgb, mask_linear, input_is_linear=input_is_linear)
+
+            # 4. Infer (GPU locked)
+            with _gpu_lock:
+                pred_alpha, pred_fg = engine.infer(inp_t, refiner_scale=refiner_scale)
+
+            # 5. Post-process mapping (CPU)
+            res = engine.postprocess(
+                pred_alpha, pred_fg, h, w,
                 fg_is_straight=USE_STRAIGHT_MODEL,
-                despill_strength=settings.despill_strength,
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
@@ -783,6 +801,19 @@ def run_inference(
 
             if on_frame_complete:
                 on_frame_complete(i, num_frames)
+            
+            return True
+
+        # Parallelize I/O using the managed thread pool
+        is_video = bool(input_cap or alpha_cap)
+        with RuntimeThreadPool(is_video) as executor:
+            from concurrent.futures import as_completed
+            futures = [executor.submit(_process_single_frame, i) for i in range(num_frames)]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"Frame processing failed: {e}")
 
         if input_cap:
             input_cap.release()

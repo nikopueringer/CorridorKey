@@ -74,3 +74,65 @@ def clear_device_cache(device: torch.device | str) -> None:
         torch.cuda.empty_cache()
     elif device_type == "mps":
         torch.mps.empty_cache()
+
+
+class RuntimeThreadPool:
+    """Context manager to handle parallel I/O with constrained compute threads.
+
+    On high-core-count systems (e.g. Threadripper), nested thread pools in
+    OpenCV, PyTorch, and OpenEXR can cause massive context-switching overhead
+    when running inside a top-level ThreadPoolExecutor.
+
+    This context manager:
+    1. Determines optimal worker count based on CPU and workload type.
+    2. Temporarily constrains library internal threads to 1 per worker.
+    3. Provides a managed ThreadPoolExecutor for I/O-heavy tasks.
+    """
+
+    def __init__(self, is_video: bool):
+        self.is_video = is_video
+        self.max_workers = 1 if is_video else min(32, (os.cpu_count() or 1) + 4)
+        self.executor = None
+        self._prev_cv2_threads = None
+        self._prev_torch_threads = None
+        self._prev_exr_threads = os.environ.get("OPENEXR_NUM_THREADS")
+
+    def __enter__(self):
+        # VideoCapture is not thread-safe; use a single worker
+        if self.is_video:
+            from concurrent.futures import ThreadPoolExecutor
+            self.executor = ThreadPoolExecutor(max_workers=1)
+            return self.executor
+
+        # Constrain library threads to prevent thrashing
+        import cv2
+        import torch
+
+        self._prev_cv2_threads = cv2.getNumThreads()
+        self._prev_torch_threads = torch.get_num_threads()
+
+        cv2.setNumThreads(0)
+        torch.set_num_threads(1)
+        os.environ["OPENEXR_NUM_THREADS"] = "1"
+
+        from concurrent.futures import ThreadPoolExecutor
+        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        return self.executor
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.executor:
+            self.executor.shutdown(wait=True)
+
+        if not self.is_video:
+            import cv2
+            import torch
+
+            if self._prev_cv2_threads is not None:
+                cv2.setNumThreads(self._prev_cv2_threads)
+            if self._prev_torch_threads is not None:
+                torch.set_num_threads(self._prev_torch_threads)
+
+            if self._prev_exr_threads is not None:
+                os.environ["OPENEXR_NUM_THREADS"] = self._prev_exr_threads
+            else:
+                os.environ.pop("OPENEXR_NUM_THREADS", None)
