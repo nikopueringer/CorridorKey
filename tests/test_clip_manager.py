@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from clip_manager import ClipAsset, ClipEntry, InferenceSettings, run_inference
+from clip_manager import ClipAsset, ClipEntry, InferenceSettings, is_image_file, is_video_file, run_inference
 
 
 class TestClipManagerInference(unittest.TestCase):
@@ -57,9 +57,11 @@ class TestClipManagerInference(unittest.TestCase):
             clip_manager.cv2.COLOR_BGR2RGB = 4
 
             mock_engine = MagicMock()
-            mock_engine.forward.return_value = {
-                "matte": np.zeros((10, 10), dtype=np.float32),
+            mock_engine.process_frame.return_value = {
+                "alpha": np.zeros((10, 10, 1), dtype=np.float32),
                 "fg": np.zeros((10, 10, 3), dtype=np.float32),
+                "comp": np.zeros((10, 10, 3), dtype=np.float32),
+                "processed": np.zeros((10, 10, 4), dtype=np.float32),
             }
 
             mock_on_clip_start = MagicMock()
@@ -124,9 +126,11 @@ class TestClipManagerInference(unittest.TestCase):
             clip_manager.cv2.COLOR_BGR2RGB = 4
 
             mock_engine = MagicMock()
-            mock_engine.forward.return_value = {
-                "matte": np.zeros((10, 10), dtype=np.float32),
+            mock_engine.process_frame.return_value = {
+                "alpha": np.zeros((10, 10, 1), dtype=np.float32),
                 "fg": np.zeros((10, 10, 3), dtype=np.float32),
+                "comp": np.zeros((10, 10, 3), dtype=np.float32),
+                "processed": np.zeros((10, 10, 4), dtype=np.float32),
             }
 
             mock_on_clip_start = MagicMock()
@@ -135,6 +139,43 @@ class TestClipManagerInference(unittest.TestCase):
 
             self.assertEqual(mock_engine.process_frame.call_count, 1)
             mock_on_clip_start.assert_called_once_with("TestClipStartFrame", 1)
+
+
+class TestFileTypeHelpers(unittest.TestCase):
+    def test_is_image_file_accepted(self):
+        for ext in (".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp"):
+            self.assertTrue(is_image_file(f"frame{ext}"))
+
+    def test_is_image_file_rejected(self):
+        for ext in (".mp4", ".txt", ".mov"):
+            self.assertFalse(is_image_file(f"clip{ext}"))
+
+    def test_is_video_file_accepted(self):
+        for ext in (".mp4", ".mov", ".avi", ".mkv"):
+            self.assertTrue(is_video_file(f"clip{ext}"))
+
+    def test_is_video_file_rejected(self):
+        self.assertFalse(is_video_file("frame.png"))
+
+
+class TestClipAsset(unittest.TestCase):
+    @patch("clip_manager.os.listdir", return_value=["a.png", "b.png", "c.png"])
+    @patch("clip_manager.is_image_file", return_value=True)
+    def test_sequence_frame_count(self, mock_iif, mock_ls):
+        asset = ClipAsset("/fake/path", "sequence")
+        self.assertEqual(asset.frame_count, 3)
+
+
+class TestClipEntry(unittest.TestCase):
+    @patch("clip_manager.glob.glob", return_value=[])
+    @patch("clip_manager.os.listdir", return_value=["frame_000.png"])
+    @patch("clip_manager.is_image_file", return_value=True)
+    @patch("clip_manager.os.path.isdir", side_effect=lambda p: os.path.basename(p) == "Input")
+    def test_find_assets_sequence(self, mock_isdir, mock_iif, mock_ls, mock_glob):
+        entry = ClipEntry("shot_a", "/fake/root")
+        entry.find_assets()
+        self.assertIsNotNone(entry.input_asset)
+        self.assertEqual(entry.input_asset.type, "sequence")
 
 
 if __name__ == "__main__":
