@@ -3,6 +3,7 @@ site_name = "CorridorKey"
 site_description = "Perfect Green Screen Keys"
 repo_name = "CorridorKey"
 repo_url = "https://github.com/nikopueringer/CorridorKey"
+extra_css = ["stylesheets/extra.css"]
 
 nav = [
     { Home = "index.md" },
