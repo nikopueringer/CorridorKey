@@ -1,8 +1,9 @@
 """Tests for clip_manager.py utility functions and ClipEntry discovery.
 
 These tests verify the non-interactive parts of clip_manager: file type
-detection, Windows→Linux path mapping, and the ClipEntry asset discovery
-that scans directory trees to find Input/AlphaHint pairs.
+detection, Windows->Linux path mapping, the ClipEntry asset discovery
+that scans directory trees to find Input/AlphaHint pairs, and the
+alpha mask decoding helper used during inference.
 
 No GPU, model weights, or interactive input required.
 """
@@ -18,6 +19,7 @@ import pytest
 from clip_manager import (
     ClipAsset,
     ClipEntry,
+    _decode_alpha_channel,
     is_image_file,
     is_video_file,
     map_path,
@@ -290,3 +292,103 @@ class TestOrganizeTarget:
         assert len(input_files) == 2
         # Original loose files should be gone
         assert not (shot / "frame_0000.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# _decode_alpha_channel
+# ---------------------------------------------------------------------------
+
+
+class TestDecodeAlphaChannel:
+    def test_2d_passthrough(self):
+        """A 2D (H, W) array is returned unchanged."""
+        mask = np.array([[0.5, 0.8], [0.2, 1.0]], dtype=np.float32)
+        result = _decode_alpha_channel(mask)
+        np.testing.assert_array_equal(result, mask)
+
+    def test_2d_passthrough_preserves_dtype(self):
+        """Dtype of a 2D input is not altered."""
+        mask_u8 = np.full((4, 4), 128, dtype=np.uint8)
+        assert _decode_alpha_channel(mask_u8).dtype == np.uint8
+
+    def test_bgr_3channel_produces_2d_output(self):
+        """A 3-channel BGR array must yield a 2D result, not a 3D one."""
+        bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+        result = _decode_alpha_channel(bgr)
+        assert result.ndim == 2
+        assert result.shape == (4, 4)
+
+    def test_bgr_3channel_uses_luminance_not_blue_channel(self):
+        """3-channel BGR: result matches cv2 grayscale, not channel 0 (blue)."""
+        bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+        bgr[:, :, 2] = 200  # R in BGR
+        result = _decode_alpha_channel(bgr)
+        expected = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        np.testing.assert_array_equal(result, expected)
+        assert not np.all(result == 0)
+
+    def test_bgr_3channel_regression_video_frame(self):
+        """3-channel BGR: does not return the red channel (BGR index 2)."""
+        bgr = np.full((8, 8, 3), 10, dtype=np.uint8)
+        bgr[:, :, 2] = 200  # red in BGR order
+        result = _decode_alpha_channel(bgr)
+        expected = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        np.testing.assert_array_equal(result, expected)
+        assert not np.all(result == 200)
+
+    def test_bgra_4channel_uses_alpha_channel_not_blue(self):
+        """4-channel BGRA: returns channel 3 (alpha), not channel 0 (blue)."""
+        bgra = np.zeros((4, 4, 4), dtype=np.uint8)
+        bgra[:, :, 0] = 50  # blue
+        bgra[:, :, 3] = 200  # alpha
+        result = _decode_alpha_channel(bgra)
+        assert result.ndim == 2
+        assert result.shape == (4, 4)
+        assert np.all(result == 200)
+
+    def test_bgra_4channel_ignores_color_channels(self):
+        """4-channel BGRA: only the alpha channel contributes to the result."""
+        bgra = np.ones((4, 4, 4), dtype=np.uint8) * 255
+        bgra[:, :, 3] = 128
+        result = _decode_alpha_channel(bgra)
+        assert np.all(result == 128)
+
+    def test_uniform_white_bgr_gives_white_grayscale(self):
+        """All-white BGR produces all-white grayscale."""
+        bgr = np.full((4, 4, 3), 255, dtype=np.uint8)
+        assert np.all(_decode_alpha_channel(bgr) == 255)
+
+    def test_uniform_black_bgr_gives_black_grayscale(self):
+        """All-black BGR produces all-black grayscale."""
+        bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+        assert np.all(_decode_alpha_channel(bgr) == 0)
+
+    def test_single_channel_with_trailing_dim_is_squeezed(self):
+        """(H, W, 1) array is squeezed to (H, W) without altering values."""
+        mask = np.full((4, 4, 1), 128, dtype=np.uint8)
+        result = _decode_alpha_channel(mask)
+        assert result.ndim == 2
+        assert result.shape == (4, 4)
+        assert np.all(result == 128)
+
+    def test_more_than_4_channels_falls_back_to_bgr_grayscale(self):
+        """Arrays with more than 4 channels use channels 0-2 as BGR fallback."""
+        data = np.zeros((4, 4, 6), dtype=np.uint8)
+        data[:, :, 0] = 50
+        data[:, :, 1] = 100
+        data[:, :, 2] = 150
+        data[:, :, 3:] = 200
+        result = _decode_alpha_channel(data)
+        expected = cv2.cvtColor(data[:, :, :3], cv2.COLOR_BGR2GRAY)
+        assert result.ndim == 2
+        np.testing.assert_array_equal(result, expected)
+
+    def test_2_channel_array_raises_value_error(self):
+        """2-channel arrays raise ValueError."""
+        with pytest.raises(ValueError, match="Unsupported array shape"):
+            _decode_alpha_channel(np.zeros((4, 4, 2), dtype=np.uint8))
+
+    def test_1d_array_raises_value_error(self):
+        """1-D arrays raise ValueError."""
+        with pytest.raises(ValueError, match="Unsupported array shape"):
+            _decode_alpha_channel(np.zeros(16, dtype=np.uint8))

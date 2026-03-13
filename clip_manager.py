@@ -79,6 +79,45 @@ def map_path(win_path: str) -> str:
     return win_path
 
 
+def _decode_alpha_channel(raw: np.ndarray) -> np.ndarray:
+    """Return a 2D (H, W) alpha mask from a raw OpenCV array.
+
+    OpenCV stores images in BGR (or BGRA) channel order. Alpha hint masks are
+    grayscale by nature, but artists may save them as 3-channel RGB or as
+    4-channel RGBA images. This function normalises all these cases to a 2D
+    (H, W) array without altering the dtype, so the caller can apply
+    bit-depth normalisation separately.
+
+    - 2D (H, W): returned as-is.
+    - 3-channel BGR (H, W, 3): converted to grayscale via cv2.COLOR_BGR2GRAY,
+      which weights channels by luminance rather than blindly picking one.
+    - 4-channel BGRA (H, W, 4): channel 3 (alpha) is returned directly, since
+      that is where image-editing tools write the actual transparency data.
+    - More than 4 channels (H, W, N) where N > 4: the first three channels
+      are treated as BGR and converted to grayscale as a best-effort fallback.
+
+    Raises ValueError for shapes that cannot be interpreted as a mask (e.g.
+    2-channel or 1-D arrays).
+    """
+    if raw.ndim == 2:
+        return raw
+
+    if raw.ndim == 3:
+        channels = raw.shape[2]
+        if channels == 1:
+            return raw.squeeze(axis=2)
+        elif channels == 3:
+            return cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
+        elif channels == 4:
+            return raw[:, :, 3]
+        elif channels > 4:
+            # More channels than expected (e.g. a multichannel EXR slice):
+            # treat the first three as BGR and convert to grayscale.
+            return cv2.cvtColor(raw[:, :, :3], cv2.COLOR_BGR2GRAY)
+
+    raise ValueError(f"Unsupported array shape for alpha decoding: {raw.shape}")
+
+
 # --- Classes ---
 class ClipAsset:
     def __init__(self, path: str, asset_type: str) -> None:
@@ -707,7 +746,7 @@ def run_inference(
                 ret, frame = alpha_cap.read()
                 if not ret:
                     break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+                mask_linear = _decode_alpha_channel(frame).astype(np.float32) / 255.0
             else:
                 fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
                 mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
@@ -715,20 +754,14 @@ def run_inference(
                 if mask_in is None:
                     continue
 
-                if mask_in.ndim == 3:
-                    if mask_in.shape[2] == 3:
-                        mask_linear = mask_in[:, :, 0]
-                    else:
-                        mask_linear = mask_in
-                else:
-                    mask_linear = mask_in
+                mask_2d = _decode_alpha_channel(mask_in)
 
-                if mask_linear.dtype == np.uint8:
-                    mask_linear = mask_linear.astype(np.float32) / 255.0
-                elif mask_linear.dtype == np.uint16:
-                    mask_linear = mask_linear.astype(np.float32) / 65535.0
+                if mask_2d.dtype == np.uint8:
+                    mask_linear = mask_2d.astype(np.float32) / 255.0
+                elif mask_2d.dtype == np.uint16:
+                    mask_linear = mask_2d.astype(np.float32) / 65535.0
                 else:
-                    mask_linear = mask_linear.astype(np.float32)
+                    mask_linear = mask_2d.astype(np.float32)
 
             if mask_linear.shape[:2] != img_srgb.shape[:2]:
                 mask_linear = cv2.resize(
