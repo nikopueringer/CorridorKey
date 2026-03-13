@@ -3,6 +3,7 @@
 
 https://github.com/user-attachments/assets/1fb27ea8-bc91-4ebc-818f-5a3b5585af08
 
+> 📖 **[Full Documentation](https://nikopueringer.github.io/CorridorKey)** — Installation guides, usage instructions, and developer docs.
 
 When you film something against a green screen, the edges of your subject inevitably blend with the green background. This creates pixels that are a mix of your subject's color and the green screen's color. Traditional keyers struggle to untangle these colors, forcing you to spend hours building complex edge mattes or manually rotoscoping. Even modern "AI Roto" solutions typically output a harsh binary mask, completely destroying the delicate, semi-transparent pixels needed for a realistic composite.
 

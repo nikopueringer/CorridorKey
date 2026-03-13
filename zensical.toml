@@ -4,7 +4,20 @@ site_description = "Perfect Green Screen Keys"
 repo_name = "CorridorKey"
 repo_url = "https://github.com/nikopueringer/CorridorKey"
 
-nav = [{ Home = "index.md" }, { LLM_HANDOVER = "LLM_HANDOVER.md" }]
+nav = [
+    { Home = "index.md" },
+    { "User Guide" = [
+        { Installation = "installation.md" },
+        { "Hardware Requirements" = "hardware-requirements.md" },
+        { Usage = "usage.md" },
+        { "Device and Backend Selection" = "device-and-backend-selection.md" },
+    ]},
+    { "Developer Guide" = [
+        { Architecture = "architecture.md" },
+        { Contributing = "contributing.md" },
+        { "LLM Handover" = "LLM_HANDOVER.md" },
+    ]},
+]
 
 [project.theme]
 language = "en"
@@ -49,3 +62,5 @@ custom_fences = [
 
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
+
+[project.markdown_extensions.pymdownx.snippets]
