@@ -47,11 +47,39 @@ _torch_stack = functools.partial(torch.stack, dim=-1)
 _numpy_stack = functools.partial(np.stack, axis=-1)
 
 
+_SRGB_LUT_SIZE = 65536
+
+
+@functools.lru_cache(maxsize=1)
+def _linear_to_srgb_lut() -> np.ndarray:
+    """Build a LUT for linear→sRGB conversion. Cached on first use."""
+    t = np.linspace(0.0, 1.0, _SRGB_LUT_SIZE, dtype=np.float64)
+    result = np.where(t <= 0.0031308, t * 12.92, 1.055 * np.power(t, 1.0 / 2.4) - 0.055)
+    return result.astype(np.float32)
+
+
+@functools.lru_cache(maxsize=1)
+def _srgb_to_linear_lut() -> np.ndarray:
+    """Build a LUT for sRGB→linear conversion. Cached on first use."""
+    t = np.linspace(0.0, 1.0, _SRGB_LUT_SIZE, dtype=np.float64)
+    result = np.where(t <= 0.04045, t / 12.92, np.power((t + 0.055) / 1.055, 2.4))
+    return result.astype(np.float32)
+
+
+def _apply_lut(x: np.ndarray, lut: np.ndarray) -> np.ndarray:
+    """Apply a [0,1]→[0,1] LUT to a float32 array via quantized index lookup."""
+    indices = np.clip(x * (_SRGB_LUT_SIZE - 1), 0, _SRGB_LUT_SIZE - 1).astype(np.uint16)
+    return lut[indices]
+
+
 def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
     Converts Linear to sRGB using the official piecewise sRGB transfer function.
     Supports both Numpy arrays and PyTorch tensors.
+    Uses LUT acceleration for numpy arrays (avoids np.power).
     """
+    if not _is_tensor(x):
+        return _apply_lut(np.clip(x, 0.0, 1.0, dtype=np.float32), _linear_to_srgb_lut())
     x = _clamp(x, 0.0)
     mask = x <= 0.0031308
     return _where(mask, x * 12.92, 1.055 * _power(x, 1.0 / 2.4) - 0.055)
@@ -61,7 +89,10 @@ def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
     Converts sRGB to Linear using the official piecewise sRGB transfer function.
     Supports both Numpy arrays and PyTorch tensors.
+    Uses LUT acceleration for numpy arrays (avoids np.power).
     """
+    if not _is_tensor(x):
+        return _apply_lut(np.clip(x, 0.0, 1.0, dtype=np.float32), _srgb_to_linear_lut())
     x = _clamp(x, 0.0)
     mask = x <= 0.04045
     return _where(mask, x / 12.92, _power((x + 0.055) / 1.055, 2.4))

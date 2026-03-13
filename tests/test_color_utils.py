@@ -65,11 +65,12 @@ class TestSrgbLinearConversion:
         assert linear_val.item() == pytest.approx(0.214, abs=0.001)
 
     # Roundtrip: linear → sRGB → linear ≈ original
+    # Tolerance 5e-5: numpy path uses LUT acceleration (65536 entries, max quantization error ~3e-5)
     @pytest.mark.parametrize("value", [0.0, 0.001, 0.0031308, 0.05, 0.214, 0.5, 0.8, 1.0])
     def test_roundtrip_numpy(self, value):
         x = _to_np(value)
         roundtripped = cu.srgb_to_linear(cu.linear_to_srgb(x))
-        assert roundtripped == pytest.approx(value, abs=1e-5)
+        assert roundtripped == pytest.approx(value, abs=5e-5)
 
     @pytest.mark.parametrize("value", [0.0, 0.001, 0.0031308, 0.05, 0.214, 0.5, 0.8, 1.0])
     def test_roundtrip_torch(self, value):
@@ -119,7 +120,7 @@ class TestSrgbLinearConversion:
         result = cu.linear_to_srgb(x)
         assert result.shape == (4,)
         roundtripped = cu.srgb_to_linear(result)
-        np.testing.assert_allclose(roundtripped, x, atol=1e-5)
+        np.testing.assert_allclose(roundtripped, x, atol=5e-5)
 
     def test_vectorized_torch(self):
         x = _to_torch([0.0, 0.1, 0.5, 1.0])
