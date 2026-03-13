@@ -284,7 +284,7 @@ def run_inference_cmd(
     if required_flags_set:
         if any(v is None for v in [linear, despill, despeckle, refiner]):
             raise ValueError("Missing required flags for inference settings.")
-        
+
         despill_clamped = max(0, min(10, despill))
         settings = InferenceSettings(
             input_is_linear=linear,

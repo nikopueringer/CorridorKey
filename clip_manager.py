@@ -544,7 +544,7 @@ def _read_frame(cap, files, path, index, is_linear):
 
     fpath = os.path.join(path, files[index])
     is_exr = fpath.lower().endswith(".exr")
-    
+
     if is_exr:
         img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
         if img_linear is None:
@@ -595,6 +595,7 @@ def run_inference(
     engine = engine_override
     if engine is None:
         from CorridorKeyModule.backend import create_engine
+
         engine = create_engine(backend=backend, device=device)
 
     for clip in ready_clips:
@@ -614,7 +615,7 @@ def run_inference(
         num_frames = total_available
         if max_frames is not None:
             num_frames = min(num_frames, max_frames)
-        
+
         actual_processing_frames = max(0, num_frames - start_frame)
 
         logger.info(
@@ -623,7 +624,10 @@ def run_inference(
         )
 
         if actual_processing_frames <= 0:
-            logger.warning(f"Clip '{clip.name}': 0 frames to process (start_frame={start_frame} >= num_frames={num_frames}), skipping.")
+            logger.warning(
+                f"Clip '{clip.name}': 0 frames to process "
+                f"(start_frame={start_frame} >= num_frames={num_frames}), skipping."
+            )
             continue
 
         input_cap = None
@@ -635,7 +639,7 @@ def run_inference(
             input_cap = cv2.VideoCapture(clip.input_asset.path)
             # Advance to start_frame
             if start_frame > 0:
-                 input_cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                input_cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         else:
             input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
 
@@ -661,7 +665,7 @@ def run_inference(
             if input_cap:
                 img_srgb = _read_frame(input_cap, [], clip.input_asset.path, 0, input_is_linear)
                 if img_srgb is None:
-                     break
+                    break
                 input_stem = f"{i:05d}"
             else:
                 img_srgb = _read_frame(None, input_files, clip.input_asset.path, i, input_is_linear)

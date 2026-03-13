@@ -1,17 +1,11 @@
 import os
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
+
 import numpy as np
 
-# -----------------------------------------------------------------------------
-# MOCKING HEAVY DEPENDENCIES BEFORE IMPORT
-# -----------------------------------------------------------------------------
-sys.modules['torch'] = MagicMock()
-sys.modules['torchvision'] = MagicMock()
-sys.modules['cv2'] = MagicMock()
+from clip_manager import ClipAsset, ClipEntry, InferenceSettings, run_inference
 
-from clip_manager import run_inference, ClipEntry, ClipAsset, InferenceSettings
 
 class TestClipManagerInference(unittest.TestCase):
     """
@@ -23,8 +17,11 @@ class TestClipManagerInference(unittest.TestCase):
     @patch("clip_manager.cv2.imwrite")
     @patch("clip_manager.is_image_file")
     @patch("clip_manager.os.listdir")
-    def test_run_inference_basic_flow(self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread):
+    def test_run_inference_basic_flow(
+        self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread
+    ):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp_path:
             clip_root = os.path.join(tmp_path, "TestClip")
             os.makedirs(os.path.join(clip_root, "Input"))
@@ -39,7 +36,7 @@ class TestClipManagerInference(unittest.TestCase):
             def side_effect_imread(path, flags=None):
                 if "alpha" in path.lower():
                     return np.zeros((10, 10), dtype=np.uint8)
-                return np.zeros((10, 10, 3), dtype=np.uint8) 
+                return np.zeros((10, 10, 3), dtype=np.uint8)
 
             mock_imread.side_effect = side_effect_imread
             mock_cvt_color.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -50,19 +47,21 @@ class TestClipManagerInference(unittest.TestCase):
                     return ["frame_000.png", "frame_001.png"]
                 else:
                     return ["alpha_000.png", "alpha_001.png"]
+
             mock_listdir.side_effect = side_effect_listdir
-            
+
             import clip_manager
+
             clip_manager.cv2.IMREAD_UNCHANGED = -1
             clip_manager.cv2.IMREAD_ANYDEPTH = 2
             clip_manager.cv2.COLOR_BGR2RGB = 4
-            
+
             mock_engine = MagicMock()
             mock_engine.forward.return_value = {
                 "matte": np.zeros((10, 10), dtype=np.float32),
-                "fg": np.zeros((10, 10, 3), dtype=np.float32)
+                "fg": np.zeros((10, 10, 3), dtype=np.float32),
             }
-            
+
             mock_on_clip_start = MagicMock()
             mock_on_frame_complete = MagicMock()
             settings = InferenceSettings()
@@ -72,7 +71,7 @@ class TestClipManagerInference(unittest.TestCase):
                 settings=settings,
                 on_clip_start=mock_on_clip_start,
                 on_frame_complete=mock_on_frame_complete,
-                engine_override=mock_engine
+                engine_override=mock_engine,
             )
 
             self.assertEqual(mock_engine.process_frame.call_count, 2)
@@ -85,8 +84,11 @@ class TestClipManagerInference(unittest.TestCase):
     @patch("clip_manager.cv2.imwrite")
     @patch("clip_manager.is_image_file")
     @patch("clip_manager.os.listdir")
-    def test_run_inference_start_frame(self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread):
+    def test_run_inference_start_frame(
+        self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread
+    ):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp_path:
             clip_root = os.path.join(tmp_path, "TestClipStartFrame")
             os.makedirs(os.path.join(clip_root, "Input"))
@@ -112,30 +114,28 @@ class TestClipManagerInference(unittest.TestCase):
                     return ["frame_000.png", "frame_001.png", "frame_002.png"]
                 else:
                     return ["alpha_000.png", "alpha_001.png", "alpha_002.png"]
+
             mock_listdir.side_effect = side_effect_listdir
-            
+
             import clip_manager
+
             clip_manager.cv2.IMREAD_UNCHANGED = -1
             clip_manager.cv2.IMREAD_ANYDEPTH = 2
             clip_manager.cv2.COLOR_BGR2RGB = 4
-            
+
             mock_engine = MagicMock()
             mock_engine.forward.return_value = {
                 "matte": np.zeros((10, 10), dtype=np.float32),
-                "fg": np.zeros((10, 10, 3), dtype=np.float32)
+                "fg": np.zeros((10, 10, 3), dtype=np.float32),
             }
-            
+
             mock_on_clip_start = MagicMock()
 
-            run_inference(
-                clips=[clip],
-                start_frame=2,
-                on_clip_start=mock_on_clip_start,
-                engine_override=mock_engine
-            )
+            run_inference(clips=[clip], start_frame=2, on_clip_start=mock_on_clip_start, engine_override=mock_engine)
 
             self.assertEqual(mock_engine.process_frame.call_count, 1)
             mock_on_clip_start.assert_called_once_with("TestClipStartFrame", 1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
