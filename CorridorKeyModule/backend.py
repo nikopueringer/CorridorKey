@@ -247,8 +247,8 @@ class _MLXEngineAdapter:
         return result
 
 
-DEFAULT_MLX_TILE_SIZE = 512
-DEFAULT_MLX_TILE_OVERLAP = 64
+DEFAULT_MLX_TILE_SIZE = 768
+DEFAULT_MLX_TILE_OVERLAP = 128
 
 
 def create_engine(
