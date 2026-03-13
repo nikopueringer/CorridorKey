@@ -119,16 +119,26 @@ def _get_checkerboard(w: int, h: int, checker_size: int = 128, color1: float = 0
     return _checkerboard_cache[key]
 
 
-def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, despeckle_size: int) -> dict:
+def _wrap_mlx_output(
+    raw: dict,
+    despill_strength: float,
+    auto_despeckle: bool,
+    despeckle_size: int,
+    enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"}),
+) -> dict:
     """Normalize MLX uint8 output to match Torch float32 contract.
 
     Torch contract:
       alpha:     [H,W,1] float32 0-1
       fg:        [H,W,3] float32 0-1 sRGB
-      comp:      [H,W,3] float32 0-1 sRGB
-      processed: [H,W,4] float32 linear premul RGBA
+      comp:      [H,W,3] float32 0-1 sRGB  (skipped if not in enabled_outputs)
+      processed: [H,W,4] float32 linear premul RGBA  (skipped if not in enabled_outputs)
     """
     from CorridorKeyModule.core import color_utils as cu
+
+    need_comp = "comp" in enabled_outputs
+    need_processed = "processed" in enabled_outputs
+    need_postprocess = need_comp or need_processed
 
     # alpha: uint8 [H,W] → float32 [H,W,1]
     alpha_raw = raw["alpha"]
@@ -139,6 +149,14 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
     # fg: uint8 [H,W,3] → float32 [H,W,3] (sRGB)
     fg = raw["fg"].astype(np.float32) / 255.0
 
+    result: dict = {
+        "alpha": alpha,
+        "fg": fg,
+    }
+
+    if not need_postprocess:
+        return result
+
     # Apply despeckle (MLX stubs this)
     if auto_despeckle:
         processed_alpha = cu.clean_matte(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
@@ -148,24 +166,21 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
     # Apply despill (MLX stubs this)
     fg_despilled = cu.despill(fg, green_limit_mode="average", strength=despill_strength)
 
-    # Composite over checkerboard for comp output
-    h, w = fg.shape[:2]
-    bg_srgb = _get_checkerboard(w, h)
-    bg_lin = cu.srgb_to_linear(bg_srgb)
+    # Colorspace conversion needed for both comp and processed
     fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
-    comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
-    comp_srgb = cu.linear_to_srgb(comp_lin)
 
-    # Build processed: [H,W,4] linear premul RGBA
-    fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
-    processed_rgba = np.concatenate([fg_premul_lin, processed_alpha], axis=-1)
+    if need_comp:
+        h, w = fg.shape[:2]
+        bg_srgb = _get_checkerboard(w, h)
+        bg_lin = cu.srgb_to_linear(bg_srgb)
+        comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+        result["comp"] = cu.linear_to_srgb(comp_lin)
 
-    return {
-        "alpha": alpha,  # raw prediction (before despeckle), matches Torch
-        "fg": fg,  # raw sRGB prediction, matches Torch
-        "comp": comp_srgb,  # sRGB composite on checker
-        "processed": processed_rgba,  # linear premul RGBA
-    }
+    if need_processed:
+        fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
+        result["processed"] = np.concatenate([fg_premul_lin, processed_alpha], axis=-1)
+
+    return result
 
 
 class _MLXEngineAdapter:
@@ -185,6 +200,7 @@ class _MLXEngineAdapter:
         despill_strength=1.0,
         auto_despeckle=True,
         despeckle_size=400,
+        enabled_outputs=frozenset({"fg", "matte", "comp", "processed"}),
     ):
         """Delegate to MLX engine, then normalize output to Torch contract."""
         import time
@@ -218,7 +234,7 @@ class _MLXEngineAdapter:
         t_mlx = time.perf_counter() - t_mlx_start
 
         t_post_start = time.perf_counter()
-        result = _wrap_mlx_output(raw, despill_strength, auto_despeckle, despeckle_size)
+        result = _wrap_mlx_output(raw, despill_strength, auto_despeckle, despeckle_size, enabled_outputs)
         t_post = time.perf_counter() - t_post_start
 
         logger.debug(

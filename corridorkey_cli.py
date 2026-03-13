@@ -269,6 +269,10 @@ def run_inference_cmd(
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
     ] = None,
+    outputs: Annotated[
+        Optional[str],
+        typer.Option("--outputs", help="Comma-separated outputs to write: fg,matte,comp,processed (default: all)"),
+    ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
@@ -276,6 +280,17 @@ def run_inference_cmd(
     prompt interactively.
     """
     clips = scan_clips()
+
+    # Parse enabled outputs
+    enabled_outputs = InferenceSettings.VALID_OUTPUTS
+    if outputs is not None:
+        parsed = frozenset(o.strip().lower() for o in outputs.split(","))
+        invalid = parsed - InferenceSettings.VALID_OUTPUTS
+        if invalid:
+            console.print(f"[red]Invalid output names: {', '.join(invalid)}")
+            console.print(f"Valid options: {', '.join(sorted(InferenceSettings.VALID_OUTPUTS))}")
+            raise typer.Exit(1)
+        enabled_outputs = parsed
 
     # despeckle_size excluded — sensible default even in headless mode
     required_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
@@ -288,6 +303,7 @@ def run_inference_cmd(
             auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
+            enabled_outputs=enabled_outputs,
         )
     else:
         settings = _prompt_inference_settings(
@@ -296,6 +312,14 @@ def run_inference_cmd(
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,
             default_refiner=refiner,
+        )
+        settings = InferenceSettings(
+            input_is_linear=settings.input_is_linear,
+            despill_strength=settings.despill_strength,
+            auto_despeckle=settings.auto_despeckle,
+            despeckle_size=settings.despeckle_size,
+            refiner_scale=settings.refiner_scale,
+            enabled_outputs=enabled_outputs,
         )
 
     with ProgressContext() as ctx_progress:

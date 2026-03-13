@@ -10,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 from queue import Queue
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, ClassVar
 
 # Enable OpenEXR support in OpenCV — needed for EXR I/O throughout the pipeline.
 # Must be set before any cv2.imread/imwrite calls on .exr files.
@@ -41,6 +41,9 @@ class InferenceSettings:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"})
+
+    VALID_OUTPUTS: ClassVar[frozenset[str]] = frozenset({"fg", "matte", "comp", "processed"})
 
 
 # Core Paths
@@ -697,6 +700,7 @@ def _writer_worker(
     phase_times: dict,
     on_frame_complete: Callable | None,
     error_event: threading.Event,
+    enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"}),
 ):
     """Write inference results to disk and fire progress callbacks."""
     try:
@@ -717,27 +721,25 @@ def _writer_worker(
 
             t_write_start = time.perf_counter()
 
-            pred_fg = res["fg"]
             pred_alpha = res["alpha"]
-
-            # Save FG (EXR half-float)
-            fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
-
-            # Save Matte (EXR half-float)
             if pred_alpha.ndim == 3:
                 pred_alpha = pred_alpha[:, :, 0]
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
-            # Save Comp (PNG 8-bit)
-            comp_srgb = res["comp"]
-            comp_bgr = cv2.cvtColor(
-                (np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
-            )
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+            if "fg" in enabled_outputs:
+                fg_bgr = cv2.cvtColor(res["fg"], cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
 
-            # Save Processed (RGBA EXR)
-            if "processed" in res:
+            if "matte" in enabled_outputs:
+                cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
+
+            if "comp" in enabled_outputs and "comp" in res:
+                comp_srgb = res["comp"]
+                comp_bgr = cv2.cvtColor(
+                    (np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
+                )
+                cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+
+            if "processed" in enabled_outputs and "processed" in res:
                 proc_rgba = res["processed"]
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
                 cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
@@ -850,6 +852,7 @@ def run_inference(
             args=(
                 write_q, fg_dir, matte_dir, comp_dir, proc_dir,
                 num_frames, phase_times, on_frame_complete, error_event,
+                settings.enabled_outputs,
             ),
             daemon=True,
         )
@@ -878,6 +881,7 @@ def run_inference(
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
+                enabled_outputs=settings.enabled_outputs,
             )
             t_infer = time.perf_counter() - t_infer_start
 
