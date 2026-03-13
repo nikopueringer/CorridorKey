@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -48,16 +51,12 @@ class TestAgentsMdStructure:
         content = _read_agents_md()
         first_line = content.strip().splitlines()[0]
         assert first_line.startswith("# "), "File must start with a top-level heading"
-        assert "CorridorKey" in first_line, (
-            f"Top-level heading must contain 'CorridorKey', got: {first_line!r}"
-        )
+        assert "CorridorKey" in first_line, f"Top-level heading must contain 'CorridorKey', got: {first_line!r}"
 
     def test_contains_section_headings(self) -> None:
         """File must contain ## headings for hierarchical structure (Req 1.2)."""
         content = _read_agents_md()
-        h2_lines = [
-            line for line in content.splitlines() if line.startswith("## ")
-        ]
+        h2_lines = [line for line in content.splitlines() if line.startswith("## ")]
         assert len(h2_lines) >= 1, "AGENTS.md must contain at least one ## heading"
 
 
@@ -121,16 +120,12 @@ class TestAgentsMdProhibitedActions:
 
     def test_gamma_22_prohibition(self) -> None:
         content = _read_agents_md()
-        assert "gamma 2.2" in content.lower() or "2.2" in content, (
-            "Gamma 2.2 prohibition not found in AGENTS.md"
-        )
+        assert "gamma 2.2" in content.lower() or "2.2" in content, "Gamma 2.2 prohibition not found in AGENTS.md"
 
     def test_gvm_core_modification_prohibition(self) -> None:
         content = _read_agents_md()
         assert "gvm_core/" in content, "gvm_core/ modification prohibition not found"
-        assert "VideoMaMaInferenceModule/" in content, (
-            "VideoMaMaInferenceModule/ modification prohibition not found"
-        )
+        assert "VideoMaMaInferenceModule/" in content, "VideoMaMaInferenceModule/ modification prohibition not found"
 
     def test_uv_lock_commit_prohibition(self) -> None:
         content = _read_agents_md()
@@ -140,9 +135,6 @@ class TestAgentsMdProhibitedActions:
 # ---------------------------------------------------------------------------
 # Property-Based Tests — Hypothesis
 # ---------------------------------------------------------------------------
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------
 # Baselines for Property 1
@@ -180,9 +172,7 @@ class TestRequiredTechnicalTerms:
         Every required technical term must appear in AGENTS.md.
         """
         content = _read_agents_md()
-        assert term in content, (
-            f"Required technical term {term!r} not found in AGENTS.md"
-        )
+        assert term in content, f"Required technical term {term!r} not found in AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +206,7 @@ class TestKeyFileMapCompleteness:
         Every required file path must appear in AGENTS.md.
         """
         content = _read_agents_md()
-        assert file_path in content, (
-            f"Required file path {file_path!r} not found in AGENTS.md"
-        )
+        assert file_path in content, f"Required file path {file_path!r} not found in AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +239,7 @@ class TestPRTemplateElements:
         Every PR template element must appear in AGENTS.md.
         """
         content = _read_agents_md()
-        assert element in content, (
-            f"PR template element {element!r} not found in AGENTS.md"
-        )
+        assert element in content, f"PR template element {element!r} not found in AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
@@ -263,9 +249,7 @@ class TestPRTemplateElements:
 LLM_HANDOVER_PATH = REPO_ROOT / "docs" / "LLM_HANDOVER.md"
 
 BASELINE_LLM_HANDOVER_LINES: tuple[str, ...] = tuple(
-    line
-    for line in LLM_HANDOVER_PATH.read_text(encoding="utf-8").splitlines()
-    if line.strip()
+    line for line in LLM_HANDOVER_PATH.read_text(encoding="utf-8").splitlines() if line.strip()
 )
 
 
@@ -287,9 +271,7 @@ class TestLLMHandoverPreservation:
         Every non-empty baseline line must still be present in the current file.
         """
         current_content = LLM_HANDOVER_PATH.read_text(encoding="utf-8")
-        assert line in current_content, (
-            f"Baseline line missing from docs/LLM_HANDOVER.md:\n{line!r}"
-        )
+        assert line in current_content, f"Baseline line missing from docs/LLM_HANDOVER.md:\n{line!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +304,4 @@ class TestDocFileReferences:
         Every required documentation file path must appear in AGENTS.md.
         """
         content = _read_agents_md()
-        assert doc_path in content, (
-            f"Required documentation path {doc_path!r} not found in AGENTS.md"
-        )
+        assert doc_path in content, f"Required documentation path {doc_path!r} not found in AGENTS.md"

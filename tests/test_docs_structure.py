@@ -100,9 +100,7 @@ class TestZensicalThemeAndExtensionPreservation:
         """
         config = _load_zensical()
         current_features = config["project"]["theme"]["features"]
-        assert feature in current_features, (
-            f"Theme feature '{feature}' was removed from zensical.toml"
-        )
+        assert feature in current_features, f"Theme feature '{feature}' was removed from zensical.toml"
 
     @given(ext_key=st.sampled_from(BASELINE_EXTENSION_KEYS))
     @settings(max_examples=100)
@@ -119,9 +117,7 @@ class TestZensicalThemeAndExtensionPreservation:
         parts = ext_key.split(".")
         node = extensions
         for part in parts:
-            assert part in node, (
-                f"Markdown extension '{ext_key}' was removed from zensical.toml"
-            )
+            assert part in node, f"Markdown extension '{ext_key}' was removed from zensical.toml"
             node = node[part]
 
 
@@ -132,9 +128,7 @@ class TestZensicalThemeAndExtensionPreservation:
 _LLM_HANDOVER_PATH = REPO_ROOT / "docs" / "LLM_HANDOVER.md"
 
 BASELINE_LLM_HANDOVER_LINES: list[str] = [
-    line
-    for raw in _LLM_HANDOVER_PATH.read_text(encoding="utf-8").splitlines()
-    if (line := raw.strip())
+    line for raw in _LLM_HANDOVER_PATH.read_text(encoding="utf-8").splitlines() if (line := raw.strip())
 ]
 
 assert BASELINE_LLM_HANDOVER_LINES, "LLM_HANDOVER.md baseline must not be empty"
@@ -163,10 +157,8 @@ class TestLLMHandoverContentPreservation:
         Every non-empty line from the baseline must still be present.
         """
         current_content = _LLM_HANDOVER_PATH.read_text(encoding="utf-8")
-        current_lines = [l.strip() for l in current_content.splitlines()]
-        assert line in current_lines, (
-            f"Line missing from LLM_HANDOVER.md: {line!r}"
-        )
+        current_lines = [ln.strip() for ln in current_content.splitlines()]
+        assert line in current_lines, f"Line missing from LLM_HANDOVER.md: {line!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,12 +211,8 @@ class TestDocumentationPagesResideInDocs:
         Every nav entry must resolve to an existing file inside docs/.
         """
         full_path = REPO_ROOT / "docs" / nav_file
-        assert full_path.exists(), (
-            f"Nav references '{nav_file}' but {full_path} does not exist"
-        )
-        assert full_path.is_file(), (
-            f"Nav references '{nav_file}' but {full_path} is not a file"
-        )
+        assert full_path.exists(), f"Nav references '{nav_file}' but {full_path} does not exist"
+        assert full_path.is_file(), f"Nav references '{nav_file}' but {full_path} is not a file"
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +226,7 @@ class TestDocumentationPagesResideInDocs:
 _README_PATH = REPO_ROOT / "README.md"
 
 BASELINE_README_LINES: list[str] = [
-    line
-    for raw in _README_PATH.read_text(encoding="utf-8").splitlines()
-    if (line := raw.strip())
+    line for raw in _README_PATH.read_text(encoding="utf-8").splitlines() if (line := raw.strip())
 ]
 
 assert BASELINE_README_LINES, "README.md baseline must not be empty"
@@ -270,10 +256,8 @@ class TestREADMEContentPreservation:
         Every non-empty line from the baseline must still be present.
         """
         current_content = _README_PATH.read_text(encoding="utf-8")
-        current_lines = [l.strip() for l in current_content.splitlines()]
-        assert line in current_lines, (
-            f"Line missing from README.md: {line!r}"
-        )
+        current_lines = [ln.strip() for ln in current_content.splitlines()]
+        assert line in current_lines, f"Line missing from README.md: {line!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +267,7 @@ class TestREADMEContentPreservation:
 _DOCS_YML_PATH = REPO_ROOT / ".github" / "workflows" / "docs.yml"
 
 BASELINE_DOCS_YML_LINES: list[str] = [
-    line
-    for raw in _DOCS_YML_PATH.read_text(encoding="utf-8").splitlines()
-    if (line := raw.strip())
+    line for raw in _DOCS_YML_PATH.read_text(encoding="utf-8").splitlines() if (line := raw.strip())
 ]
 
 assert BASELINE_DOCS_YML_LINES, "docs.yml baseline must not be empty"
@@ -314,7 +296,5 @@ class TestWorkflowFileImmutability:
         Every non-empty line from the baseline must still be present.
         """
         current_content = _DOCS_YML_PATH.read_text(encoding="utf-8")
-        current_lines = [l.strip() for l in current_content.splitlines()]
-        assert line in current_lines, (
-            f"Line missing from docs.yml: {line!r}"
-        )
+        current_lines = [ln.strip() for ln in current_content.splitlines()]
+        assert line in current_lines, f"Line missing from docs.yml: {line!r}"
