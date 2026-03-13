@@ -36,6 +36,29 @@ uv run pytest --cov        # show test coverage (sources and branch mode configu
 
 Most tests run in a few seconds and don't need a GPU or model weights. Tests that require CUDA are marked with `@pytest.mark.gpu` and will be skipped automatically if no GPU is available.
 
+### Apple Silicon (Mac) Notes
+
+If you are contributing on an Apple Silicon Mac, there are a few extra things to be aware of.
+
+**`uv.lock` drift:** Running `uv run pytest` on macOS regenerates `uv.lock` with macOS-specific dependency markers. **Do not commit this file.** Before staging your changes, always run:
+
+```bash
+git restore uv.lock
+```
+
+**Selecting the compute backend:** CorridorKey auto-detects MPS on Apple Silicon. To test with the MLX backend or force CPU, set the environment variable before running:
+
+```bash
+export CORRIDORKEY_BACKEND=mlx   # use native MLX on Apple Silicon
+export CORRIDORKEY_DEVICE=cpu    # force CPU (useful for isolating device bugs)
+```
+
+**MPS operator fallback:** If PyTorch raises an error about an unsupported MPS operator, enable CPU fallback for those ops:
+
+```bash
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+```
+
 ### Linting and Formatting
 
 ```bash
