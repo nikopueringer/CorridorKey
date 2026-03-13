@@ -59,7 +59,9 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     ```
 3.  Install all dependencies (uv will download Python 3.10+ automatically if needed):
     ```bash
-    uv sync
+    uv sync                  # CPU/MPS (default — works everywhere)
+    uv sync --extra cuda     # CUDA GPU acceleration (Linux/Windows)
+    uv sync --extra mlx      # Apple Silicon MLX acceleration
     ```
 4.  **Download the Models:**
     *   **CorridorKey v1.0 Model (~300MB):** Downloads automatically on first run. If no `.pth` file is found in `CorridorKeyModule/checkpoints/`, the engine fetches it from [HuggingFace](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and saves it as `CorridorKey.pth`. No manual download needed.
@@ -76,7 +78,7 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
               --local-dir VideoMaMaInferenceModule/checkpoints/stable-video-diffusion-img2vid-xt \
               --include "feature_extractor/*" "image_encoder/*" "vae/*" "model_index.json"
             ```
-
+        *   VideoMaMa is an amazing project, please go star their [repo](https://github.com/cvlab-kaist/VideoMaMa) and show them some support! 
 ### 2. How it Works
 
 CorridorKey requires two inputs to process a frame:
@@ -86,7 +88,8 @@ CorridorKey requires two inputs to process a frame:
 I've had the best results using GVM or VideoMaMa to create the AlphaHint, so I've repackaged those projects and integrated them here as optional modules inside `clip_manager.py`. Here is how they compare:
 
 *   **GVM:** Completely automatic and requires no additional input. It works exceptionally well for people, but can struggle with inanimate objects.
-*   **VideoMaMa:** Requires you to provide a rough VideoMamaMaskHint (often drawn by hand or AI) telling it what you want to key. If you choose to use this, place your mask hint in the `VideoMamaMaskHint/` folder that the wizard creates for your shot. VideoMaMa results are spectacular and can be controlled more easily than GVM due to this mask hint. 
+*   **VideoMaMa:** Requires you to provide a rough VideoMamaMaskHint (often drawn by hand or AI) telling it what you want to key. If you choose to use this, place your mask hint in the `VideoMamaMaskHint/` folder that the wizard creates for your shot. VideoMaMa results are spectacular and can be controlled more easily than GVM due to this mask hint.
+*   **Please** go show the creators of these projects some love and star their repos. [VideoMaMa](https://github.com/cvlab-kaist/VideoMaMa) and [GVM](https://github.com/aim-uofa/GVM)
 
 Perhaps in the future, I will implement other generators for the AlphaHint! In the meantime, the better your Alpha Hint, the better CorridorKey's final result will be. Experiment with different amounts of mask erosion or feathering. The model was trained on coarse, blurry, eroded masks, and is exceptional at filling in details from the hint. However, it is generally less effective at subtracting unwanted mask details if your Alpha Hint is expanded too far. 
 
@@ -190,10 +193,22 @@ uv run python clip_manager.py --action wizard --win_path "V:\..."
 
 Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
 
-**Mac users (Apple Silicon):** MPS support is experimental in PyTorch. If you encounter operator errors, set `PYTORCH_ENABLE_MPS_FALLBACK=1` to fall back to CPU for unsupported ops:
+### Apple Silicon / MPS Troubleshooting
+
+**Confirm MPS is active:** Run with verbose logging to see which device was selected:
+```bash
+uv run python clip_manager.py --action list 2>&1 | grep -i "device\|backend\|mps"
+```
+
+**MPS operator errors** (`NotImplementedError: ... not implemented for 'MPS'`): Some PyTorch operations are not yet supported on MPS. Enable CPU fallback for those ops:
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
+uv run python corridorkey_cli.py --action wizard --win_path "/path/to/clips"
 ```
+
+**Silent CPU fallback**: If MPS silently falls back to CPU without this variable, the run will be much slower. Setting `PYTORCH_ENABLE_MPS_FALLBACK=1` in your shell profile (`~/.zshrc`) ensures it is always active.
+
+**Use native MLX instead of PyTorch MPS:** MLX avoids PyTorch's MPS layer entirely and typically runs faster on Apple Silicon. See the [Backend Selection](#backend-selection) section below for setup steps.
 
 ## Backend Selection
 
@@ -204,11 +219,17 @@ CorridorKey supports two inference backends:
 Resolution: `--backend` flag > `CORRIDORKEY_BACKEND` env var > auto-detect.
 Auto mode prefers MLX on Apple Silicon when available.
 
+**Override via CLI flag (corridorkey_cli.py):**
+```bash
+uv run python corridorkey_cli.py --action wizard --win_path "/path/to/clips" --backend mlx
+uv run python corridorkey_cli.py --action run_inference --backend torch
+```
+
 ### MLX Setup (Apple Silicon)
 
 1. Install the MLX backend:
    ```bash
-   uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git
+   uv sync --extra mlx
    ```
 2. Obtain the MLX weights (`.safetensors`) — pick **one** option:
 
@@ -249,7 +270,7 @@ MLX uses img_size=2048 by default (same as Torch).
 
 ### Troubleshooting
 - **"No .safetensors checkpoint found"** — place MLX weights in `CorridorKeyModule/checkpoints/`
-- **"corridorkey_mlx not installed"** — run `uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git`
+- **"corridorkey_mlx not installed"** — run `uv sync --extra mlx`
 - **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
 - **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
 
@@ -281,7 +302,7 @@ Please keep the Corridor Key name in any future forks or releases!
 
 CorridorKey integrates several open-source modules for Alpha Hint generation. We would like to explicitly credit and thank the following research teams:
 
-*   **Generative Video Matting (GVM):** Developed by the Advanced Intelligent Machines (AIM) research team at Zhejiang University. The GVM code and models are heavily utilized in the `gvm_core` module. Their work is licensed under the [2-clause BSD License (BSD-2-Clause)](https://opensource.org/license/bsd-2-clause). You can find their source repository here: [aim-uofa/GVM](https://github.com/aim-uofa/GVM).
-*   **VideoMaMa:** Developed by the CVLAB at KAIST. The VideoMaMa architecture is utilized within the `VideoMaMaInferenceModule`. Their code is released under the [Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/), and their specific foundation model checkpoints (`dino_projection_mlp.pth`, `unet/*`) are subject to the [Stability AI Community License](https://stability.ai/license). You can find their source repository here: [cvlab-kaist/VideoMaMa](https://github.com/cvlab-kaist/VideoMaMa).
+*   **Generative Video Matting (GVM):** Developed by the Advanced Intelligent Machines (AIM) research team at Zhejiang University. The GVM code and models are heavily utilized in the `gvm_core` module. Their work is licensed under the [2-clause BSD License (BSD-2-Clause)](https://opensource.org/license/bsd-2-clause). You can find their source repository here: [aim-uofa/GVM](https://github.com/aim-uofa/GVM). Give them a star!
+*   **VideoMaMa:** Developed by the CVLAB at KAIST. The VideoMaMa architecture is utilized within the `VideoMaMaInferenceModule`. Their code is released under the [Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/), and their specific foundation model checkpoints (`dino_projection_mlp.pth`, `unet/*`) are subject to the [Stability AI Community License](https://stability.ai/license). You can find their source repository here: [cvlab-kaist/VideoMaMa](https://github.com/cvlab-kaist/VideoMaMa). Give them a star!
 
 By using these optional modules, you agree to abide by their respective Non-Commercial licenses. Please review their repositories for full terms.

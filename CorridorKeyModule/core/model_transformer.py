@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 
 import timm
 import torch
@@ -143,8 +142,6 @@ class CNNRefinerModule(nn.Module):
         return self.final(x) * 10.0
 
 
-# We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
-@torch.compile(disable=(sys.platform != "linux" and sys.platform != "win32"))
 class GreenFormer(nn.Module):
     def __init__(
         self,
