@@ -59,5 +59,6 @@ Give CorridorKey a hint of what you want, and it separates the light for you.
     [:octicons-arrow-right-24: Architecture](architecture.md)
     · [Contributing](contributing.md)
     · [LLM Handover](LLM_HANDOVER.md)
+    · [AI-Assisted Development](ai-assisted-development.md)
 
 </div>

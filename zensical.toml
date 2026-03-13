@@ -16,6 +16,7 @@ nav = [
         { Architecture = "architecture.md" },
         { Contributing = "contributing.md" },
         { "LLM Handover" = "LLM_HANDOVER.md" },
+        { "AI-Assisted Development" = "ai-assisted-development.md" },
     ]},
 ]
 

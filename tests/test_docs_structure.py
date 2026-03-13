@@ -298,3 +298,160 @@ class TestWorkflowFileImmutability:
         current_content = _DOCS_YML_PATH.read_text(encoding="utf-8")
         current_lines = [ln.strip() for ln in current_content.splitlines()]
         assert line in current_lines, f"Line missing from docs.yml: {line!r}"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — AI-Assisted Development page (ai-dev-setup-guide)
+# ---------------------------------------------------------------------------
+
+
+def test_ai_dev_page_exists() -> None:
+    """The AI-Assisted Development page must exist on disk.
+
+    Validates: Requirements 1.1, 12.1
+    """
+    ai_dev_path = REPO_ROOT / "docs" / "ai-assisted-development.md"
+    assert ai_dev_path.exists(), f"{ai_dev_path} does not exist"
+    assert ai_dev_path.is_file(), f"{ai_dev_path} is not a file"
+
+
+def test_ai_dev_page_in_nav() -> None:
+    """The nav in zensical.toml must reference ai-assisted-development.md
+    with the title 'AI-Assisted Development'.
+
+    Validates: Requirements 11.1, 11.2, 11.3, 12.2
+    """
+    config = _load_zensical()
+    nav = config["project"]["nav"]
+    nav_files = _extract_nav_files(nav)
+    assert "ai-assisted-development.md" in nav_files, "ai-assisted-development.md not found in zensical.toml nav"
+
+    # Also verify the title is correct by walking the nav structure.
+    def _find_title(entries: list, target_file: str) -> str | None:
+        for entry in entries:
+            if isinstance(entry, dict):
+                for title, value in entry.items():
+                    if isinstance(value, str) and value == target_file:
+                        return title
+                    if isinstance(value, list):
+                        found = _find_title(value, target_file)
+                        if found is not None:
+                            return found
+        return None
+
+    title = _find_title(nav, "ai-assisted-development.md")
+    assert title == "AI-Assisted Development", f"Expected nav title 'AI-Assisted Development', got {title!r}"
+
+
+# ---------------------------------------------------------------------------
+# Baseline — nav file references for ai-dev-setup-guide property tests
+# ---------------------------------------------------------------------------
+
+BASELINE_NAV_FILES: list[str] = list(_NAV_FILES)
+
+assert BASELINE_NAV_FILES, "Baseline nav files must not be empty"
+
+
+# ---------------------------------------------------------------------------
+# Property 1: Existing Nav Entry Preservation (ai-dev-setup-guide)
+# ---------------------------------------------------------------------------
+
+
+class TestNavEntryPreservation:
+    """Feature: ai-dev-setup-guide, Property 1: Existing Nav Entry Preservation
+
+    For any file reference that existed in the zensical.toml nav array before
+    the AI-Assisted Development entry was added, that file reference must still
+    be present in the nav array after the change.
+
+    Validates: Requirements 11.4
+    """
+
+    @given(nav_file=st.sampled_from(BASELINE_NAV_FILES))
+    @settings(max_examples=100)
+    def test_nav_entry_preserved(self, nav_file: str) -> None:
+        """**Validates: Requirements 11.4**
+
+        Every nav .md reference from the baseline must still be present.
+        """
+        current_nav_files = _extract_nav_files(_load_zensical()["project"]["nav"])
+        assert nav_file in current_nav_files, f"Nav entry '{nav_file}' was removed from zensical.toml"
+
+
+# ---------------------------------------------------------------------------
+# Baseline — docs/index.md content lines (non-empty, stripped)
+# ---------------------------------------------------------------------------
+
+_INDEX_MD_PATH = REPO_ROOT / "docs" / "index.md"
+
+BASELINE_INDEX_LINES: list[str] = [
+    line for raw in _INDEX_MD_PATH.read_text(encoding="utf-8").splitlines() if (line := raw.strip())
+]
+
+assert BASELINE_INDEX_LINES, "docs/index.md baseline must not be empty"
+
+
+# ---------------------------------------------------------------------------
+# Property 2: Index Page Content Preservation (ai-dev-setup-guide)
+# ---------------------------------------------------------------------------
+
+
+class TestIndexPageContentPreservation:
+    """Feature: ai-dev-setup-guide, Property 2: Index Page Content Preservation
+
+    For any non-empty line in the original docs/index.md, that line must appear
+    identically in the current version of the file after the AI-Assisted
+    Development link is added.
+
+    Validates: Requirements 13.2
+    """
+
+    @given(line=st.sampled_from(BASELINE_INDEX_LINES))
+    @settings(max_examples=100)
+    def test_line_preserved(self, line: str) -> None:
+        """**Validates: Requirements 13.2**
+
+        Every non-empty line from the baseline must still be present.
+        """
+        current_content = _INDEX_MD_PATH.read_text(encoding="utf-8")
+        current_lines = [ln.strip() for ln in current_content.splitlines()]
+        assert line in current_lines, f"Line missing from docs/index.md: {line!r}"
+
+
+def test_ai_dev_page_has_required_content() -> None:
+    """The AI-Assisted Development page must contain all required sections and markers.
+
+    Validates: Requirements 1.2, 1.3, 2.1, 2.2, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
+    """
+    ai_dev_path = REPO_ROOT / "docs" / "ai-assisted-development.md"
+    content = ai_dev_path.read_text(encoding="utf-8")
+
+    # Heading
+    assert "# AI-Assisted Development" in content
+
+    # Context source references
+    assert "AGENTS.md" in content
+    assert "LLM_HANDOVER.md" in content
+
+    # Quick Start section
+    assert "Quick Start" in content
+
+    # Six tool names
+    for tool in ("Kiro", "Claude Code", "Cursor", "GitHub Copilot", "Windsurf", "Gemini CLI"):
+        assert tool in content, f"Tool '{tool}' not found in ai-assisted-development.md"
+
+    # Contributions note
+    assert any(
+        word in content.lower() for word in ("contributions", "welcome", "contributing")
+    ), "No contributions/welcome note found in ai-assisted-development.md"
+
+
+def test_index_page_links_to_ai_dev() -> None:
+    """The docs/index.md must contain a link to ai-assisted-development.md.
+
+    Validates: Requirements 13.1
+    """
+    content = _INDEX_MD_PATH.read_text(encoding="utf-8")
+    assert "ai-assisted-development.md" in content, (
+        "docs/index.md does not contain a link to ai-assisted-development.md"
+    )
