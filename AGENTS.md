@@ -91,10 +91,6 @@ The project uses **[Ruff](https://docs.astral.sh/ruff/)** for both linting and f
 
 ### Apple Silicon (macOS)
 
-- **`uv.lock` drift:** Running `uv run pytest` on macOS regenerates `uv.lock` with macOS-specific markers. **Do not commit this file.** Before staging changes, always run:
-  ```bash
-  git restore uv.lock
-  ```
 - **MPS operator fallback:** Some PyTorch operations are not yet implemented for MPS. Enable CPU fallback:
   ```bash
   export PYTORCH_ENABLE_MPS_FALLBACK=1
@@ -108,7 +104,6 @@ The project uses **[Ruff](https://docs.astral.sh/ruff/)** for both linting and f
 
 1. **Do not apply a pure gamma 2.2 curve.** Always use the piecewise sRGB transfer functions in `color_utils.py`. A naive `pow(x, 2.2)` breaks the toe region and produces incorrect compositing results.
 2. **Do not modify files inside `gvm_core/` or `VideoMaMaInferenceModule/`.** These are third-party research modules kept close to upstream. Changes should be made in wrapper code or upstream PRs.
-3. **Do not commit `uv.lock` changes made on macOS.** Apple Silicon resolves platform-specific markers that differ from the Linux CI lockfile. Always `git restore uv.lock` before committing.
 
 ## PR Workflow & GitHub Templates
 

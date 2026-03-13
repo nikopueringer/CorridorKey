@@ -103,10 +103,7 @@ class TestAgentsMdRuffConfig:
 
 
 class TestAgentsMdPlatformCaveats:
-    """Validate platform-specific caveats are present (Reqs 8.1–8.3)."""
-
-    def test_git_restore_uv_lock(self) -> None:
-        assert "git restore uv.lock" in _read_agents_md()
+    """Validate platform-specific caveats are present (Reqs 8.2–8.3)."""
 
     def test_pytorch_mps_fallback(self) -> None:
         assert "PYTORCH_ENABLE_MPS_FALLBACK=1" in _read_agents_md()
@@ -116,7 +113,7 @@ class TestAgentsMdPlatformCaveats:
 
 
 class TestAgentsMdProhibitedActions:
-    """Validate prohibited actions are documented (Reqs 9.1–9.3)."""
+    """Validate prohibited actions are documented (Reqs 9.1–9.2)."""
 
     def test_gamma_22_prohibition(self) -> None:
         content = _read_agents_md()
@@ -126,10 +123,6 @@ class TestAgentsMdProhibitedActions:
         content = _read_agents_md()
         assert "gvm_core/" in content, "gvm_core/ modification prohibition not found"
         assert "VideoMaMaInferenceModule/" in content, "VideoMaMaInferenceModule/ modification prohibition not found"
-
-    def test_uv_lock_commit_prohibition(self) -> None:
-        content = _read_agents_md()
-        assert "uv.lock" in content, "uv.lock commit prohibition not found"
 
 
 # ---------------------------------------------------------------------------
