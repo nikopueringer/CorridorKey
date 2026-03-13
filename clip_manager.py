@@ -6,7 +6,10 @@ import logging
 import os
 import shutil
 import sys
+import threading
+import time
 from dataclasses import dataclass
+from queue import Queue
 from typing import TYPE_CHECKING, Callable
 
 # Enable OpenEXR support in OpenCV — needed for EXR I/O throughout the pipeline.
@@ -593,6 +596,162 @@ def run_videomama(
             traceback.print_exc()
 
 
+def _reader_worker(
+    read_q: Queue,
+    num_frames: int,
+    input_cap,
+    alpha_cap,
+    input_files: list[str],
+    alpha_files: list[str],
+    input_asset_path: str,
+    alpha_asset_path: str,
+    input_is_linear: bool,
+    error_event: threading.Event,
+):
+    """Decode input + alpha frames and enqueue them for inference."""
+    try:
+        for i in range(num_frames):
+            if error_event.is_set():
+                break
+
+            t_read_start = time.perf_counter()
+            img_srgb = None
+            input_stem = f"{i:05d}"
+
+            # -- Read input frame --
+            if input_cap:
+                ret, frame = input_cap.read()
+                if not ret:
+                    break
+                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img_srgb = img_rgb.astype(np.float32) / 255.0
+                input_stem = f"{i:05d}"
+            else:
+                fpath = os.path.join(input_asset_path, input_files[i])
+                input_stem = os.path.splitext(input_files[i])[0]
+
+                is_exr = fpath.lower().endswith(".exr")
+                if is_exr:
+                    img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
+                    if img_linear is None:
+                        continue
+                    img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
+                    img_srgb = np.maximum(img_linear_rgb, 0.0)
+                else:
+                    img_bgr = cv2.imread(fpath)
+                    if img_bgr is None:
+                        continue
+                    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                    img_srgb = img_rgb.astype(np.float32) / 255.0
+
+            # -- Read alpha mask --
+            mask_linear = None
+            if alpha_cap:
+                ret, frame = alpha_cap.read()
+                if not ret:
+                    break
+                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+            else:
+                fpath = os.path.join(alpha_asset_path, alpha_files[i])
+                mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
+
+                if mask_in is None:
+                    continue
+
+                if mask_in.ndim == 3:
+                    if mask_in.shape[2] == 3:
+                        mask_linear = mask_in[:, :, 0]
+                    else:
+                        mask_linear = mask_in
+                else:
+                    mask_linear = mask_in
+
+                if mask_linear.dtype == np.uint8:
+                    mask_linear = mask_linear.astype(np.float32) / 255.0
+                elif mask_linear.dtype == np.uint16:
+                    mask_linear = mask_linear.astype(np.float32) / 65535.0
+                else:
+                    mask_linear = mask_linear.astype(np.float32)
+
+            if mask_linear.shape[:2] != img_srgb.shape[:2]:
+                mask_linear = cv2.resize(
+                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                )
+
+            t_read = time.perf_counter() - t_read_start
+            read_q.put((i, input_stem, img_srgb, mask_linear, t_read))
+    except Exception as e:
+        logger.error(f"Reader thread error: {e}")
+        error_event.set()
+    finally:
+        read_q.put(None)  # sentinel
+
+
+def _writer_worker(
+    write_q: Queue,
+    fg_dir: str,
+    matte_dir: str,
+    comp_dir: str,
+    proc_dir: str,
+    num_frames: int,
+    phase_times: dict,
+    on_frame_complete: Callable | None,
+    error_event: threading.Event,
+):
+    """Write inference results to disk and fire progress callbacks."""
+    try:
+        while True:
+            item = write_q.get()
+            if item is None:
+                break
+            if error_event.is_set():
+                break
+
+            i, input_stem, res, t_infer = item
+            phase_times["infer"].append(t_infer)
+
+            # Collect adapter-level postprocess timing if available
+            timing = res.pop("_timing", None)
+            if timing and "postprocess" in timing:
+                phase_times["postprocess"].append(timing["postprocess"])
+
+            t_write_start = time.perf_counter()
+
+            pred_fg = res["fg"]
+            pred_alpha = res["alpha"]
+
+            # Save FG (EXR half-float)
+            fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
+
+            # Save Matte (EXR half-float)
+            if pred_alpha.ndim == 3:
+                pred_alpha = pred_alpha[:, :, 0]
+            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
+
+            # Save Comp (PNG 8-bit)
+            comp_srgb = res["comp"]
+            comp_bgr = cv2.cvtColor(
+                (np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
+            )
+            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+
+            # Save Processed (RGBA EXR)
+            if "processed" in res:
+                proc_rgba = res["processed"]
+                proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
+                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
+
+            t_write = time.perf_counter() - t_write_start
+            phase_times["write"].append(t_write)
+
+            if on_frame_complete:
+                on_frame_complete(i, num_frames)
+    except Exception as e:
+        logger.error(f"Writer thread error: {e}")
+        error_event.set()
+
+
 def run_inference(
     clips,
     device=None,
@@ -618,8 +777,6 @@ def run_inference(
     # Ensure Output Directory exists
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    import numpy as np
 
     if device is None:
         device = resolve_device()
@@ -670,132 +827,66 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
-        import time
+        phase_times: dict[str, list[float]] = {"read": [], "infer": [], "postprocess": [], "write": []}
 
-        phase_times = {"read": [], "infer": [], "postprocess": [], "write": []}
+        # -- Async I/O pipeline: reader → inference → writer --
+        QUEUE_DEPTH = 2
+        read_q: Queue = Queue(maxsize=QUEUE_DEPTH)
+        write_q: Queue = Queue(maxsize=QUEUE_DEPTH)
+        error_event = threading.Event()
 
-        for i in range(num_frames):
-            # 1. Read Input
-            t_read_start = time.perf_counter()
-            img_srgb = None
-            input_stem = f"{i:05d}"
+        reader = threading.Thread(
+            target=_reader_worker,
+            args=(
+                read_q, num_frames, input_cap, alpha_cap,
+                input_files, alpha_files,
+                clip.input_asset.path, clip.alpha_asset.path,
+                settings.input_is_linear, error_event,
+            ),
+            daemon=True,
+        )
+        writer = threading.Thread(
+            target=_writer_worker,
+            args=(
+                write_q, fg_dir, matte_dir, comp_dir, proc_dir,
+                num_frames, phase_times, on_frame_complete, error_event,
+            ),
+            daemon=True,
+        )
 
-            # Use the settings-defined gamma
-            input_is_linear = settings.input_is_linear
+        reader.start()
+        writer.start()
 
-            if input_cap:
-                ret, frame = input_cap.read()
-                if not ret:
-                    break
-                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img_srgb = img_rgb.astype(np.float32) / 255.0
-                input_stem = f"{i:05d}"
-            else:
-                fpath = os.path.join(clip.input_asset.path, input_files[i])
-                input_stem = os.path.splitext(input_files[i])[0]
+        # Main thread: inference loop
+        while True:
+            item = read_q.get()
+            if item is None:
+                break
+            if error_event.is_set():
+                break
 
-                is_exr = fpath.lower().endswith(".exr")
-                if is_exr:
-                    img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
-                    if img_srgb is None:
-                        continue
-                else:
-                    img_bgr = cv2.imread(fpath)
-                    if img_bgr is None:
-                        continue
-                    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                    img_srgb = img_rgb.astype(np.float32) / 255.0
-
-            # 2. Read Alpha (Mask)
-            mask_linear = None
-            if alpha_cap:
-                ret, frame = alpha_cap.read()
-                if not ret:
-                    break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
-            else:
-                fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
-                mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
-
-                if mask_in is None:
-                    continue
-
-                if mask_in.ndim == 3:
-                    if mask_in.shape[2] == 3:
-                        mask_linear = mask_in[:, :, 0]
-                    else:
-                        mask_linear = mask_in
-                else:
-                    mask_linear = mask_in
-
-                if mask_linear.dtype == np.uint8:
-                    mask_linear = mask_linear.astype(np.float32) / 255.0
-                elif mask_linear.dtype == np.uint16:
-                    mask_linear = mask_linear.astype(np.float32) / 65535.0
-                else:
-                    mask_linear = mask_linear.astype(np.float32)
-
-            if mask_linear.shape[:2] != img_srgb.shape[:2]:
-                mask_linear = cv2.resize(
-                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
-                )
-
-            # 3. Process
-            t_read = time.perf_counter() - t_read_start
+            i, input_stem, img_srgb, mask_linear, t_read = item
             phase_times["read"].append(t_read)
 
             t_infer_start = time.perf_counter()
-            USE_STRAIGHT_MODEL = True
             res = engine.process_frame(
                 img_srgb,
                 mask_linear,
-                input_is_linear=input_is_linear,
-                fg_is_straight=USE_STRAIGHT_MODEL,
+                input_is_linear=settings.input_is_linear,
+                fg_is_straight=True,
                 despill_strength=settings.despill_strength,
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
             )
-
             t_infer = time.perf_counter() - t_infer_start
-            phase_times["infer"].append(t_infer)
 
-            pred_fg = res["fg"]  # sRGB
-            pred_alpha = res["alpha"]  # Linear
+            write_q.put((i, input_stem, res, t_infer))
 
-            # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
-            t_write_start = time.perf_counter()
-
-            # Save FG
-            # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
-            fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
-
-            # Save Matte
-            if pred_alpha.ndim == 3:
-                pred_alpha = pred_alpha[:, :, 0]
-            # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
-
-            # 5. Generate Reference Comp
-            comp_srgb = res["comp"]
-            # Save Comp (PNG 8-bit)
-            comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
-
-            # 6. Save Processed (RGBA EXR)
-            if "processed" in res:
-                # Result is RGBA
-                proc_rgba = res["processed"]
-                # Convert to BGRA for OpenCV
-                proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
-
-            t_write = time.perf_counter() - t_write_start
-            phase_times["write"].append(t_write)
-
-            if on_frame_complete:
-                on_frame_complete(i, num_frames)
+        # Signal writer to drain and stop
+        write_q.put(None)
+        writer.join()
+        reader.join()
 
         # Log per-phase timing summary (skip first frame as warmup)
         if len(phase_times["read"]) > 1:

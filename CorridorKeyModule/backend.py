@@ -106,6 +106,19 @@ def _discover_checkpoint(ext: str) -> Path:
     return Path(matches[0])
 
 
+_checkerboard_cache: dict[tuple[int, int, int, float, float], np.ndarray] = {}
+
+
+def _get_checkerboard(w: int, h: int, checker_size: int = 128, color1: float = 0.15, color2: float = 0.55) -> np.ndarray:
+    """Return a cached checkerboard pattern, creating it only on first call per resolution."""
+    from CorridorKeyModule.core import color_utils as cu
+
+    key = (w, h, checker_size, color1, color2)
+    if key not in _checkerboard_cache:
+        _checkerboard_cache[key] = cu.create_checkerboard(w, h, checker_size=checker_size, color1=color1, color2=color2)
+    return _checkerboard_cache[key]
+
+
 def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, despeckle_size: int) -> dict:
     """Normalize MLX uint8 output to match Torch float32 contract.
 
@@ -137,7 +150,7 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
 
     # Composite over checkerboard for comp output
     h, w = fg.shape[:2]
-    bg_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
+    bg_srgb = _get_checkerboard(w, h)
     bg_lin = cu.srgb_to_linear(bg_srgb)
     fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
     comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
@@ -214,6 +227,7 @@ class _MLXEngineAdapter:
             t_post * 1000,
         )
 
+        result["_timing"] = {"mlx_inference": t_mlx, "postprocess": t_post}
         return result
 
 
