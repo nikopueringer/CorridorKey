@@ -16,11 +16,12 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
-from backend.frame_io import EXR_WRITE_FLAGS
+from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
     from gvm_core import GVMProcessor
+from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,68 @@ def generate_alphas(
             import traceback
 
             traceback.print_exc()
+
+
+def get_birefnet_usage_options():
+    return list(usage_to_weights_file.keys())
+
+
+def run_birefnet(
+    clips,
+    device=None,
+    usage="General",
+    dilate_radius=0,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+    on_frame_complete: Callable[[int, int], None] | None = None,
+):
+    clips_to_process = [c for c in clips if c.alpha_asset is None]
+
+    if not clips_to_process:
+        logger.info("All clips have valid Alpha assets. No BiRefNet generation needed.")
+        return
+
+    if device is None:
+        device = resolve_device()
+
+    logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
+
+    logger.info(f"Initializing BiRefNet ({usage}) on {device}...")
+    # Initialize the handler once
+    try:
+        handler = BiRefNetHandler(device=device, usage=usage)
+    except ImportError as e:
+        logger.error(f"BiRefNet Import Error: {e}")
+        return
+    except Exception as e:
+        logger.error(f"BiRefNet Initialization Error: {e}")
+        return
+
+    try:
+        for clip in clips_to_process:
+            logger.info(f"Generating BiRefNet Alpha for: {clip.name}")
+            if on_clip_start:
+                on_clip_start(clip.name, clip.input_asset.frame_count)
+
+            alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
+            os.makedirs(alpha_output_dir, exist_ok=True)
+
+            try:
+                handler.process(
+                    input_path=clip.input_asset.path,
+                    alpha_output_dir=alpha_output_dir,
+                    dilate_radius=dilate_radius,
+                    on_frame_complete=on_frame_complete,
+                )
+                logger.info(f"BiRefNet complete for {clip.name}")
+            except Exception as e:
+                logger.error(f"BiRefNet failed for {clip.name}: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+    finally:
+        handler.cleanup()
 
 
 def run_videomama(
@@ -628,12 +691,9 @@ def run_inference(
 
                 is_exr = fpath.lower().endswith(".exr")
                 if is_exr:
-                    img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
-                    if img_linear is None:
+                    img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
+                    if img_srgb is None:
                         continue
-                    img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
-                    # Support overriding EXR behavior if user picked 's'
-                    img_srgb = np.maximum(img_linear_rgb, 0.0)
                 else:
                     img_bgr = cv2.imread(fpath)
                     if img_bgr is None:

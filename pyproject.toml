@@ -32,6 +32,8 @@ dependencies = [
     "matplotlib",
     # VideoMaMa alpha hint generator
     "einops",
+    # BiRefNet alpha hint generator
+    "kornia",
     # CLI tools (huggingface-hub is also a transitive dep, but must be direct
     # so that uv installs the "hf" console-script entry point)
     "huggingface-hub",
