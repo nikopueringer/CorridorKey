@@ -249,6 +249,10 @@ def run_inference_cmd(
         Optional[int],
         typer.Option("--max-frames", help="Limit frames per clip"),
     ] = None,
+    skip_existing: Annotated[
+        bool,
+        typer.Option("--skip-existing", help="Skip frames whose output files already exist (resume a partial render)"),
+    ] = False,
     linear: Annotated[
         Optional[bool],
         typer.Option("--linear/--srgb", help="Input colorspace (default: prompt)"),
@@ -304,6 +308,7 @@ def run_inference_cmd(
             device=ctx.obj["device"],
             backend=backend,
             max_frames=max_frames,
+            skip_existing=skip_existing,
             settings=settings,
             on_clip_start=ctx_progress.on_clip_start,
             on_frame_complete=ctx_progress.on_frame_complete,
