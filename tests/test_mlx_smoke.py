@@ -25,8 +25,9 @@ def test_mlx_smoke_2048(mlx_engine):
 
     result = mlx_engine.process_frame(image, mask)
 
-    # Keys
-    assert set(result.keys()) == {"alpha", "fg", "comp", "processed"}
+    # Keys — _timing is an internal side-channel for profiling, not a real output
+    public_keys = {k for k in result.keys() if not k.startswith("_")}
+    assert public_keys == {"alpha", "fg", "comp", "processed"}
 
     # Shapes
     assert result["alpha"].shape == (h, w, 1), f"alpha shape: {result['alpha'].shape}"

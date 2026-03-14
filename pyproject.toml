@@ -52,7 +52,12 @@ mlx = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov", "ruff", "hypothesis"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "hypothesis",
+]
 docs = ["zensical>=0.0.24"]
 
 [project.scripts]

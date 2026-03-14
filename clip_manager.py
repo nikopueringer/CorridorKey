@@ -923,8 +923,7 @@ def run_inference(
                     logger.info(f"  {phase_name:>12s}: {median_ms:7.1f} ms/frame  |  {total_ms:8.1f} ms total")
             # Sum all phases per-frame to get total pipeline time
             all_steady = [
-                sum(t)
-                for t in zip(*(durations[warmup_skip:] for durations in phase_times.values()), strict=False)
+                sum(t) for t in zip(*(durations[warmup_skip:] for durations in phase_times.values()), strict=False)
             ]
             if all_steady:
                 med_total = statistics.median(all_steady) * 1000
