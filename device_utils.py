@@ -31,9 +31,9 @@ def resolve_device(requested: str | None = None) -> str:
         RuntimeError: If the requested backend is unavailable.
     """
     # CLI arg takes priority, then env var, then auto
-    device = requested
+    device = requested.strip().lower() if requested is not None else None
     if device is None or device == "auto":
-        device = os.environ.get(DEVICE_ENV_VAR, "auto")
+        device = os.environ.get(DEVICE_ENV_VAR, "auto").strip().lower()
 
     if device == "auto":
         return detect_best_device()

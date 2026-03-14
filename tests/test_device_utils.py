@@ -72,6 +72,11 @@ class TestResolveDevice:
         monkeypatch.delenv(DEVICE_ENV_VAR, raising=False)
         assert resolve_device("auto") == "cuda"
 
+    def test_auto_string_is_case_insensitive(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=True)
+        monkeypatch.delenv(DEVICE_ENV_VAR, raising=False)
+        assert resolve_device(" AUTO ") == "cuda"
+
     # --- env var fallback ---
 
     def test_env_var_used_when_no_cli_arg(self, monkeypatch):
@@ -82,6 +87,11 @@ class TestResolveDevice:
     def test_env_var_auto_triggers_detect(self, monkeypatch):
         _patch_gpu(monkeypatch, cuda=False, mps=True)
         monkeypatch.setenv(DEVICE_ENV_VAR, "auto")
+        assert resolve_device(None) == "mps"
+
+    def test_env_var_auto_is_case_insensitive(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=False, mps=True)
+        monkeypatch.setenv(DEVICE_ENV_VAR, " AUTO ")
         assert resolve_device(None) == "mps"
 
     # --- CLI arg overrides env var ---
