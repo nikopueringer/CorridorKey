@@ -63,9 +63,8 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     uv sync --extra cuda     # CUDA GPU acceleration (Linux/Windows)
     uv sync --extra mlx      # Apple Silicon MLX acceleration
     ```
-4.  **Download the Models:** You must manually download these open-source foundational models and place them in their exact respective folders:
-    *   **CorridorKey v1.0 Model (~300MB):** [Download CorridorKey_v1.0.pth](https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth) 
-        *   Place inside: `CorridorKeyModule/checkpoints/` and ensure it is named exactly `CorridorKey.pth`.
+4.  **Download the Models:**
+    *   **CorridorKey v1.0 Model (~300MB):** Downloads automatically on first run. If no `.pth` file is found in `CorridorKeyModule/checkpoints/`, the engine fetches it from [HuggingFace](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and saves it as `CorridorKey.pth`. No manual download needed.
     *   **GVM Weights (Optional):** [HuggingFace: geyongtao/gvm](https://huggingface.co/geyongtao/gvm)
         *   Download using the CLI: `uv run hf download geyongtao/gvm --local-dir gvm_core/weights`
     *   **VideoMaMa Weights (Optional):** [HuggingFace: SammyLim/VideoMaMa](https://huggingface.co/SammyLim/VideoMaMa)
