@@ -3,20 +3,22 @@ name = "corridorkey"
 version = "1.0.0"
 description = "Neural network green screen keying for professional VFX pipelines"
 readme = "README.md"
-requires-python = ">=3.10, <=3.14"
+requires-python = ">=3.10, <3.14"
 license = { text = "CC-BY-NC-SA-4.0" }
 authors = [{ name = "Corridor Digital" }]
 
 dependencies = [
     # Core inference
-    "torch==2.10.0",
-    "torchvision==0.25.0",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
     "timm==1.0.24",
     "numpy",
     "opencv-python",
     "tqdm",
     "setuptools",
-
+    # Triton fix for Windows
+    # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
+    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
     # GVM alpha hint generator
     "diffusers",
     "transformers",
@@ -28,21 +30,30 @@ dependencies = [
     "easydict",
     "imageio",
     "matplotlib",
-
     # VideoMaMa alpha hint generator
     "einops",
-
+    # BiRefNet alpha hint generator
+    "kornia",
     # CLI tools (huggingface-hub is also a transitive dep, but must be direct
     # so that uv installs the "hf" console-script entry point)
     "huggingface-hub",
+    # CLI framework + terminal output
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+]
+mlx = [
+    "corridorkey-mlx ; python_version >= '3.11'",
 ]
 
 [dependency-groups]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "ruff",
-]
+dev = ["pytest", "pytest-cov", "ruff", "hypothesis"]
+docs = ["zensical>=0.0.24"]
 
 [project.scripts]
 corridorkey = "corridorkey_cli:main"
@@ -83,14 +94,34 @@ omit = [
     "gvm_core/*",
     "VideoMaMaInferenceModule/*",
     "tests/*",
-    "test_vram.py",  # manual GPU smoke test, not part of the pytest suite
+    "test_vram.py", # manual GPU smoke test, not part of the pytest suite
+]
+
+[tool.uv]
+# Guard against transitive deps (diffusers, imageio, PIMS) silently pulling in
+# opencv-python-headless, which conflicts with opencv-python at the file level
+# (both install into the same cv2/ directory). If any future dep requests
+# opencv-python-headless, uv resolution will fail explicitly rather than
+# corrupting the environment.
+constraint-dependencies = [
+    "opencv-python-headless==99999",
+]
+conflicts = [
+    [
+        { extra = "cuda" },
+        { extra = "mlx" },
+    ],
 ]
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu126"
+url = "https://download.pytorch.org/whl/cu128" # CUDA 12.6 doesn't support RTX 5000 Series
 explicit = true
+extra = "cuda"
 
 [tool.uv.sources]
-torch = { index = "pytorch" }
-torchvision = { index = "pytorch" }
+# Use Hiera fix in order to utilize the FlashAttention Kernel
+timm = { git = "https://github.com/Raiden129/pytorch-image-models-fix", branch = "fix/hiera-flash-attention-global-4d" }
+torch = { index = "pytorch", extra = "cuda" }
+torchvision = { index = "pytorch", extra = "cuda" }
+corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }

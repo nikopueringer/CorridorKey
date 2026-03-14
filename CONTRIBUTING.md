@@ -2,6 +2,12 @@
 
 Thanks for your interest in improving CorridorKey! Whether you're a VFX artist, a pipeline TD, or a machine learning researcher, contributions of all kinds are welcome — bug reports, feature ideas, documentation fixes, and code.
 
+## Legal Agreement
+
+By contributing to this project, you agree that your contributions will be licensed under the project's **[CorridorKey Licence](LICENSE)**.
+
+By submitting a Pull Request, you specifically acknowledge and agree to the terms set forth in **Section 6 (CONTRIBUTIONS)** of the license. This ensures that Corridor Digital maintains the full right to use, distribute, and sublicense this codebase, including PR contributions. This is a project for the community, and will always remain freely available here.
+
 ## Getting Started
 
 ### Prerequisites
@@ -29,6 +35,29 @@ uv run pytest --cov        # show test coverage (sources and branch mode configu
 ```
 
 Most tests run in a few seconds and don't need a GPU or model weights. Tests that require CUDA are marked with `@pytest.mark.gpu` and will be skipped automatically if no GPU is available.
+
+### Apple Silicon (Mac) Notes
+
+If you are contributing on an Apple Silicon Mac, there are a few extra things to be aware of.
+
+**`uv.lock` drift:** Running `uv run pytest` on macOS regenerates `uv.lock` with macOS-specific dependency markers. **Do not commit this file.** Before staging your changes, always run:
+
+```bash
+git restore uv.lock
+```
+
+**Selecting the compute backend:** CorridorKey auto-detects MPS on Apple Silicon. To test with the MLX backend or force CPU, set the environment variable before running:
+
+```bash
+export CORRIDORKEY_BACKEND=mlx   # use native MLX on Apple Silicon
+export CORRIDORKEY_DEVICE=cpu    # force CPU (useful for isolating device bugs)
+```
+
+**MPS operator fallback:** If PyTorch raises an error about an unsupported MPS operator, enable CPU fallback for those ops:
+
+```bash
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+```
 
 ### Linting and Formatting
 

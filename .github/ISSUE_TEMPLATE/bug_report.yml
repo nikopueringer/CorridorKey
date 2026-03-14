@@ -1,0 +1,107 @@
+name: 🐛 Bug Report
+description: Report a reproducible issue or unexpected behavior in the project.
+title: "[Bug]: "
+labels: [bug]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Detailed bug reports help us fix issues faster.
+
+        **Before submitting:**
+        - Search existing issues to avoid duplicates
+        - Verify the issue is reproducible with the latest version
+        - Isolate the problem (provide minimal steps to reproduce)
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Your operating system and version.
+      placeholder: "Windows 11, macOS 14.2, Ubuntu 22.04 LTS"
+    validations:
+      required: true
+
+  - type: input
+    id: installation_method
+    attributes:
+      label: Installation Method
+      description: How did you install CorridorKey? (e.g., Windows batch installer, `uv sync`, Docker, manual setup)
+      placeholder: "Windows batch installer, uv sync --extra cuda, Docker"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu_info
+    attributes:
+      label: GPU/Hardware (Optional)
+      description: GPU model and VRAM if applicable, or other relevant hardware constraints.
+      placeholder: "NVIDIA RTX 4090 (24GB), Apple M3 Pro (18GB unified memory)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide clear, numbered steps to reproduce the issue. Be as specific as possible.
+      placeholder: |
+        1. Step 1
+        2. Step 2
+        3. Step 3
+        4. Step 4
+        5. Error occurs
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen instead? Be clear and concise.
+      placeholder: "The application should display a settings panel without errors."
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happened instead? Describe the bug clearly and concisely.
+      placeholder: "The application crashes with an Error"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Error Messages
+      description: Paste complete error logs, full stack traces, or screenshots. Use code blocks for readability.
+      placeholder: |
+        ```
+        Put your log in here
+        ```
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround (if available)
+      description: If you've found a way to work around this issue, please describe it.
+      placeholder: "As a workaround, I can set the timeout environment variable before starting the app."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Verification Checklist
+      options:
+        - label: I've verified this bug hasn't been reported before
+          required: true
+        - label: I can reproduce this issue consistently
+          required: true
+        - label: I've included all relevant logs, screenshots, and error messages
+          required: true
+        - label: I've tested with the latest version of the project
+          required: false

@@ -11,12 +11,17 @@ _load_frames_for_videomama, _load_mask_frames_for_videomama).
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import cv2
 import numpy as np
 
+from CorridorKeyModule.core.color_utils import linear_to_srgb
+
 from .validators import normalize_mask_channels, normalize_mask_dtype
+
+logger = logging.getLogger(__name__)
 
 # EXR write flags — PXR24 half-float (smallest working compression)
 EXR_WRITE_FLAGS = [
@@ -32,8 +37,8 @@ def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray 
 
     Args:
         fpath: Absolute path to image file.
-        gamma_correct_exr: If True, apply gamma 1/2.2 to EXR data
-            (converts linear → approximate sRGB for models expecting sRGB).
+        gamma_correct_exr: If True, apply piecewise sRGB transfer function
+            to EXR data (converts linear → sRGB for models expecting sRGB).
 
     Returns:
         float32 array [H, W, 3] in RGB order, or None if read fails.
@@ -43,6 +48,7 @@ def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray 
     if is_exr:
         img = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
         if img is None:
+            logger.warning("Could not read frame: %s", fpath)
             return None
         # Strip alpha channel from BGRA EXR
         if img.ndim == 3 and img.shape[2] == 4:
@@ -50,11 +56,12 @@ def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         result = np.maximum(img_rgb, 0.0).astype(np.float32)
         if gamma_correct_exr:
-            result = np.power(result, 1.0 / 2.2).astype(np.float32)
+            result = linear_to_srgb(result).astype(np.float32)
         return result
     else:
         img = cv2.imread(fpath)
         if img is None:
+            logger.warning("Could not read frame: %s", fpath)
             return None
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img_rgb.astype(np.float32) / 255.0

@@ -6,7 +6,8 @@ import logging
 import os
 import shutil
 import sys
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable
 
 # Enable OpenEXR support in OpenCV — needed for EXR I/O throughout the pipeline.
 # Must be set before any cv2.imread/imwrite calls on .exr files.
@@ -15,12 +16,28 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
+from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
     from gvm_core import GVMProcessor
+from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class InferenceSettings:
+    """Settings for CorridorKey inference, extracted from interactive prompts.
+
+    Can be constructed directly for non-interactive use (Nuke, Houdini, batch scripts).
+    """
+
+    input_is_linear: bool = False
+    despill_strength: float = 0.5  # 0.0–1.0
+    auto_despeckle: bool = True
+    despeckle_size: int = 400
+    refiner_scale: float = 1.0
 
 
 # Core Paths
@@ -185,7 +202,12 @@ def get_gvm_processor(device: str = "cpu") -> GVMProcessor:
         raise RuntimeError(f"Failed to initialize GVM Processor: {e}") from e
 
 
-def generate_alphas(clips, device=None):
+def generate_alphas(
+    clips,
+    device=None,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+):
     clips_to_process = [c for c in clips if c.alpha_asset is None]
 
     if not clips_to_process:
@@ -209,6 +231,8 @@ def generate_alphas(clips, device=None):
 
     for clip in clips_to_process:
         logger.info(f"Generating Alpha for: {clip.name}")
+        if on_clip_start:
+            on_clip_start(clip.name, len(clips_to_process))
 
         alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
         if os.path.exists(alpha_output_dir):
@@ -263,7 +287,76 @@ def generate_alphas(clips, device=None):
             traceback.print_exc()
 
 
-def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | None = None) -> None:
+def get_birefnet_usage_options():
+    return list(usage_to_weights_file.keys())
+
+
+def run_birefnet(
+    clips,
+    device=None,
+    usage="General",
+    dilate_radius=0,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+    on_frame_complete: Callable[[int, int], None] | None = None,
+):
+    clips_to_process = [c for c in clips if c.alpha_asset is None]
+
+    if not clips_to_process:
+        logger.info("All clips have valid Alpha assets. No BiRefNet generation needed.")
+        return
+
+    if device is None:
+        device = resolve_device()
+
+    logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
+
+    logger.info(f"Initializing BiRefNet ({usage}) on {device}...")
+    # Initialize the handler once
+    try:
+        handler = BiRefNetHandler(device=device, usage=usage)
+    except ImportError as e:
+        logger.error(f"BiRefNet Import Error: {e}")
+        return
+    except Exception as e:
+        logger.error(f"BiRefNet Initialization Error: {e}")
+        return
+
+    try:
+        for clip in clips_to_process:
+            logger.info(f"Generating BiRefNet Alpha for: {clip.name}")
+            if on_clip_start:
+                on_clip_start(clip.name, clip.input_asset.frame_count)
+
+            alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
+            os.makedirs(alpha_output_dir, exist_ok=True)
+
+            try:
+                handler.process(
+                    input_path=clip.input_asset.path,
+                    alpha_output_dir=alpha_output_dir,
+                    dilate_radius=dilate_radius,
+                    on_frame_complete=on_frame_complete,
+                )
+                logger.info(f"BiRefNet complete for {clip.name}")
+            except Exception as e:
+                logger.error(f"BiRefNet failed for {clip.name}: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+    finally:
+        handler.cleanup()
+
+
+def run_videomama(
+    clips: list[ClipEntry],
+    chunk_size: int = 50,
+    device: str | None = None,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+    on_frame_complete: Callable[[int, int], None] | None = None,
+) -> None:
     """
     Runs VideoMaMa on clips that have VideoMamaMaskHint but NO AlphaHint.
     """
@@ -338,6 +431,8 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
 
     for clip in clips_to_process:
         logger.info(f"Running VideoMaMa on: {clip.name}")
+        if on_clip_start:
+            on_clip_start(clip.name, len(clips_to_process))
 
         # Retrieve resolved path
         mask_hint_path = clip_mask_paths[clip.name]
@@ -481,6 +576,9 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
                     cv2.imwrite(out_path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
                     total_saved += 1
 
+                    if on_frame_complete:
+                        on_frame_complete(total_saved, num_frames)
+
                 logger.info(f"  Saved {total_saved}/{num_frames} frames...")
 
             logger.info(f"VideoMaMa Complete: Saved {total_saved} frames to AlphaHint.")
@@ -495,7 +593,16 @@ def run_videomama(clips: list[ClipEntry], chunk_size: int = 50, device: str | No
             traceback.print_exc()
 
 
-def run_inference(clips, device=None, backend=None, max_frames=None):
+def run_inference(
+    clips,
+    device=None,
+    backend=None,
+    max_frames=None,
+    settings: InferenceSettings | None = None,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+    on_frame_complete: Callable[[int, int], None] | None = None,
+):
     ready_clips = [c for c in clips if c.input_asset and c.alpha_asset]
 
     if not ready_clips:
@@ -504,57 +611,9 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
 
     logger.info(f"Found {len(ready_clips)} clips ready for inference.")
 
-    # --- User Prompts ---
-    print("\n--- Inference Settings ---")
-
-    # 1. Gamma Prompt
-    user_input_is_linear = False
-    gamma_choice = input("Is the input sequence Linear (l) or sRGB (s)? [l/s]: ").strip().lower()
-    if gamma_choice == "l":
-        user_input_is_linear = True
-        logger.info("User selected: Linear Input")
-    else:
-        logger.info("User selected: sRGB Input (or default)")
-
-    # 2. Despill Prompt
-    despill_val = input("Enter Despill Strength (0-10, 10 is max despill) [default 5]: ").strip()
-    try:
-        despill_int = int(despill_val)
-        despill_int = max(0, min(10, despill_int))
-    except ValueError:
-        despill_int = 5
-
-    despill_strength = despill_int / 10.0
-    logger.info(f"User selected: Despill Strength {despill_int}/10 ({despill_strength})")
-    # 3. Auto-Despeckle Prompt
-    auto_despeckle = True
-    despeckle_size = 400
-    despeckle_choice = input("Enable Auto-Despeckle (removes tracking dots in Processed/Comp)? [Y/n]: ").strip().lower()
-    if despeckle_choice == "n":
-        auto_despeckle = False
-        logger.info("User selected: Auto-Despeckle OFF")
-    else:
-        logger.info("User selected: Auto-Despeckle ON (default)")
-        size_val = input("Enter Auto-Despeckle Size (min pixels for a spot) [default 400]: ").strip()
-        try:
-            val_int = int(size_val)
-            despeckle_size = max(0, val_int)
-        except ValueError:
-            despeckle_size = 400
-        logger.info(f"User selected: Auto-Despeckle Size {despeckle_size}px")
-
-    # 4. Refiner Strength Prompt
-    refiner_val = input("Enter Refiner Strength (multiplier) [default 1.0] (experimental): ").strip()
-    if refiner_val == "":
-        refiner_scale = 1.0
-    else:
-        try:
-            refiner_scale = float(refiner_val)
-        except ValueError:
-            refiner_scale = 1.0
-    logger.info(f"User selected: Refiner Strength {refiner_scale}")
-
-    print("--------------------------\n")
+    # Backward compat for callers that don't pass settings
+    if settings is None:
+        settings = InferenceSettings()
 
     # Ensure Output Directory exists
     if not os.path.exists(OUTPUT_DIR):
@@ -608,16 +667,16 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
         else:
             alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
 
-        for i in range(num_frames):
-            if i % 10 == 0:
-                print(f"  Frame {i}/{num_frames}...", end="\r")
+        if on_clip_start:
+            on_clip_start(clip.name, num_frames)
 
+        for i in range(num_frames):
             # 1. Read Input
             img_srgb = None
             input_stem = f"{i:05d}"
 
-            # Use the user-defined gamma
-            input_is_linear = user_input_is_linear
+            # Use the settings-defined gamma
+            input_is_linear = settings.input_is_linear
 
             if input_cap:
                 ret, frame = input_cap.read()
@@ -632,12 +691,9 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
 
                 is_exr = fpath.lower().endswith(".exr")
                 if is_exr:
-                    img_linear = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
-                    if img_linear is None:
+                    img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
+                    if img_srgb is None:
                         continue
-                    img_linear_rgb = cv2.cvtColor(img_linear, cv2.COLOR_BGR2RGB)
-                    # Support overriding EXR behavior if user picked 's'
-                    img_srgb = np.maximum(img_linear_rgb, 0.0)
                 else:
                     img_bgr = cv2.imread(fpath)
                     if img_bgr is None:
@@ -686,36 +742,27 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                 mask_linear,
                 input_is_linear=input_is_linear,
                 fg_is_straight=USE_STRAIGHT_MODEL,
-                despill_strength=despill_strength,
-                auto_despeckle=auto_despeckle,
-                despeckle_size=despeckle_size,
-                refiner_scale=refiner_scale,
+                despill_strength=settings.despill_strength,
+                auto_despeckle=settings.auto_despeckle,
+                despeckle_size=settings.despeckle_size,
+                refiner_scale=settings.refiner_scale,
             )
 
             pred_fg = res["fg"]  # sRGB
             pred_alpha = res["alpha"]  # Linear
 
-            # 4. Save (EXR DWAB Half-Float)
-
-            # Compression Params
-            exr_flags = [
-                cv2.IMWRITE_EXR_TYPE,
-                cv2.IMWRITE_EXR_TYPE_HALF,
-                # DWAB fails. PXR24 verified as smallest working format (46KB vs ZIP 56KB vs B44A 688KB)
-                cv2.IMWRITE_EXR_COMPRESSION,
-                cv2.IMWRITE_EXR_COMPRESSION_PXR24,
-            ]
+            # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
 
             # Save FG
             # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
             fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, exr_flags)
+            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
 
             # Save Matte
             if pred_alpha.ndim == 3:
                 pred_alpha = pred_alpha[:, :, 0]
             # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, exr_flags)
+            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
             # 5. Generate Reference Comp
             comp_srgb = res["comp"]
@@ -729,13 +776,52 @@ def run_inference(clips, device=None, backend=None, max_frames=None):
                 proc_rgba = res["processed"]
                 # Convert to BGRA for OpenCV
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, exr_flags)
+                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
 
-        print("")
+            if on_frame_complete:
+                on_frame_complete(i, num_frames)
+
         if input_cap:
             input_cap.release()
         if alpha_cap:
             alpha_cap.release()
+
+        # 7. Stitch comp frames into MP4 (if input was video)
+        if clip.input_asset and clip.input_asset.type == "video":
+            try:
+                from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
+
+                if find_ffmpeg():
+                    # Get source fps
+                    try:
+                        video_info = probe_video(clip.input_asset.path)
+                        fps = video_info.get("fps", 24.0)
+                    except Exception:
+                        fps = 24.0
+
+                    comp_video_path = os.path.join(clip_out_root, f"{clip.name}_comp.mp4")
+
+                    # Detect frame pattern from saved files
+                    comp_files = sorted(f for f in os.listdir(comp_dir) if f.endswith(".png"))
+                    if comp_files:
+                        # Frames are named {input_stem}.png — e.g. 00000.png
+                        # Build ffmpeg pattern from first file
+                        first = comp_files[0]
+                        stem = os.path.splitext(first)[0]
+                        if stem.isdigit():
+                            pattern = f"%0{len(stem)}d.png"
+                        else:
+                            pattern = "frame_%06d.png"
+
+                        logger.info(f"Stitching comp video: {comp_dir} -> {comp_video_path} @ {fps} fps")
+                        stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
+                    else:
+                        logger.warning(f"No comp frames found in {comp_dir}, skipping video stitch.")
+                else:
+                    logger.info("ffmpeg not found — skipping comp video stitch.")
+            except Exception as e:
+                logger.warning(f"Comp video stitch failed (non-fatal): {e}")
+
         logger.info(f"Clip {clip.name} Complete.")
 
 

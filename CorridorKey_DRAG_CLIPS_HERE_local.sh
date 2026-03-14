@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Corridor Key Launcher - Local Linux/macOS
 
 # Get the directory where this script is located
@@ -26,10 +26,22 @@ TARGET_PATH="$1"
 # Strip trailing slash if present
 TARGET_PATH="${TARGET_PATH%/}"
 
+# Ensure uv is available before attempting to run
+if ! command -v uv &> /dev/null; then
+    echo "[ERROR] 'uv' is not installed or not on PATH."
+    echo ""
+    echo "Install uv by running:"
+    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo ""
+    echo "Then reopen your terminal and try again."
+    read -p "Press enter to exit..."
+    exit 1
+fi
+
 echo "Starting Corridor Key locally..."
 echo "Target: $TARGET_PATH"
 
-# Run the python script via uv (handles the virtual environment automatically)
-uv run python "$LOCAL_SCRIPT" --action wizard --win_path "$TARGET_PATH"
+# Run via uv entry point (handles the virtual environment automatically)
+uv run corridorkey wizard "$TARGET_PATH"
 
 read -p "Press enter to close..."

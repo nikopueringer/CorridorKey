@@ -44,14 +44,14 @@ The biggest challenge in this codebase revolves around **Color Space** and **Gam
 
 ## 3. The Inference Pipeline (`clip_manager.py`)
 
-Users generally run the system via local shell launcher scripts (`CorridorKey_local.bat` or `.sh`) which boot the `clip_manager.py` wizard. 
+Users generally run the system via local shell launcher scripts (`CorridorKey_DRAG_CLIPS_HERE_local.bat` or `CorridorKey_DRAG_CLIPS_HERE_local.sh`) which boot the `clip_manager.py` wizard.
 
 The pipeline works as follows:
 1.  **Scan:** Looks for folders (or dragged-and-dropped paths) containing an `Input` sequence (RGB) and an `AlphaHint` sequence (BW).
 2.  **Config:** Prompts the user for settings (Gamma space, Despill strength, Auto-Despeckle threshold, Refiner Strength).
 3.  **Execution:** Loops frame-by-frame, passing `[H, W, 3]` Numpy arrays to `engine.process_frame()`.
 4.  **Export:**
-    *   `FG` directory: Half-float EXR, RGB (Linear).
+    *   `FG` directory: Half-float EXR, RGB (**sRGB** — the model predicts straight FG in sRGB; convert to linear before compositing).
     *   `Matte` directory: Half-float EXR, Grayscale (Linear).
     *   `Processed` directory: Half-float EXR, RGBA (Linear, Premultiplied).
     *   `Comp` directory: 8-bit PNG (sRGB composite over a checkerboard, for quick preview).

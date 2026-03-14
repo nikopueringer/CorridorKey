@@ -24,7 +24,9 @@ def _power(x: np.ndarray | torch.Tensor, exponent: float) -> np.ndarray | torch.
     return power(x, exponent)
 
 
-def _where(condition: bool, x: np.ndarray | torch.Tensor, y: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+def _where(
+    condition: np.ndarray | torch.Tensor, x: np.ndarray | torch.Tensor, y: np.ndarray | torch.Tensor
+) -> np.ndarray | torch.Tensor:
     """
     Where function that supports both Numpy arrays and PyTorch tensors.
     """
@@ -36,10 +38,9 @@ def _clamp(x: np.ndarray | torch.Tensor, min: float) -> np.ndarray | torch.Tenso
     """
     Clamp function that supports both Numpy arrays and PyTorch tensors.
     """
-    if _is_tensor(x):
+    if isinstance(x, torch.Tensor):
         return x.clamp(min=0.0)
-    else:
-        return np.clip(x, 0.0, None)
+    return np.clip(x, 0.0, None)
 
 
 _torch_stack = functools.partial(torch.stack, dim=-1)
@@ -153,7 +154,7 @@ def dilate_mask(mask: np.ndarray | torch.Tensor, radius: int) -> np.ndarray | to
 
     kernel_size = int(radius * 2 + 1)
 
-    if _is_tensor(mask):
+    if isinstance(mask, torch.Tensor):
         # PyTorch Dilation (using Max Pooling)
         # Expects [B, C, H, W]
         orig_dim = mask.dim()
@@ -171,12 +172,10 @@ def dilate_mask(mask: np.ndarray | torch.Tensor, radius: int) -> np.ndarray | to
         elif orig_dim == 3:
             return dilated.squeeze(0)
         return dilated
-    else:
-        # Numpy Dilation (using OpenCV)
-        import cv2
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        return cv2.dilate(mask, kernel)
+    # Numpy Dilation (using OpenCV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    return cv2.dilate(mask, kernel)
 
 
 def apply_garbage_matte(
@@ -228,9 +227,10 @@ def despill(
     else:
         limit = (r + b) / 2.0
 
-    if tensor:
-        # PyTorch Impl
-        spill_amount = torch.clamp(g - limit, min=0.0)
+    if isinstance(image, torch.Tensor):
+        # PyTorch Impl — g/limit are Tensor since image is Tensor
+        diff: torch.Tensor = g - limit  # type: ignore[assignment]
+        spill_amount = torch.clamp(diff, min=0.0)
     else:
         # Numpy Impl
         spill_amount = np.maximum(g - limit, 0.0)

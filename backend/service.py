@@ -289,7 +289,10 @@ class CorridorKeyService:
         if self._engine is not None:
             return self._engine
 
-        from CorridorKeyModule.inference_engine import CorridorKeyEngine
+        try:
+            from CorridorKeyModule.inference_engine import CorridorKeyEngine
+        except ImportError as exc:
+            raise RuntimeError("CorridorKeyModule is not installed. Run: uv sync") from exc
 
         ckpt_dir = os.path.join(BASE_DIR, "CorridorKeyModule", "checkpoints")
         ckpt_files = glob_module.glob(os.path.join(ckpt_dir, "*.pth"))
@@ -404,6 +407,11 @@ class CorridorKeyService:
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             return img_rgb.astype(np.float32) / 255.0, input_stem, input_is_linear
         else:
+            if frame_index >= len(input_files):
+                logger.warning(
+                    f"Clip '{clip.name}': frame_index {frame_index} out of range (have {len(input_files)} frames)"
+                )
+                return None, f"{frame_index:05d}", input_is_linear
             fpath = os.path.join(clip.input_asset.path, input_files[frame_index])
             input_stem = os.path.splitext(input_files[frame_index])[0]
             img = read_image_frame(fpath)
