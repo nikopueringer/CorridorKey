@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "editorconfig.editorconfig",
+    "tamasfe.even-better-toml",
+    "github.vscode-github-actions",
+    "github.vscode-pull-request-github",
+    "davidanson.vscode-markdownlint",
+    "hverlin.mise-vscode",
+    "christian-kohler.path-intellisense",
+    "ms-python.python",
+    "rodolphebarbanneau.python-docstring-highlighter",
+    "charliermarsh.ruff",
+    "astral-sh.ty",
+    "redhat.vscode-yaml"
+  ]
+}
