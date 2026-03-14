@@ -10,12 +10,15 @@ Tracks all optimization experiments on the `feature/mlx-optimization` branch. Ea
 |---|---|---|
 | PyTorch (MPS) | 3:34 | — |
 | MLX (pre-optimization, 512px tiles) | 2:04 | ~3400 |
-| MLX (pipeline opts, 768px tiles, all outputs) | 1:20 | 2948 |
+| MLX (pipeline opts, 768px tiles) | 1:20 | 2948 |
 | MLX (+ refiner fp16, compile, no buffer limits) | 1:15 | 2762 |
-| MLX (+ remove all gc.collect/mx.clear_cache) | 0:55 | 2208 |
-| **MLX (all opts, all outputs)** | **0:55** | **2208** |
-| **MLX (all opts, matte+fg, fast-exr)** | **0:51** | **1424** |
-| **Speedup vs pre-opt** | | **2.4x** |
+| MLX (+ remove gc.collect/mx.clear_cache) | 0:55 | 2208 |
+| MLX (+ iterative dilation, vectorized CCL) | 0:54 | 2177 |
+| **MLX (all opts, all outputs)** | **0:54** | **2177** |
+| **MLX (all opts, matte+fg, fast-exr)** | **0:51** | **1417** |
+| **Speedup vs pre-opt (all outputs)** | | **1.56x** |
+| **Speedup vs pre-opt (matte+fg fast-exr)** | | **2.40x** |
+| **Speedup vs PyTorch MPS** | | **~4.2x** |
 
 ---
 
