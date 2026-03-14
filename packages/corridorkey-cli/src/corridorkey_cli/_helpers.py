@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import TracebackType
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -59,8 +60,13 @@ class ProgressContext:
         self._progress.__enter__()
         return self
 
-    def __exit__(self, *exc: object) -> None:
-        self._progress.__exit__(*exc)
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self._progress.__exit__(exc_type, exc_val, exc_tb)
 
     def on_clip_start(self, clip_name: str, state: str) -> None:
         """Reset the progress bar for a new clip."""
