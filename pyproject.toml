@@ -21,7 +21,10 @@ dev = [
   "ruff>=0.15.5",
   "ty>=0.0.21",
 ]
-docs = ["zensical>=0.0.26"]
+docs = [
+    "mkdocstrings[python]>=1.0.3",
+    "zensical>=0.0.26",
+]
 
 [tool.uv.workspace]
 members = ["packages/*"]
