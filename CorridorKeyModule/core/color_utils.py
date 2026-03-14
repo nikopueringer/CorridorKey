@@ -295,13 +295,11 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
     # Find connected components
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_8u, connectivity=8)
 
-    # Create an empty mask for the cleaned components
-    cleaned_mask = np.zeros_like(mask_8u)
-
-    # Keep components larger than the threshold (skip label 0, which is background)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
-            cleaned_mask[labels == i] = 255
+    # Vectorized: keep components larger than area threshold
+    areas = stats[:, cv2.CC_STAT_AREA]
+    keep = np.zeros(num_labels, dtype=np.uint8)
+    keep[1:] = (areas[1:] >= area_threshold).astype(np.uint8)
+    cleaned_mask = (keep[labels] * 255).astype(np.uint8)
 
     # Dilate — use iterative small kernels for large dilations (4-5x faster)
     if dilation > 0:
