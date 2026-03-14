@@ -30,6 +30,10 @@ mlx = ["corridorkey[mlx]"]
 [dependency-groups]
 dev = ["pytest>=9.0.2"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
 [tool.uv.sources]
 corridorkey = { workspace = true }
 

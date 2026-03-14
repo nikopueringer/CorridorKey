@@ -11,6 +11,7 @@ from corridorkey.config import CorridorKeyConfig, export_config, load_config
 from corridorkey.errors import CorridorKeyError, FFmpegNotFoundError
 from corridorkey.ffmpeg_tools import check_ffmpeg
 from corridorkey.job_queue import GPUJob, GPUJobQueue, JobStatus, JobType
+from corridorkey.model_manager import MODEL_DOWNLOAD_URL, MODEL_FILENAME, download_model, is_model_present
 from corridorkey.models import InOutRange
 from corridorkey.pipeline import ClipSummary, PipelineResult, process_directory
 from corridorkey.project import (
@@ -66,6 +67,11 @@ __all__ = [
     "FFmpegNotFoundError",
     # FFmpeg diagnostics
     "check_ffmpeg",
+    # Model management
+    "is_model_present",
+    "download_model",
+    "MODEL_DOWNLOAD_URL",
+    "MODEL_FILENAME",
     # Project management
     "create_project",
     "add_clips_to_project",

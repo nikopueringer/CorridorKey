@@ -26,7 +26,8 @@ import logging
 from pathlib import Path
 
 from pydantic import BaseModel, field_validator
-from utilityhub_config import expand_path_validator, load_settings
+from utilityhub_config import load_settings
+from utilityhub_config.utils import expand_path
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,11 @@ class CorridorKeyConfig(BaseModel):
             first use if it does not exist.
         checkpoint_dir: Directory where model checkpoints are stored.
             Can be overridden to a shared network path in studio environments.
+        model_download_url: URL to download the inference model checkpoint.
+            Defaults to the official release URL. Override to point at a
+            mirror or a local file server (e.g. in air-gapped studios).
+        model_filename: Expected filename of the downloaded checkpoint.
+            Only change this if you are hosting a renamed build.
         device: Compute device to use. One of "auto", "cuda", "mps", "cpu".
             "auto" selects the best available device at runtime.
         despill_strength: Default green-spill suppression strength (0.0-1.0).
@@ -67,6 +73,10 @@ class CorridorKeyConfig(BaseModel):
     # Paths
     app_dir: Path = _DEFAULT_APP_DIR
     checkpoint_dir: Path = _DEFAULT_CHECKPOINT_DIR
+
+    # Model download - None means fall back to the built-in constants in model_manager
+    model_download_url: str | None = None
+    model_filename: str | None = None
 
     # Device
     device: str = "auto"
@@ -87,8 +97,8 @@ class CorridorKeyConfig(BaseModel):
     @field_validator("app_dir", "checkpoint_dir", mode="before")
     @classmethod
     def _expand_paths(cls, v: Path | str) -> Path:
-        """Expand tilde and environment variables in path fields."""
-        return expand_path_validator(v)
+        """Expand tilde and environment variables in path fields without requiring existence."""
+        return expand_path(str(v) if isinstance(v, Path) else v)
 
 
 def export_config(config: CorridorKeyConfig, path: str | Path | None = None) -> Path:
@@ -125,6 +135,8 @@ def export_config(config: CorridorKeyConfig, path: str | Path | None = None) -> 
     ]
     for field_name in CorridorKeyConfig.model_fields:
         value = getattr(config, field_name)
+        if value is None:
+            continue
         if isinstance(value, Path):
             value = str(value)
         if isinstance(value, str):
