@@ -1,17 +1,76 @@
 [project]
 name = "corridorkey"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Rajesh Das", email = "hyperoot.tech@proton.me" }
-]
+description = "Application layer for the CorridorKey AI chroma keying pipeline."
 requires-python = ">=3.13"
-dependencies = []
+readme = "README.md"
+authors = [{ name = "Corridor Digital" }]
+maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
 
-[project.scripts]
-corridorkey = "corridorkey:main"
+dependencies = [
+    "corridorkey-core>=0.1.0",
+    "opencv-python>=4.13.0.92",
+    "numpy>=2.0.0",
+    # GVM alpha hint generator
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "peft",
+    "av",
+    "Pillow",
+    "PIMS",
+    "easydict",
+    "imageio",
+    "matplotlib",
+    # VideoMaMa alpha hint generator
+    "einops",
+    # BiRefNet alpha hint generator
+    "kornia",
+    # CLI framework + terminal output
+    "typer>=0.12",
+    "rich>=13",
+    "tqdm",
+    # Triton fix for Windows
+    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "hypothesis>=6.151.9"]
+
+[project.optional-dependencies]
+cuda = ["corridorkey-core[cuda]"]
+
+
+[tool.uv.sources]
+corridorkey-core = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires CUDA GPU (skipped in CI)",
+    "slow: long-running test",
+    "mlx: requires Apple Silicon with MLX installed",
+]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["corridorkey"]
+
+[tool.coverage.report]
+fail_under = 75

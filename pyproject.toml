@@ -1,5 +1,5 @@
 [project]
-name = "corridorkey"
+name = "corridorkey-workspace"
 version = "2.0.0"
 description = "AI Green Screen Keyer by Corridor Digital"
 license = { text = "CC-BY-NC-SA-4.0" }
@@ -21,13 +21,11 @@ dev = [
   "ruff>=0.15.5",
   "ty>=0.0.21",
 ]
-docs = [
-    "mkdocstrings[python]>=1.0.3",
-    "zensical>=0.0.26",
-]
+docs = ["mkdocstrings[python]>=1.0.3", "zensical>=0.0.26"]
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
 corridorkey-core = { workspace = true }
+corridorkey = { workspace = true }
