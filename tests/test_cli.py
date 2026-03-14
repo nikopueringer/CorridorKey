@@ -240,3 +240,18 @@ class TestNonInteractiveFlags:
         assert "--linear" in plain
         assert "--refiner" in plain
         assert "--despeckle-size" in plain
+        assert "--sample-frames" in plain
+
+    @patch("corridorkey_cli.scan_clips")
+    @patch("corridorkey_cli.run_inference")
+    def test_sample_frames_passed_through(self, mock_run, mock_scan):
+        """--sample-frames is forwarded to run_inference as sample_frames kwarg."""
+        mock_scan.return_value = []
+        result = runner.invoke(
+            app,
+            ["run-inference", "--sample-frames", "5", "--srgb", "--despill", "5", "--despeckle", "--refiner", "1.0"],
+        )
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["sample_frames"] == 5

@@ -16,7 +16,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
-from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
+from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame, read_video_frame_at
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -593,11 +593,28 @@ def run_videomama(
             traceback.print_exc()
 
 
+def _compute_sample_indices(n: int, total: int) -> list[int]:
+    """Return n evenly-spaced frame indices in [0, total).
+
+    Examples:
+        _compute_sample_indices(5, 500) -> [0, 125, 250, 375, 499]
+        _compute_sample_indices(1, 500) -> [0]
+        _compute_sample_indices(500, 100) -> [0, 1, ..., 99]  # clamped
+    """
+    if n >= total:
+        return list(range(total))
+    if n == 1:
+        return [0]
+    step = (total - 1) / (n - 1)
+    return sorted({round(i * step) for i in range(n)})
+
+
 def run_inference(
     clips,
     device=None,
     backend=None,
     max_frames=None,
+    sample_frames=None,
     settings: InferenceSettings | None = None,
     *,
     on_clip_start: Callable[[str, int], None] | None = None,
@@ -630,12 +647,16 @@ def run_inference(
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
 
-        # Setup Outputs in ClipFolder/Output/...
+        # Setup Outputs in ClipFolder/Output/... (or Output/Sample/ when sampling)
         clip_out_root = os.path.join(clip.root_path, "Output")
-        fg_dir = os.path.join(clip_out_root, "FG")
-        matte_dir = os.path.join(clip_out_root, "Matte")
-        comp_dir = os.path.join(clip_out_root, "Comp")
-        proc_dir = os.path.join(clip_out_root, "Processed")
+        if sample_frames is not None and sample_frames > 0:
+            clip_out_root_effective = os.path.join(clip_out_root, "Sample")
+        else:
+            clip_out_root_effective = clip_out_root
+        fg_dir = os.path.join(clip_out_root_effective, "FG")
+        matte_dir = os.path.join(clip_out_root_effective, "Matte")
+        comp_dir = os.path.join(clip_out_root_effective, "Comp")
+        proc_dir = os.path.join(clip_out_root_effective, "Processed")
 
         for d in [fg_dir, matte_dir, comp_dir, proc_dir]:
             os.makedirs(d, exist_ok=True)
@@ -643,12 +664,24 @@ def run_inference(
         num_frames = min(clip.input_asset.frame_count, clip.alpha_asset.frame_count)
         if max_frames is not None:
             num_frames = min(num_frames, max_frames)
+
+        # Compute which frames to process
+        if sample_frames is not None and sample_frames > 0:
+            frame_indices = _compute_sample_indices(sample_frames, num_frames)
+            logger.info(
+                "  Sample mode: %d frames selected from %d total -> Output/Sample/",
+                len(frame_indices),
+                num_frames,
+            )
+        else:
+            frame_indices = list(range(num_frames))
+
         logger.info(
             f"  Input frames: {clip.input_asset.frame_count},"
-            f" Alpha frames: {clip.alpha_asset.frame_count} -> Processing {num_frames} frames"
+            f" Alpha frames: {clip.alpha_asset.frame_count} -> Processing {len(frame_indices)} frames"
         )
 
-        if num_frames == 0:
+        if len(frame_indices) == 0:
             logger.warning(f"Clip '{clip.name}': 0 frames to process, skipping.")
             continue
 
@@ -657,23 +690,24 @@ def run_inference(
         input_files = []
         alpha_files = []
 
-        if clip.input_asset.type == "video":
-            input_cap = cv2.VideoCapture(clip.input_asset.path)
-        else:
-            input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+        if sample_frames is None:  # sequential caps — normal render only
+            if clip.input_asset.type == "video":
+                input_cap = cv2.VideoCapture(clip.input_asset.path)
+            if clip.alpha_asset.type == "video":
+                alpha_cap = cv2.VideoCapture(clip.alpha_asset.path)
 
-        if clip.alpha_asset.type == "video":
-            alpha_cap = cv2.VideoCapture(clip.alpha_asset.path)
-        else:
+        if clip.input_asset.type != "video":
+            input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+        if clip.alpha_asset.type != "video":
             alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
 
         if on_clip_start:
-            on_clip_start(clip.name, num_frames)
+            on_clip_start(clip.name, len(frame_indices))
 
-        for i in range(num_frames):
+        for frame_idx in frame_indices:
             # 1. Read Input
             img_srgb = None
-            input_stem = f"{i:05d}"
+            input_stem = f"{frame_idx:05d}"
 
             # Use the settings-defined gamma
             input_is_linear = settings.input_is_linear
@@ -684,10 +718,13 @@ def run_inference(
                     break
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img_srgb = img_rgb.astype(np.float32) / 255.0
-                input_stem = f"{i:05d}"
+            elif clip.input_asset.type == "video":  # sample mode — seek to frame_idx
+                img_srgb = read_video_frame_at(clip.input_asset.path, frame_idx)
+                if img_srgb is None:
+                    break
             else:
-                fpath = os.path.join(clip.input_asset.path, input_files[i])
-                input_stem = os.path.splitext(input_files[i])[0]
+                fpath = os.path.join(clip.input_asset.path, input_files[frame_idx])
+                input_stem = os.path.splitext(input_files[frame_idx])[0]
 
                 is_exr = fpath.lower().endswith(".exr")
                 if is_exr:
@@ -708,8 +745,18 @@ def run_inference(
                 if not ret:
                     break
                 mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+            elif clip.alpha_asset.type == "video":  # sample mode — seek to frame_idx
+                _alpha_cap = cv2.VideoCapture(clip.alpha_asset.path)
+                try:
+                    _alpha_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = _alpha_cap.read()
+                    if not ret:
+                        break
+                    mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+                finally:
+                    _alpha_cap.release()
             else:
-                fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
+                fpath = os.path.join(clip.alpha_asset.path, alpha_files[frame_idx])
                 mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
 
                 if mask_in is None:
@@ -779,15 +826,17 @@ def run_inference(
                 cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
 
             if on_frame_complete:
-                on_frame_complete(i, num_frames)
+                on_frame_complete(frame_idx, len(frame_indices))
 
         if input_cap:
             input_cap.release()
         if alpha_cap:
             alpha_cap.release()
 
-        # 7. Stitch comp frames into MP4 (if input was video)
-        if clip.input_asset and clip.input_asset.type == "video":
+        # 7. Stitch comp frames into MP4 (if input was video; skipped in sample mode)
+        if sample_frames is not None and sample_frames > 0:
+            logger.info("Sample mode — skipping comp video stitch.")
+        elif clip.input_asset and clip.input_asset.type == "video":
             try:
                 from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
 
