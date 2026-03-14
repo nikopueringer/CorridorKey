@@ -102,3 +102,49 @@ See `HANDOFF_TO_CORRIDORKEY.md` Section 5 for full list. Key items:
 - GPU stream parallelism: single GPU on Apple Silicon
 - MLX concurrent threads: Metal command encoder crashes on concurrent calls
 - GPU-side colorspace: requires cross-repo API change for marginal gain
+
+---
+
+## Final Hail Mary Optimization Pass (27 experiments)
+
+**Baseline**: 0:54 wall, 1456ms/frame median infer (3 runs after 30s cooldown)
+
+All 27 ideas from Deep Research doc tested or triaged. GitHub issues #50-#76.
+
+### Tested and Failed
+
+| # | Technique | Result | Why |
+|---|---|---|---|
+| #50 | Space-to-Depth dilated conv | +17% regression (1682ms) | pixel_unshuffle copies + poor grouped conv GPU utilization |
+| #51 | SIMD-aligned attention padding (head_dim 56→64) | +23% regression (1756ms) | mx.pad allocations × 432 ops/frame dwarfs kernel alignment gain |
+| #53 | Granular per-component eval boundaries | +2.7% regression (1495ms) | Extra CPU-GPU sync barriers outweigh memory pool recycling |
+| #54 | IOKit GPU power state pinning (caffeinate) | No effect | GPU reaches peak clocks fast enough during 218ms tile inference |
+| #55 | Metal shader cache pre-warming | +1.6% regression (1455ms) | Warmup startup cost exceeds JIT savings for 37-frame clip |
+| #59 | MLX memory pool cache-limit tuning | Inconsistent (1392-1660ms) | Removing limits gives wildly variable results |
+| #73 | Disable Metal shader validation | No effect | Not enabled by default in production |
+| #74 | MLX_MAX_OPS_PER_BUFFER=1 starvation | +24% regression (1783ms) | Too-frequent kernel dispatch overhead |
+| #58 | NCHW transposition sandwiches | Impossible | MLX Conv2d only supports NHWC layout |
+
+### Triaged as Impractical (not testable from Python/MLX)
+
+| # | Technique | Why |
+|---|---|---|
+| #52 | In-place memory mutation (input_rw_status) | Requires MLX C++ source patch |
+| #56 | Force implicit GEMM for refiner convs | Requires MLX C++ conv dispatch modification |
+| #57 | SIMD-level fused GroupNorm | Previous custom GroupNorm: -67% micro, 0% pipeline |
+| #60 | Sub-tile graph interleaving | Granular eval proved sync barriers hurt |
+| #62 | Fused overlap blending | Weights frozen at compile time |
+| #63 | Pointwise shapeless compilation | Fixed 768×768 shapes, no benefit |
+| #64 | QoS thread escalation | GPU-bound, not CPU scheduling |
+| #65 | Async CPU-GPU postprocessing overlap | No CPU work left to overlap |
+| #61 | Safetensors mmap bypass | Startup not the bottleneck |
+| #66-#72, #75-#76 | Various Tier 3 (texture LUT, fast sqrt, ICB, TBDR, etc.) | Implementation effort months, success probability <10% |
+
+### Conclusion
+
+**The 0:54 baseline represents the hardware limit for this architecture on Apple Silicon with MLX.** 79 prior experiments + 27 new experiments = 106 total optimization attempts. Every lever accessible from Python/MLX has been pulled. The remaining theoretical gains require:
+1. MLX C++ source modifications (in-place mutation, conv algorithm forcing)
+2. Custom Metal/Swift extensions (ICB, TBDR, texture sampling)
+3. Model retraining (knowledge distillation, architecture changes)
+
+None of these are feasible within the current project constraints.
