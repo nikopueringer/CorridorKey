@@ -27,7 +27,6 @@ import logging
 import os
 import re
 import shutil
-import sys
 from datetime import datetime
 
 from corridorkey.models import InOutRange
@@ -39,8 +38,6 @@ _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp
 
 # Qt-style file dialog filter string for video files.
 VIDEO_FILE_FILTER = "Video Files (*.mp4 *.mov *.avi *.mkv *.mxf *.webm *.m4v);;All Files (*)"
-
-_app_dir: str | None = None
 
 
 def _dedupe_path(parent_dir: str, stem: str) -> tuple[str, str]:
@@ -67,37 +64,6 @@ def _dedupe_path(parent_dir: str, stem: str) -> tuple[str, str]:
         if not os.path.exists(candidate_path):
             return candidate_path, candidate_stem
         index += 1
-
-
-def set_app_dir(path: str) -> None:
-    """Set the application directory. Call once at startup.
-
-    Args:
-        path: Absolute path to the application directory.
-    """
-    global _app_dir
-    _app_dir = path
-
-
-def projects_root() -> str:
-    """Return the Projects root directory, creating it if needed.
-
-    Resolution order:
-      1. ``{_app_dir}/Projects/`` if set_app_dir() was called.
-      2. ``{exe_dir}/Projects/`` when running as a frozen executable.
-      3. ``{repo_root}/Projects/`` in development mode.
-
-    Returns:
-        Absolute path to the Projects root directory.
-    """
-    if _app_dir:
-        root = os.path.join(_app_dir, "Projects")
-    elif getattr(sys, "frozen", False):
-        root = os.path.join(os.path.dirname(sys.executable), "Projects")
-    else:
-        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Projects")
-    os.makedirs(root, exist_ok=True)
-    return root
 
 
 def sanitize_stem(filename: str, max_len: int = 60) -> str:

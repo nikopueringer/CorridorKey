@@ -266,9 +266,9 @@ class ClipEntry:
         Returns:
             Absolute path to the original video, or None if not found.
         """
-        from corridorkey.project import _read_clip_or_project_json
+        from corridorkey.project import read_clip_json, read_project_json
 
-        data = _read_clip_or_project_json(self.root_path)
+        data = read_clip_json(self.root_path) or read_project_json(self.root_path)
         if not data:
             return None
         source = data.get("source", {})

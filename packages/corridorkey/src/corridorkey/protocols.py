@@ -21,11 +21,11 @@ class AlphaGenerator(Protocol):
     frames into the clip's AlphaHint/ directory, then transition the clip
     to READY state.
 
-    Example implementation (corridorkey-gvm):
-        class GVMAlphaGenerator:
+    Example implementation (corridorkey-gbm):
+        class GBMAlphaGenerator:
             def generate(self, clip, on_progress=None, on_warning=None): ...
             @property
-            def name(self) -> str: return "gvm"
+            def name(self) -> str: return "gbm"
     """
 
     @property

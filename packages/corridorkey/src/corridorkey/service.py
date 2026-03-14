@@ -190,9 +190,35 @@ class CorridorKeyService:
         self._job_queue: GPUJobQueue | None = None
         self._gpu_lock = threading.Lock()
 
-    # ------------------------------------------------------------------
-    # Job queue (lazy - only needed for GUI/async use)
-    # ------------------------------------------------------------------
+    def default_inference_params(self) -> InferenceParams:
+        """Build InferenceParams seeded from the loaded config.
+
+        Callers that want config-driven defaults should use this rather
+        than constructing InferenceParams() directly.
+
+        Returns:
+            InferenceParams with values from CorridorKeyConfig.
+        """
+        return InferenceParams(
+            input_is_linear=self._config.input_is_linear,
+            despill_strength=self._config.despill_strength,
+            auto_despeckle=self._config.auto_despeckle,
+            despeckle_size=self._config.despeckle_size,
+            refiner_scale=self._config.refiner_scale,
+        )
+
+    def default_output_config(self) -> OutputConfig:
+        """Build OutputConfig seeded from the loaded config.
+
+        Returns:
+            OutputConfig with format values from CorridorKeyConfig.
+        """
+        return OutputConfig(
+            fg_format=self._config.fg_format,
+            matte_format=self._config.matte_format,
+            comp_format=self._config.comp_format,
+            processed_format=self._config.processed_format,
+        )
 
     @property
     def job_queue(self) -> GPUJobQueue:
@@ -200,10 +226,6 @@ class CorridorKeyService:
         if self._job_queue is None:
             self._job_queue = GPUJobQueue()
         return self._job_queue
-
-    # ------------------------------------------------------------------
-    # Device and VRAM
-    # ------------------------------------------------------------------
 
     def detect_device(self, requested: str | None = None) -> str:
         """Resolve and store the compute device.
@@ -244,10 +266,6 @@ class CorridorKeyService:
         except Exception as e:
             logger.debug("VRAM query failed: %s", e)
             return {}
-
-    # ------------------------------------------------------------------
-    # Engine lifecycle
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _vram_allocated_mb() -> float:
@@ -310,10 +328,6 @@ class CorridorKeyService:
         """True if the inference engine is loaded in VRAM."""
         return self._engine_loaded and self._engine is not None
 
-    # ------------------------------------------------------------------
-    # Alpha generation (protocol-based, generator-agnostic)
-    # ------------------------------------------------------------------
-
     def run_alpha_generator(
         self,
         clip: ClipEntry,
@@ -354,10 +368,6 @@ class CorridorKeyService:
                 raise JobCancelledError(clip.name, 0) from None
             raise CorridorKeyError(f"Alpha generator '{generator.name}' failed for '{clip.name}': {e}") from e
 
-    # ------------------------------------------------------------------
-    # Clip scanning
-    # ------------------------------------------------------------------
-
     def scan_clips(self, clips_dir: str, allow_standalone_videos: bool = True) -> list[ClipEntry]:
         """Scan a directory for clip folders.
 
@@ -382,10 +392,6 @@ class CorridorKeyService:
             Subset of clips whose state equals the requested state.
         """
         return [c for c in clips if c.state == state]
-
-    # ------------------------------------------------------------------
-    # Frame I/O helpers (private)
-    # ------------------------------------------------------------------
 
     def _read_input_frame(
         self,
@@ -455,10 +461,6 @@ class CorridorKeyService:
         mask = read_mask_frame(fpath, clip.name, frame_index)
         validate_frame_read(mask, clip.name, frame_index, fpath)
         return mask
-
-    # ------------------------------------------------------------------
-    # Output writing helpers (private)
-    # ------------------------------------------------------------------
 
     def _write_image(self, img: np.ndarray, path: str, fmt: str, clip_name: str, frame_index: int) -> None:
         """Write a single image to disk in the requested format.
@@ -564,10 +566,6 @@ class CorridorKeyService:
                 clip_name,
                 frame_index,
             )
-
-    # ------------------------------------------------------------------
-    # Inference
-    # ------------------------------------------------------------------
 
     def run_inference(
         self,

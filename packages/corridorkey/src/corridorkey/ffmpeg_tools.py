@@ -375,7 +375,7 @@ def stitch_video(
         "-start_number",
         "0",
         "-i",
-        in_dir + "/" + pattern,
+        os.path.join(in_dir, pattern),
         "-c:v",
         codec,
         "-crf",

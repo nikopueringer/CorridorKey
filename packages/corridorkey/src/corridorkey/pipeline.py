@@ -88,11 +88,11 @@ def process_directory(
     Returns:
         PipelineResult with per-clip summaries.
     """
-    params = params or InferenceParams()
-    output_config = output_config or OutputConfig()
-
     service = CorridorKeyService(config)
     service.detect_device(device)
+
+    params = params or service.default_inference_params()
+    output_config = output_config or service.default_output_config()
     result = PipelineResult()
 
     try:
