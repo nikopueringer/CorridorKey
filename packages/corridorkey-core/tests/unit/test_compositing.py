@@ -4,6 +4,7 @@ All tests use synthetic numpy arrays and run without GPU or model files.
 """
 
 import numpy as np
+import pytest
 import torch
 from corridorkey_core.compositing import (
     clean_matte,
@@ -160,6 +161,11 @@ class TestDespill:
         img = _solid(4, 4, 0.2, 0.9, 0.2)
         result = despill(img, green_limit_mode="max", strength=1.0)
         assert result.shape == img.shape
+
+    def test_invalid_mode_raises(self):
+        img = _solid(4, 4, 0.2, 0.9, 0.2)
+        with pytest.raises(ValueError, match="green_limit_mode"):
+            despill(img, green_limit_mode="median")
 
     def test_tensor_input(self):
         img = torch.tensor(_solid(4, 4, 0.2, 0.9, 0.2))

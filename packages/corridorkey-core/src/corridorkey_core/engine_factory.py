@@ -284,7 +284,7 @@ def create_engine(
     Args:
         checkpoint_dir: Directory containing the checkpoint file(s).
         backend: "torch", "mlx", "auto", or None. Resolved via resolve_backend().
-        device: Torch device string (e.g. "cuda", "cpu"). Torch only.
+        device: Torch device string (e.g. "cuda", "cpu"). Torch only. Defaults to "cpu" when None.
         img_size: Square resolution the model runs at internally.
         tile_size: MLX only — tile size for tiled inference. None = full-frame.
         overlap: MLX only — overlap pixels between tiles.

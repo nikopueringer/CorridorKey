@@ -38,10 +38,10 @@ def _where(
 
 
 def _clamp(x: np.ndarray | torch.Tensor, min: float) -> np.ndarray | torch.Tensor:
-    # Clamps values to a minimum of 0.0. Dispatches to torch or numpy.
+    # Clamps values to the given minimum. Dispatches to torch or numpy.
     if isinstance(x, torch.Tensor):
-        return x.clamp(min=0.0)
-    return np.clip(x, 0.0, None)
+        return x.clamp(min=min)
+    return np.clip(x, min, None)
 
 
 _torch_stack = functools.partial(torch.stack, dim=-1)
@@ -113,20 +113,30 @@ def composite_premul(
     return fg + bg * (1.0 - alpha)
 
 
+_VALID_GREEN_LIMIT_MODES = ("average", "max")
+
+
 def despill(
     image: np.ndarray | torch.Tensor, green_limit_mode: str = "average", strength: float = 1.0
 ) -> np.ndarray | torch.Tensor:
     """Remove green spill from an RGB image using a luminance-preserving method.
 
     Excess green is redistributed equally to red and blue channels to neutralize
-    the spill without darkening the subject.
+    the spill without darkening the subject. Output is clamped to [0, 1].
 
     Args:
         image: RGB float array in range 0-1.
         green_limit_mode: How to compute the green limit. "average" uses (R+B)/2,
-            "max" uses max(R, B).
+            "max" uses max(R, B). Any other value raises ValueError.
         strength: Blend factor between original and despilled result (0.0 to 1.0).
+            Values outside [0, 1] are accepted but may produce out-of-range output.
+
+    Raises:
+        ValueError: If green_limit_mode is not "average" or "max".
     """
+    if green_limit_mode not in _VALID_GREEN_LIMIT_MODES:
+        raise ValueError(f"Invalid green_limit_mode '{green_limit_mode}'. Must be one of: {_VALID_GREEN_LIMIT_MODES}")
+
     if strength <= 0.0:
         return image
 
@@ -147,8 +157,16 @@ def despill(
         spill_amount = np.maximum(g - green_limit, 0.0)
 
     g_new = g - spill_amount
-    r_new = r + (spill_amount * 0.5)
-    b_new = b + (spill_amount * 0.5)
+    r_new = _clamp(r + (spill_amount * 0.5), 0.0)
+    b_new = _clamp(b + (spill_amount * 0.5), 0.0)
+
+    # Clamp to [0, 1] — redistribution can push bright channels above 1.0
+    if isinstance(image, torch.Tensor):
+        r_new = r_new.clamp(max=1.0)
+        b_new = b_new.clamp(max=1.0)
+    else:
+        r_new = np.clip(r_new, 0.0, 1.0)
+        b_new = np.clip(b_new, 0.0, 1.0)
 
     despilled_image = _stack([r_new, g_new, b_new])
 

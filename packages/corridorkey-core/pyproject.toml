@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0"]
+dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "hypothesis>=6.151.9"]
 
 [project.optional-dependencies]
 cuda = ["torch==2.10.0", "torchvision==0.25.0"]
@@ -59,10 +59,10 @@ markers = [
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-addopts = "--tb=short"
+addopts = "--tb=short --cov-config=packages/corridorkey-core/pyproject.toml"
 
 [tool.coverage.run]
-omit = ["*/inference_engine.py"]
+omit = ["*/inference_engine.py", "*\\inference_engine.py"]
 
 [tool.coverage.report]
 fail_under = 75
