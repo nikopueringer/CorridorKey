@@ -47,7 +47,6 @@ class ClipState(Enum):
 
 
 # Valid state transitions: from_state -> set of allowed to_states.
-# Valid state transitions: from_state -> set of allowed to_states.
 _TRANSITIONS: dict[ClipState, set[ClipState]] = {
     ClipState.EXTRACTING: {ClipState.RAW, ClipState.ERROR},
     ClipState.RAW: {ClipState.MASKED, ClipState.READY, ClipState.ERROR},
