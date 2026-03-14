@@ -1,0 +1,35 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.uv-cache
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Docker files (no need to copy themselves into the image)
+Dockerfile
+docker-compose.yml
+
+# Documentation and repo metadata
+CONTRIBUTING.md
+docs/
+.git-blame-ignore-revs
+
+# Tests (not needed at runtime)
+tests/
+test_vram.py
+
+# Launcher scripts (host-only)
+*.bat
+*.sh
+
+# Large/generated data and local outputs
+ClipsForInference/
+IgnoredClips/
+Output/
+CorridorKeyModule/checkpoints/
+gvm_core/weights/
+VideoMaMaInferenceModule/checkpoints/

@@ -2,6 +2,12 @@
 
 Thanks for your interest in improving CorridorKey! Whether you're a VFX artist, a pipeline TD, or a machine learning researcher, contributions of all kinds are welcome — bug reports, feature ideas, documentation fixes, and code.
 
+## Legal Agreement
+
+By contributing to this project, you agree that your contributions will be licensed under the project's **[CorridorKey Licence](LICENSE)**.
+
+By submitting a Pull Request, you specifically acknowledge and agree to the terms set forth in **Section 6 (CONTRIBUTIONS)** of the license. This ensures that Corridor Digital maintains the full right to use, distribute, and sublicense this codebase, including PR contributions. This is a project for the community, and will always remain freely available here.
+
 ## Getting Started
 
 ### Prerequisites

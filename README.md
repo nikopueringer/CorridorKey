@@ -93,6 +93,59 @@ Perhaps in the future, I will implement other generators for the AlphaHint! In t
 
 Please give feedback and share your results!
 
+### Docker (Linux + NVIDIA GPU)
+
+If you prefer not to install dependencies locally, you can run CorridorKey in Docker.
+
+Prerequisites:
+- Docker Engine + Docker Compose plugin installed.
+- NVIDIA driver installed on the host (Linux), with CUDA compatibility for the PyTorch CUDA 12.6 wheels used by this project.
+- NVIDIA Container Toolkit installed and configured for Docker (`nvidia-smi` should work on host, and `docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi` should succeed).
+
+1. Build the image:
+   ```bash
+   docker build -t corridorkey:latest .
+   ```
+2. Run an action directly (example: inference):
+   ```bash
+   docker run --rm -it --gpus all \
+     -e OPENCV_IO_ENABLE_OPENEXR=1 \
+     -v "$(pwd)/ClipsForInference:/app/ClipsForInference" \
+     -v "$(pwd)/Output:/app/Output" \
+     -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
+     -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
+     -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
+     corridorkey:latest --action run_inference --device cuda
+   ```
+3. Docker Compose (recommended for repeat runs):
+   ```bash
+   docker compose build
+   docker compose --profile gpu run --rm corridorkey --action run_inference --device cuda
+   docker compose --profile gpu run --rm corridorkey --action list
+   docker compose --profile cpu run --rm corridorkey-cpu --action run_inference --device cpu
+   ```
+4. Optional: pin to specific GPU(s) for multi-GPU workstations:
+   ```bash
+   NVIDIA_VISIBLE_DEVICES=0 docker compose --profile gpu run --rm corridorkey --action list
+   NVIDIA_VISIBLE_DEVICES=1,2 docker compose --profile gpu run --rm corridorkey --action run_inference --device cuda
+   ```
+
+Notes:
+- You still need to place model weights in the same folders used by native runs (mounted above).
+- The container does not include kernel GPU drivers; those always come from the host. The image provides user-space dependencies and relies on Docker's NVIDIA runtime to pass through driver libraries/devices.
+- The wizard works too, but use a path inside the container, for example:
+  ```bash
+  docker run --rm -it --gpus all \
+    -e OPENCV_IO_ENABLE_OPENEXR=1 \
+    -v "$(pwd)/ClipsForInference:/app/ClipsForInference" \
+    -v "$(pwd)/Output:/app/Output" \
+    -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
+    -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
+    -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
+    corridorkey:latest --action wizard --win_path /app/ClipsForInference
+  docker compose --profile gpu run --rm corridorkey --action wizard --win_path /app/ClipsForInference
+  ```
+
 ### 3. Usage: The Command Line Wizard
 
 For the easiest experience, use the provided launcher scripts. These scripts launch a prompt-based configuration wizard in your terminal.
@@ -204,6 +257,8 @@ MLX uses img_size=2048 by default (same as Torch).
 ## Advanced Usage
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.
+
+You can also explore the full, auto-generated codebase documentation on [DeepWiki](https://deepwiki.com/nikopueringer/CorridorKey).
 
 ### Running Tests
 

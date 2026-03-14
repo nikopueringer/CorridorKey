@@ -21,6 +21,7 @@ from device_utils import resolve_device
 
 if TYPE_CHECKING:
     from gvm_core import GVMProcessor
+from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,68 @@ def generate_alphas(
             import traceback
 
             traceback.print_exc()
+
+
+def get_birefnet_usage_options():
+    return list(usage_to_weights_file.keys())
+
+
+def run_birefnet(
+    clips,
+    device=None,
+    usage="General",
+    dilate_radius=0,
+    *,
+    on_clip_start: Callable[[str, int], None] | None = None,
+    on_frame_complete: Callable[[int, int], None] | None = None,
+):
+    clips_to_process = [c for c in clips if c.alpha_asset is None]
+
+    if not clips_to_process:
+        logger.info("All clips have valid Alpha assets. No BiRefNet generation needed.")
+        return
+
+    if device is None:
+        device = resolve_device()
+
+    logger.info(f"Found {len(clips_to_process)} clips missing Alpha.")
+
+    logger.info(f"Initializing BiRefNet ({usage}) on {device}...")
+    # Initialize the handler once
+    try:
+        handler = BiRefNetHandler(device=device, usage=usage)
+    except ImportError as e:
+        logger.error(f"BiRefNet Import Error: {e}")
+        return
+    except Exception as e:
+        logger.error(f"BiRefNet Initialization Error: {e}")
+        return
+
+    try:
+        for clip in clips_to_process:
+            logger.info(f"Generating BiRefNet Alpha for: {clip.name}")
+            if on_clip_start:
+                on_clip_start(clip.name, clip.input_asset.frame_count)
+
+            alpha_output_dir = os.path.join(clip.root_path, "AlphaHint")
+            os.makedirs(alpha_output_dir, exist_ok=True)
+
+            try:
+                handler.process(
+                    input_path=clip.input_asset.path,
+                    alpha_output_dir=alpha_output_dir,
+                    dilate_radius=dilate_radius,
+                    on_frame_complete=on_frame_complete,
+                )
+                logger.info(f"BiRefNet complete for {clip.name}")
+            except Exception as e:
+                logger.error(f"BiRefNet failed for {clip.name}: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+    finally:
+        handler.cleanup()
 
 
 def run_videomama(
@@ -725,6 +788,43 @@ def run_inference(
             input_cap.release()
         if alpha_cap:
             alpha_cap.release()
+
+        # 7. Stitch comp frames into MP4 (if input was video)
+        if clip.input_asset and clip.input_asset.type == "video":
+            try:
+                from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
+
+                if find_ffmpeg():
+                    # Get source fps
+                    try:
+                        video_info = probe_video(clip.input_asset.path)
+                        fps = video_info.get("fps", 24.0)
+                    except Exception:
+                        fps = 24.0
+
+                    comp_video_path = os.path.join(clip_out_root, f"{clip.name}_comp.mp4")
+
+                    # Detect frame pattern from saved files
+                    comp_files = sorted(f for f in os.listdir(comp_dir) if f.endswith(".png"))
+                    if comp_files:
+                        # Frames are named {input_stem}.png — e.g. 00000.png
+                        # Build ffmpeg pattern from first file
+                        first = comp_files[0]
+                        stem = os.path.splitext(first)[0]
+                        if stem.isdigit():
+                            pattern = f"%0{len(stem)}d.png"
+                        else:
+                            pattern = "frame_%06d.png"
+
+                        logger.info(f"Stitching comp video: {comp_dir} -> {comp_video_path} @ {fps} fps")
+                        stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
+                    else:
+                        logger.warning(f"No comp frames found in {comp_dir}, skipping video stitch.")
+                else:
+                    logger.info("ffmpeg not found — skipping comp video stitch.")
+            except Exception as e:
+                logger.warning(f"Comp video stitch failed (non-fatal): {e}")
+
         logger.info(f"Clip {clip.name} Complete.")
 
 

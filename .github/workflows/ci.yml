@@ -9,9 +9,12 @@ on:
 env:
   UV_NO_SYNC: 1
   UV_LOCKED: 1
+  OPENCV_IO_ENABLE_OPENEXR: 1
 
 permissions:
   contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   lint:

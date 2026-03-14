@@ -37,6 +37,28 @@ VIDEO_FILE_FILTER = "Video Files (*.mp4 *.mov *.avi *.mkv *.mxf *.webm *.m4v);;A
 _app_dir: str | None = None
 
 
+def _dedupe_path(parent_dir: str, stem: str) -> tuple[str, str]:
+    """Return a unique child path under *parent_dir* and its final stem.
+
+    If ``{parent_dir}/{stem}`` already exists, appends numeric suffixes
+    (``_2``, ``_3``, ...) until a free path is found.
+
+    Unlike fixed-range probes, this never silently falls back to an existing
+    path after enough collisions.
+    """
+    path = os.path.join(parent_dir, stem)
+    if not os.path.exists(path):
+        return path, stem
+
+    index = 2
+    while True:
+        candidate_stem = f"{stem}_{index}"
+        candidate_path = os.path.join(parent_dir, candidate_stem)
+        if not os.path.exists(candidate_path):
+            return candidate_path, candidate_stem
+        index += 1
+
+
 def set_app_dir(path: str) -> None:
     """Set the application directory. Called once at startup by main.py."""
     global _app_dir
@@ -122,13 +144,7 @@ def create_project(
     folder_name = f"{timestamp}_{name_stem}"
 
     # Deduplicate if folder already exists (e.g. rapid imports)
-    project_dir = os.path.join(root, folder_name)
-    if os.path.exists(project_dir):
-        for i in range(2, 100):
-            candidate = os.path.join(root, f"{folder_name}_{i}")
-            if not os.path.exists(candidate):
-                project_dir = candidate
-                break
+    project_dir, _ = _dedupe_path(root, folder_name)
 
     clips_dir = os.path.join(project_dir, "clips")
     os.makedirs(clips_dir, exist_ok=True)
@@ -209,14 +225,7 @@ def _create_clip_folder(
     clip_name = sanitize_stem(filename)
 
     # Deduplicate clip folder names within same project
-    clip_dir = os.path.join(clips_dir, clip_name)
-    if os.path.exists(clip_dir):
-        for i in range(2, 100):
-            candidate = os.path.join(clips_dir, f"{clip_name}_{i}")
-            if not os.path.exists(candidate):
-                clip_dir = candidate
-                clip_name = f"{clip_name}_{i}"
-                break
+    clip_dir, clip_name = _dedupe_path(clips_dir, clip_name)
 
     source_dir = os.path.join(clip_dir, "Source")
     os.makedirs(source_dir, exist_ok=True)

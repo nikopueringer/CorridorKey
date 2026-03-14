@@ -1,0 +1,37 @@
+services:
+  corridorkey:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: corridorkey:latest
+    gpus: ${CK_GPUS:-all}
+    environment:
+      - OPENCV_IO_ENABLE_OPENEXR=1
+      # Use "all", "0", "1", or CSV like "0,1" for multi-GPU pinning.
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      # Add graphics if needed for GUI/OpenGL workloads.
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
+    volumes:
+      - ./ClipsForInference:/app/ClipsForInference
+      - ./Output:/app/Output
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
+    stdin_open: true
+    tty: true
+
+  corridorkey-cpu:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: corridorkey:latest
+    volumes:
+      - ./ClipsForInference:/app/ClipsForInference
+      - ./Output:/app/Output
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
+    stdin_open: true
+    tty: true
