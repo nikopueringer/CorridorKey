@@ -22,7 +22,7 @@ import torch
 # ---------------------------------------------------------------------------
 
 
-def _make_engine_with_mock(mock_greenformer, img_size=64):
+def _make_engine_with_mock(mock_greenformer, img_size=64, device="cpu"):
     """Create a CorridorKeyEngine with a mocked model, bypassing __init__.
 
     Manually sets the attributes that __init__ would create, avoiding the
@@ -31,12 +31,12 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
     engine = object.__new__(CorridorKeyEngine)
-    engine.device = torch.device("cpu")
+    engine.device = torch.device(device)
     engine.img_size = img_size
     engine.checkpoint_path = "/fake/checkpoint.pth"
     engine.use_refiner = False
-    engine.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
-    engine.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+    engine.mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32, device=torch.device(device)).reshape(3, 1, 1)
+    engine.std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32, device=torch.device(device)).reshape(3, 1, 1)
     engine.model = mock_greenformer
     engine.model_precision = torch.float32
     engine.mixed_precision = True
@@ -224,8 +224,7 @@ class TestNvidiaGPUProcess:
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
 
-        engine = _make_engine_with_mock(mock_greenformer)
-        engine.device = torch.device("cuda")
+        engine = _make_engine_with_mock(mock_greenformer, device=torch.device("cuda"))
 
         result = engine.process_frame(sample_frame_rgb, sample_mask)
         assert result["alpha"].dtype == np.float32

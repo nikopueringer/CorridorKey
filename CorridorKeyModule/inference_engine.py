@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torchvision
+import torchvision.transforms.functional as TF
 
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
@@ -31,8 +33,8 @@ class CorridorKeyEngine:
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
 
-        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
-        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+        self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device).reshape(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], dtype=model_precision, device=self.device).reshape(3, 1, 1)
 
         if mixed_precision or model_precision != torch.float32:
             # Use faster matrix multiplication implementation
@@ -119,99 +121,65 @@ class CorridorKeyEngine:
         if len(unexpected) > 0:
             print(f"[Warning] Unexpected keys: {unexpected}")
 
+        # We only tested compilation on Windows and Linux. For other platforms compilation is disabled as a precaution.
+        if sys.platform == "linux" or sys.platform == "win32":
+            model = torch.compile(model)
+
         return model
 
-    @torch.inference_mode()
-    def process_frame(
-        self,
-        image: np.ndarray,
-        mask_linear: np.ndarray,
-        refiner_scale: float = 1.0,
-        input_is_linear: bool = False,
-        fg_is_straight: bool = True,
-        despill_strength: float = 1.0,
-        auto_despeckle: bool = True,
-        despeckle_size: int = 400,
-    ) -> dict[str, np.ndarray]:
-        """
-        Process a single frame.
-        Args:
-            image: Numpy array [H, W, 3] (0.0-1.0 or 0-255).
-                   - If input_is_linear=False (Default): Assumed sRGB.
-                   - If input_is_linear=True: Assumed Linear.
-            mask_linear: Numpy array [H, W] or [H, W, 1] (0.0-1.0). Assumed Linear.
-            refiner_scale: Multiplier for Refiner Deltas (default 1.0).
-            input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
-                             If False, resizes in sRGB (standard).
-            fg_is_straight: bool. If True, assumes FG output is Straight (unpremultiplied).
-                            If False, assumes FG output is Premultiplied.
-            despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
-            auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
-            despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
-        Returns:
-             dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
-        """
-        # 1. Inputs Check & Normalization
-        if image.dtype == np.uint8:
-            image = image.astype(np.float32) / 255.0
-
-        if mask_linear.dtype == np.uint8:
-            mask_linear = mask_linear.astype(np.float32) / 255.0
-
-        h, w = image.shape[:2]
-
-        # Ensure Mask Shape
-        if mask_linear.ndim == 2:
-            mask_linear = mask_linear[:, :, np.newaxis]
-
+    def _preprocess_input(
+        self, image_batch: torch.Tensor, mask_batch_linear: torch.Tensor, input_is_linear: bool
+    ) -> torch.Tensor:
         # 2. Resize to Model Size
         # If input is linear, we resize in linear to preserve energy/highlights,
         # THEN convert to sRGB for the model.
         if input_is_linear:
-            # Resize in Linear
-            img_resized_lin = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+            # TODO: Check if interpolation is comparable to cv2.INTER_LINEAR (probably close enough)
+            img_resized_lin = TF.resize(
+                image_batch,
+                [self.img_size, self.img_size],
+                interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+            )
             # Convert to sRGB for Model
             img_resized = cu.linear_to_srgb(img_resized_lin)
         else:
             # Standard sRGB Resize
-            img_resized = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+            img_resized = TF.resize(
+                image_batch,
+                [self.img_size, self.img_size],
+                interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+            )
 
-        mask_resized = cv2.resize(mask_linear, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-
-        if mask_resized.ndim == 2:
-            mask_resized = mask_resized[:, :, np.newaxis]
+        mask_resized = TF.resize(
+            mask_batch_linear,
+            [self.img_size, self.img_size],
+            interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+        )
 
         # 3. Normalize (ImageNet)
         # Model expects sRGB input normalized
         img_norm = (img_resized - self.mean) / self.std
 
         # 4. Prepare Tensor
-        inp_np = np.concatenate([img_norm, mask_resized], axis=-1)  # [H, W, 4]
-        inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
+        inp_concat = torch.concat((img_norm, mask_resized), -3)  # [4, H, W]
 
-        # 5. Inference
-        # Hook for Refiner Scaling
-        handle = None
-        if refiner_scale != 1.0 and self.model.refiner is not None:
+        return inp_concat
 
-            def scale_hook(module, input, output):
-                return output * refiner_scale
-
-            handle = self.model.refiner.register_forward_hook(scale_hook)
-
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
-            out = self.model(inp_t)
-
-        if handle:
-            handle.remove()
-
-        pred_alpha = out["alpha"]
-        pred_fg = out["fg"]  # Output is sRGB (Sigmoid)
-
+    def _postprocess_cpu(
+        self,
+        pred_alpha: torch.Tensor,
+        pred_fg: torch.Tensor,
+        w: int,
+        h: int,
+        fg_is_straight: bool,
+        despill_strength: float,
+        auto_despeckle: bool,
+        despeckle_size: int,
+    ) -> dict[str, np.ndarray]:
         # 6. Post-Process (Resize Back to Original Resolution)
         # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
-        res_alpha = pred_alpha[0].permute(1, 2, 0).float().cpu().numpy()
-        res_fg = pred_fg[0].permute(1, 2, 0).float().cpu().numpy()
+        res_alpha = pred_alpha.permute(1, 2, 0).numpy()
+        res_fg = pred_fg.permute(1, 2, 0).numpy()
         res_alpha = cv2.resize(res_alpha, (w, h), interpolation=cv2.INTER_LANCZOS4)
         res_fg = cv2.resize(res_fg, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
@@ -260,3 +228,315 @@ class CorridorKeyEngine:
             "comp": comp_srgb,  # sRGB, Composite
             "processed": processed_rgba,  # Linear/Premul, RGBA, Garbage Matted & Despilled
         }
+
+    def _get_checkerboard_linear_gpu(self, w: int, h: int) -> torch.Tensor:
+        """Return a cached checkerboard tensor [H, W, 3] on device in linear space."""
+        checker_size = 128
+        y_coords = torch.arange(h, device=self.device) // checker_size
+        x_coords = torch.arange(w, device=self.device) // checker_size
+        y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+        checker = ((x_grid + y_grid) % 2).float()
+        # Map 0 -> 0.15, 1 -> 0.55 (sRGB), then convert to linear before caching
+        bg_srgb = checker * 0.4 + 0.15  # [H, W]
+        bg_srgb_3 = bg_srgb.unsqueeze(-1).expand(-1, -1, 3)
+        return cu.srgb_to_linear(bg_srgb_3)
+
+    def _postprocess_gpu(
+        self,
+        pred_alpha: torch.Tensor,
+        pred_fg: torch.Tensor,
+        w: int,
+        h: int,
+        fg_is_straight: bool,
+        despill_strength: float,
+        auto_despeckle: bool,
+        despeckle_size: int,
+    ) -> list[dict[str, np.ndarray]]:
+        """Post-process on GPU, transfer final results to CPU.
+
+        When ``sync=True`` (default), blocks until transfer completes and
+        returns numpy arrays.  When ``sync=False``, starts the DMA
+        non-blocking and returns a :class:`PendingTransfer` — call
+        ``.resolve()`` to get the numpy dict later.
+        """
+        # Resize on GPU using F.interpolate (much faster than cv2 at 4K)
+        alpha_up = TF.resize(
+            pred_alpha.float(),
+            [h, w],
+            interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+        )
+        fg_up = TF.resize(
+            pred_fg.float(),
+            [h, w],
+            interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+        )
+
+        # Convert to HWC on GPU
+        res_alpha = alpha_up.permute(0, 2, 3, 1)  # [B, H, W, 1]
+        res_fg = fg_up.permute(0, 2, 3, 1)  # [B, H, W, 3]
+
+        # A. Clean matte
+        if auto_despeckle:
+            processed_alpha = self._clean_matte_gpu(res_alpha, despeckle_size, dilation=25, blur_size=5)
+        else:
+            processed_alpha = res_alpha
+
+        # B. Despill on GPU
+        fg_despilled = self._despill_gpu(res_fg, despill_strength)
+
+        # C. sRGB → linear on GPU
+        fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
+
+        # D. Premultiply on GPU
+        fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
+
+        # E. Pack RGBA on GPU
+        processed_rgba = torch.cat([fg_premul_lin, processed_alpha], dim=-1)
+
+        # F. Composite
+        bg_lin = self._get_checkerboard_linear_gpu(w, h)
+        if fg_is_straight:
+            comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+        else:
+            comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
+        comp_srgb = cu.linear_to_srgb(comp_lin)  # [H, W, 3] opaque
+
+        res_alpha, res_fg, comp_srgb, processed_rgba = (
+            res_alpha.cpu(),
+            res_fg.cpu(),
+            comp_srgb.cpu(),
+            processed_rgba.cpu(),
+        )
+
+        out = []
+        for i in range(res_alpha.shape[0]):
+            result = {
+                "alpha": res_alpha[i].numpy(),
+                "fg": res_fg[i].numpy(),
+                "comp": comp_srgb[i].numpy(),
+                "processed": processed_rgba[i].numpy(),
+            }
+            out.append(result)
+        return out
+
+    @staticmethod
+    @torch.compile()
+    def _clean_matte_gpu(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
+        """Fully GPU matte cleanup using morphological operations.
+
+        Approximates connected-component removal by eroding small regions
+        away, then dilating back.  Avoids the GPU→CPU→GPU roundtrip that
+        ``cv2.connectedComponentsWithStats`` would require.
+
+        The erosion radius is derived from ``area_threshold``: a circular
+        spot of area A has radius sqrt(A/pi), so erosion by that radius
+        eliminates it.
+        """
+        _device = alpha.device
+        # alpha: [H, W, 1]
+        a2d = alpha[..., 0]
+        mask = (a2d > 0.5).float().unsqueeze(-3)  # [B, 1, H, W]
+
+        # Erode: kill spots smaller than area_threshold
+        # A circle of area A has radius r = sqrt(A / pi)
+        import math
+
+        erode_r = max(1, int(math.sqrt(area_threshold / math.pi)))
+        erode_k = erode_r * 2 + 1
+        # Erosion = negative of max_pool on negated mask
+        mask = -F.max_pool2d(-mask, erode_k, stride=1, padding=erode_r)
+
+        # Dilate back to restore edges of large regions
+        dilate_r = erode_r + (dilation if dilation > 0 else 0)
+        dilate_k = dilate_r * 2 + 1
+        mask = F.max_pool2d(mask, dilate_k, stride=1, padding=dilate_r)
+
+        # Blur for soft edges
+        if blur_size > 0:
+            k = int(blur_size * 2 + 1)
+            mask = TF.gaussian_blur(mask, [k, k])
+
+        safe = mask.squeeze(0).squeeze(0)  # [H, W]
+        return (a2d * safe).unsqueeze(-1)  # [H, W, 1]
+
+    @staticmethod
+    @torch.compile()
+    def _despill_gpu(image: torch.Tensor, strength: float) -> torch.Tensor:
+        """GPU despill — keeps data on device."""
+        if strength <= 0.0:
+            return image
+        r, g, b = image[..., 0], image[..., 1], image[..., 2]
+        limit = (r + b) / 2.0
+        spill = torch.clamp(g - limit, min=0.0)
+        g_new = g - spill
+        r_new = r + spill * 0.5
+        b_new = b + spill * 0.5
+        despilled = torch.stack([r_new, g_new, b_new], dim=-1)
+        if strength < 1.0:
+            return image * (1.0 - strength) + despilled * strength
+        return despilled
+
+    @torch.inference_mode()
+    def process_frame(
+        self,
+        image: np.ndarray,
+        mask_linear: np.ndarray,
+        refiner_scale: float = 1.0,
+        input_is_linear: bool = False,
+        fg_is_straight: bool = True,
+        despill_strength: float = 1.0,
+        auto_despeckle: bool = True,
+        despeckle_size: int = 400,
+    ) -> dict[str, np.ndarray]:
+        """
+        Process a single frame.
+        Args:
+            image: Numpy array [H, W, 3] (0.0-1.0 or 0-255).
+                   - If input_is_linear=False (Default): Assumed sRGB.
+                   - If input_is_linear=True: Assumed Linear.
+            mask_linear: Numpy array [H, W] or [H, W, 1] (0.0-1.0). Assumed Linear.
+            refiner_scale: Multiplier for Refiner Deltas (default 1.0).
+            input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
+                             If False, resizes in sRGB (standard).
+            fg_is_straight: bool. If True, assumes FG output is Straight (unpremultiplied).
+                            If False, assumes FG output is Premultiplied.
+            despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
+            auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
+            despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
+        Returns:
+             dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
+        """
+        image_was_uint8 = image.dtype == np.uint8
+        mask_was_uint8 = mask_linear.dtype == np.uint8
+
+        # immediately casting to float is fine since fp16 can represent all uint8 values exactly
+        image = torch.from_numpy(image).to(self.model_precision).to(self.device)
+        mask_linear = torch.from_numpy(mask_linear).to(self.model_precision).to(self.device)
+        # 1. Inputs Check & Normalization
+        if image_was_uint8:
+            image = image / 255.0
+
+        if mask_was_uint8:
+            mask_linear = mask_linear / 255.0
+
+        h, w = image.shape[:2]
+
+        # Ensure Mask Shape
+        if mask_linear.ndim == 2:
+            mask_linear = mask_linear.unsqueeze(-1)
+
+        image = image.permute(2, 0, 1)  # [C, H, W]
+        mask_linear = mask_linear.permute(2, 0, 1)  # [C, H, W]
+
+        image = image.unsqueeze(0)
+        mask_linear = mask_linear.unsqueeze(0)
+
+        inp_t = self._preprocess_input(image, mask_linear, input_is_linear)
+
+        # 5. Inference
+        # Hook for Refiner Scaling
+        handle = None
+        if refiner_scale != 1.0 and self.model.refiner is not None:
+
+            def scale_hook(module, input, output):
+                return output * refiner_scale
+
+            handle = self.model.refiner.register_forward_hook(scale_hook)
+
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
+            prediction = self.model(inp_t)
+
+        if handle:
+            handle.remove()
+
+        pred_alpha = prediction["alpha"].float()
+        pred_fg = prediction["fg"].float()  # Output is sRGB (Sigmoid)
+
+        return self._postprocess_gpu(
+            pred_alpha, pred_fg, w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
+        )[0]
+
+    @torch.inference_mode()
+    def batch_process_frames(
+        self,
+        images: np.ndarray,
+        masks_linear: np.ndarray,
+        refiner_scale: float = 1.0,
+        input_is_linear: bool = False,
+        fg_is_straight: bool = True,
+        despill_strength: float = 1.0,
+        auto_despeckle: bool = True,
+        despeckle_size: int = 400,
+        num_workers: int = torch.multiprocessing.cpu_count() // 2,
+    ) -> list[dict[str, np.ndarray]]:
+        """
+        Process a single frame.
+        Args:
+            images: Numpy array [B, H, W, 3] (0.0-1.0 or 0-255).
+                   - If input_is_linear=False (Default): Assumed sRGB.
+                   - If input_is_linear=True: Assumed Linear.
+            masks_linear: Numpy array [B, H, W] or [B, H, W, 1] (0.0-1.0). Assumed Linear.
+            refiner_scale: Multiplier for Refiner Deltas (default 1.0).
+            input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
+                             If False, resizes in sRGB (standard).
+            fg_is_straight: bool. If True, assumes FG output is Straight (unpremultiplied).
+                            If False, assumes FG output is Premultiplied.
+            despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
+            auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
+            despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
+            num_workers: int. Number of worker threads used for post-processing
+        Returns:
+             list[dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}]
+        """
+        image_was_uint8 = images.dtype == np.uint8
+        mask_was_uint8 = masks_linear.dtype == np.uint8
+
+        # immediately casting to float is fine since fp16 can represent all uint8 values exactly
+        image = torch.from_numpy(images).to(self.model_precision).to(self.device)
+        mask_linear = torch.from_numpy(masks_linear).to(self.model_precision).to(self.device)
+        # 1. Inputs Check & Normalization
+        if image_was_uint8:
+            image = image / 255.0
+
+        if mask_was_uint8:
+            mask_linear = mask_linear / 255.0
+
+        bs, h, w = image.shape[:3]
+
+        # Ensure Mask Shape
+        if mask_linear.ndim == 3:
+            mask_linear = mask_linear.unsqueeze(-1)
+
+        image = image.permute(0, 3, 1, 2)  # [B, C, H, W]
+        mask_linear = mask_linear.permute(0, 3, 1, 2)  # [B, C, H, W]
+
+        inp_t = self._preprocess_input(image, mask_linear, input_is_linear)
+
+        # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
+        torch.cuda.empty_cache()
+
+        # 5. Inference
+        # Hook for Refiner Scaling
+        handle = None
+        if refiner_scale != 1.0 and self.model.refiner is not None:
+
+            def scale_hook(module, input, output):
+                return output * refiner_scale
+
+            handle = self.model.refiner.register_forward_hook(scale_hook)
+
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
+            prediction = self.model(inp_t)
+
+        # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
+        del inp_t
+        torch.cuda.empty_cache()
+
+        if handle:
+            handle.remove()
+
+        out = self._postprocess_gpu(
+            prediction["alpha"], prediction["fg"], w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
+        )
+
+        return out
