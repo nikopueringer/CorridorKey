@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +99,8 @@ def _ensure_torch_checkpoint() -> Path:
     """
     dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME
     hf_url = f"https://huggingface.co/{HF_REPO_ID}"
+
+    from huggingface_hub import hf_hub_download
 
     logger.info("Downloading CorridorKey checkpoint from %s ...", hf_url)
 

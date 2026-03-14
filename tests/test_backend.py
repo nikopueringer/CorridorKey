@@ -83,7 +83,7 @@ class TestDiscoverCheckpoint:
     def test_zero_torch_triggers_auto_download(self, tmp_path):
         """Empty dir + TORCH_EXT now calls _ensure_torch_checkpoint (auto-download)."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download") as mock_dl:
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
                 # Simulate hf_hub_download returning a cached file
                 cached = tmp_path / "hf_cache" / "CorridorKey.pth"
                 cached.parent.mkdir()
@@ -99,7 +99,7 @@ class TestDiscoverCheckpoint:
         """When auto-download fails, RuntimeError is raised with HF URL."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
             with mock.patch(
-                "CorridorKeyModule.backend.hf_hub_download",
+                "huggingface_hub.hf_hub_download",
                 side_effect=ConnectionError("no network"),
             ):
                 with pytest.raises(RuntimeError, match="huggingface.co"):
@@ -133,7 +133,7 @@ class TestDiscoverCheckpoint:
         cached.write_bytes(b"fake-checkpoint-data")
 
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download", return_value=str(cached)) as mock_dl:
+            with mock.patch("huggingface_hub.hf_hub_download", return_value=str(cached)) as mock_dl:
                 result = _ensure_torch_checkpoint()
 
                 assert result == tmp_path / HF_CHECKPOINT_FILENAME
@@ -149,7 +149,7 @@ class TestDiscoverCheckpoint:
         ckpt = tmp_path / "model.pth"
         ckpt.write_bytes(b"existing")
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download") as mock_dl:
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
                 result = _discover_checkpoint(TORCH_EXT)
                 assert result == ckpt
                 mock_dl.assert_not_called()
@@ -157,7 +157,7 @@ class TestDiscoverCheckpoint:
     def test_mlx_not_triggered(self, tmp_path):
         """MLX ext with empty dir raises FileNotFoundError, no download attempted."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download") as mock_dl:
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
                 with pytest.raises(FileNotFoundError):
                     _discover_checkpoint(MLX_EXT)
                 mock_dl.assert_not_called()
@@ -166,7 +166,7 @@ class TestDiscoverCheckpoint:
         """ConnectionError from hf_hub_download becomes RuntimeError with HF URL."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
             with mock.patch(
-                "CorridorKeyModule.backend.hf_hub_download",
+                "huggingface_hub.hf_hub_download",
                 side_effect=ConnectionError("connection refused"),
             ) as mock_dl:
                 with pytest.raises(RuntimeError, match=r"huggingface\.co/nikopueringer/CorridorKey_v1\.0"):
@@ -180,7 +180,7 @@ class TestDiscoverCheckpoint:
         cached.write_bytes(b"data")
 
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download", return_value=str(cached)):
+            with mock.patch("huggingface_hub.hf_hub_download", return_value=str(cached)):
                 with mock.patch(
                     "CorridorKeyModule.backend.shutil.copy2",
                     side_effect=OSError(errno.ENOSPC, "No space left on device"),
@@ -195,7 +195,7 @@ class TestDiscoverCheckpoint:
         cached.write_bytes(b"data")
 
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
-            with mock.patch("CorridorKeyModule.backend.hf_hub_download", return_value=str(cached)):
+            with mock.patch("huggingface_hub.hf_hub_download", return_value=str(cached)):
                 with caplog.at_level(logging.INFO, logger="CorridorKeyModule.backend"):
                     _ensure_torch_checkpoint()
 

@@ -101,7 +101,7 @@ class TestMissingCheckpointTriggersDownload:
             with (
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
-                    "CorridorKeyModule.backend.hf_hub_download",
+                    "huggingface_hub.hf_hub_download",
                     return_value=str(cached_file),
                 ) as mock_dl,
             ):
@@ -166,7 +166,7 @@ class TestExistingCheckpointSkipsDownload:
             with (
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
-                    "CorridorKeyModule.backend.hf_hub_download",
+                    "huggingface_hub.hf_hub_download",
                 ) as mock_dl,
             ):
                 result = _discover_checkpoint(TORCH_EXT)
@@ -207,7 +207,7 @@ class TestAutoDownloadIsTorchOnly:
             with (
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
-                    "CorridorKeyModule.backend.hf_hub_download",
+                    "huggingface_hub.hf_hub_download",
                 ) as mock_dl,
             ):
                 with pytest.raises(FileNotFoundError):
@@ -278,7 +278,7 @@ class TestNetworkErrorsProduceActionableMessages:
             with (
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
-                    "CorridorKeyModule.backend.hf_hub_download",
+                    "huggingface_hub.hf_hub_download",
                     side_effect=exc,
                 ),
             ):
