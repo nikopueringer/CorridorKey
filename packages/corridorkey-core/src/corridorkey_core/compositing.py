@@ -162,8 +162,8 @@ def despill(
 
     # Clamp to [0, 1] - redistribution can push bright channels above 1.0
     if isinstance(image, torch.Tensor):
-        r_new = r_new.clamp(max=1.0)
-        b_new = b_new.clamp(max=1.0)
+        r_new = r_new.clamp(max=1.0)  # ty:ignore[unresolved-attribute]
+        b_new = b_new.clamp(max=1.0)  # ty:ignore[unresolved-attribute]
     else:
         r_new = np.clip(r_new, 0.0, 1.0)
         b_new = np.clip(b_new, 0.0, 1.0)
