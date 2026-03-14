@@ -48,7 +48,9 @@ class InferenceSettings:
     VALID_OUTPUTS: ClassVar[frozenset[str]] = frozenset({"fg", "matte", "comp", "processed"})
 
 
-# Async I/O pipeline: one frame in-flight + one buffered
+# Async I/O pipeline depth: allows one frame to be read ahead while another
+# is being inferred, hiding I/O latency behind GPU compute. Depth of 2
+# gives double-buffering without excessive memory usage.
 _ASYNC_QUEUE_DEPTH = 2
 
 # Core Paths
@@ -620,47 +622,53 @@ def _reader_worker(
     from backend.frame_io import read_image_frame, read_mask_frame
 
     try:
-        for i in range(num_frames):
+        for frame_index in range(num_frames):
             if error_event.is_set():
                 break
 
-            t_read_start = time.perf_counter()
-            img_srgb = None
-            mask_linear = None
-            input_stem = f"{i:05d}"
+            read_start = time.perf_counter()
+            frame_rgb = None
+            alpha_mask = None
+            frame_stem = f"{frame_index:05d}"
 
             # -- Read input frame --
             if input_cap:
-                ret, frame = input_cap.read()
+                ret, raw_frame = input_cap.read()
                 if not ret:
                     break
-                img_srgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+                frame_rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
             else:
-                fpath = os.path.join(input_asset_path, input_files[i])
-                input_stem = os.path.splitext(input_files[i])[0]
-                img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
+                fpath = os.path.join(input_asset_path, input_files[frame_index])
+                frame_stem = os.path.splitext(input_files[frame_index])[0]
+                # gamma_correct_exr: EXR files are linear, but the model expects sRGB.
+                # If input_is_linear is True, the engine handles the conversion itself,
+                # so we only gamma-correct when the caller says the input is sRGB.
+                frame_rgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
 
             # -- Read alpha mask --
             if alpha_cap:
-                ret, frame = alpha_cap.read()
+                ret, raw_frame = alpha_cap.read()
                 if not ret:
                     break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+                # Alpha videos store the mask in the blue channel by convention
+                alpha_mask = raw_frame[:, :, 2].astype(np.float32) / 255.0
             else:
-                fpath = os.path.join(alpha_asset_path, alpha_files[i])
-                mask_linear = read_mask_frame(fpath)
+                fpath = os.path.join(alpha_asset_path, alpha_files[frame_index])
+                alpha_mask = read_mask_frame(fpath)
 
-            if img_srgb is None or mask_linear is None:
-                logger.warning("Skipping frame %d: failed to read input or mask", i)
+            if frame_rgb is None or alpha_mask is None:
+                logger.warning("Skipping frame %d: failed to read input or mask", frame_index)
                 continue
 
-            if mask_linear.shape[:2] != img_srgb.shape[:2]:
-                mask_linear = cv2.resize(
-                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+            # Resize mask to match input dimensions if they differ
+            # (e.g. alpha hint generated at different resolution)
+            if alpha_mask.shape[:2] != frame_rgb.shape[:2]:
+                alpha_mask = cv2.resize(
+                    alpha_mask, (frame_rgb.shape[1], frame_rgb.shape[0]), interpolation=cv2.INTER_LINEAR
                 )
 
-            t_read = time.perf_counter() - t_read_start
-            read_q.put((i, input_stem, img_srgb, mask_linear, t_read))
+            read_elapsed = time.perf_counter() - read_start
+            read_q.put((frame_index, frame_stem, frame_rgb, alpha_mask, read_elapsed))
     except Exception as e:
         logger.error("Reader thread error: %s", e)
         error_event.set()
@@ -679,7 +687,11 @@ def _writer_worker(
     enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"}),
     fast_exr: bool = False,
 ):
-    """Write inference results to disk and fire progress callbacks."""
+    """Write inference results to disk in a background thread.
+
+    Runs concurrently with inference on the main thread — while the GPU
+    processes frame N+1, this thread writes frame N to disk.
+    """
     exr_flags = EXR_WRITE_FLAGS_FAST if fast_exr else EXR_WRITE_FLAGS
     try:
         while True:
@@ -689,39 +701,42 @@ def _writer_worker(
             if error_event.is_set():
                 break
 
-            i, input_stem, res, t_infer = item
-            phase_times["infer"].append(t_infer)
+            frame_index, frame_stem, inference_result, inference_elapsed = item
+            phase_times["infer"].append(inference_elapsed)
 
-            # Collect adapter-level postprocess timing if available
-            timing = res.pop("_timing", None)
-            if timing and "postprocess" in timing:
-                phase_times["postprocess"].append(timing["postprocess"])
+            # MLX adapter attaches per-phase timing via a "_timing" side-channel;
+            # Torch engine does not. Pop it here so it doesn't leak into output dicts.
+            adapter_timing = inference_result.pop("_timing", None)
+            if adapter_timing and "postprocess" in adapter_timing:
+                phase_times["postprocess"].append(adapter_timing["postprocess"])
 
-            t_write_start = time.perf_counter()
+            write_start = time.perf_counter()
 
-            pred_alpha = res["alpha"]
-            if pred_alpha.ndim == 3:
-                pred_alpha = pred_alpha[:, :, 0]
+            alpha_matte = inference_result["alpha"]
+            if alpha_matte.ndim == 3:
+                alpha_matte = alpha_matte[:, :, 0]
 
             if "fg" in enabled_outputs:
-                fg_bgr = cv2.cvtColor(res["fg"], cv2.COLOR_RGB2BGR)
-                cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, exr_flags)
+                fg_bgr = cv2.cvtColor(inference_result["fg"], cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(fg_dir, f"{frame_stem}.exr"), fg_bgr, exr_flags)
 
             if "matte" in enabled_outputs:
-                cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, exr_flags)
+                cv2.imwrite(os.path.join(matte_dir, f"{frame_stem}.exr"), alpha_matte, exr_flags)
 
-            if "comp" in enabled_outputs and "comp" in res:
-                comp_srgb = res["comp"]
-                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-                cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+            if "comp" in enabled_outputs and "comp" in inference_result:
+                composite_srgb = inference_result["comp"]
+                composite_bgr = cv2.cvtColor(
+                    (np.clip(composite_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
+                )
+                cv2.imwrite(os.path.join(comp_dir, f"{frame_stem}.png"), composite_bgr)
 
-            if "processed" in enabled_outputs and "processed" in res:
-                proc_rgba = res["processed"]
-                proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, exr_flags)
+            if "processed" in enabled_outputs and "processed" in inference_result:
+                processed_rgba = inference_result["processed"]
+                processed_bgra = cv2.cvtColor(processed_rgba, cv2.COLOR_RGBA2BGRA)
+                cv2.imwrite(os.path.join(proc_dir, f"{frame_stem}.exr"), processed_bgra, exr_flags)
 
-            t_write = time.perf_counter() - t_write_start
-            phase_times["write"].append(t_write)
+            write_elapsed = time.perf_counter() - write_start
+            phase_times["write"].append(write_elapsed)
     except Exception as e:
         logger.error(f"Writer thread error: {e}")
         error_event.set()
@@ -802,12 +817,14 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
-        # phase_times lists are appended from both main and writer threads.
-        # list.append is atomic under CPython's GIL. If targeting free-threaded
-        # Python (3.13t+), protect with a lock.
+        # Per-phase timing for the benchmark summary at the end.
+        # list.append is atomic under CPython's GIL — safe for cross-thread use.
+        # If targeting free-threaded Python (3.13t+), these would need a lock.
         phase_times: dict[str, list[float]] = {"read": [], "infer": [], "postprocess": [], "write": []}
 
-        # -- Async I/O pipeline: reader → inference → writer --
+        # Async I/O pipeline: three concurrent stages connected by queues.
+        #   reader thread → [read_q] → main thread (inference) → [write_q] → writer thread
+        # This hides disk I/O latency behind GPU compute time.
         read_q: Queue = Queue(maxsize=_ASYNC_QUEUE_DEPTH)
         write_q: Queue = Queue(maxsize=_ASYNC_QUEUE_DEPTH)
         error_event = threading.Event()
@@ -847,17 +864,18 @@ def run_inference(
         reader.start()
         writer.start()
 
-        # Main thread: inference loop
+        # Main thread runs inference — the GPU-bound bottleneck.
+        # Reader and writer threads handle I/O concurrently.
         try:
             while True:
                 item = read_q.get()
                 if item is None or error_event.is_set():
                     break
 
-                i, input_stem, img_srgb, mask_linear, t_read = item
-                phase_times["read"].append(t_read)
+                frame_index, frame_stem, frame_rgb, alpha_mask, read_elapsed = item
+                phase_times["read"].append(read_elapsed)
 
-                t_infer_start = time.perf_counter()
+                inference_start = time.perf_counter()
                 engine_kwargs: dict = dict(
                     input_is_linear=settings.input_is_linear,
                     fg_is_straight=True,
@@ -866,20 +884,21 @@ def run_inference(
                     despeckle_size=settings.despeckle_size,
                     refiner_scale=settings.refiner_scale,
                 )
-                # Only MLX adapter accepts enabled_outputs; Torch engine does not
+                # MLX adapter accepts enabled_outputs to skip unneeded post-processing;
+                # Torch engine computes all outputs unconditionally
                 if hasattr(engine, "_engine"):
                     engine_kwargs["enabled_outputs"] = settings.enabled_outputs
-                res = engine.process_frame(img_srgb, mask_linear, **engine_kwargs)
-                t_infer = time.perf_counter() - t_infer_start
+                inference_result = engine.process_frame(frame_rgb, alpha_mask, **engine_kwargs)
+                inference_elapsed = time.perf_counter() - inference_start
 
                 if error_event.is_set():
                     break
-                write_q.put((i, input_stem, res, t_infer))
+                write_q.put((frame_index, frame_stem, inference_result, inference_elapsed))
 
                 if on_frame_complete:
-                    on_frame_complete(i, num_frames)
+                    on_frame_complete(frame_index, num_frames)
         finally:
-            # Always unblock writer — prevents deadlock if inference throws
+            # Sentinel unblocks writer — prevents deadlock if inference throws
             write_q.put(None)
 
         writer.join()
@@ -888,18 +907,25 @@ def run_inference(
         if error_event.is_set():
             logger.error("Pipeline error — check reader/writer thread logs above")
 
-        # Log per-phase timing summary (skip first frame as warmup)
+        # Log per-phase timing summary, skipping first frame (warmup includes
+        # model compilation, JIT, and cold GPU caches — not representative)
         if len(phase_times["read"]) > 1:
             warmup_skip = 1
-            n_frames = len(phase_times["read"]) - 1
-            logger.info(f"--- Timing summary for {clip.name} (frames {warmup_skip}-{n_frames}, median ms) ---")
-            for phase, times in phase_times.items():
-                steady = times[warmup_skip:]
-                if steady:
-                    med = statistics.median(steady) * 1000
-                    total = sum(steady) * 1000
-                    logger.info(f"  {phase:>12s}: {med:7.1f} ms/frame  |  {total:8.1f} ms total")
-            all_steady = [sum(t) for t in zip(*(times[warmup_skip:] for times in phase_times.values()), strict=False)]
+            steady_state_count = len(phase_times["read"]) - 1
+            logger.info(
+                f"--- Timing summary for {clip.name} (frames {warmup_skip}-{steady_state_count}, median ms) ---"
+            )
+            for phase_name, phase_durations in phase_times.items():
+                steady_durations = phase_durations[warmup_skip:]
+                if steady_durations:
+                    median_ms = statistics.median(steady_durations) * 1000
+                    total_ms = sum(steady_durations) * 1000
+                    logger.info(f"  {phase_name:>12s}: {median_ms:7.1f} ms/frame  |  {total_ms:8.1f} ms total")
+            # Sum all phases per-frame to get total pipeline time
+            all_steady = [
+                sum(t)
+                for t in zip(*(durations[warmup_skip:] for durations in phase_times.values()), strict=False)
+            ]
             if all_steady:
                 med_total = statistics.median(all_steady) * 1000
                 logger.info(f"  {'TOTAL':>12s}: {med_total:7.1f} ms/frame")

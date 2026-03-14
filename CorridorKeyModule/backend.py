@@ -23,7 +23,10 @@ DEFAULT_IMG_SIZE = 2048
 BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
 VALID_BACKENDS = ("auto", "torch", "mlx")
 
-# Adaptive despeckle: skip CCL if fewer than this fraction of pixels are in transition zone
+# Adaptive despeckle bypass: if the alpha matte is already mostly binary
+# (near 0 or 1), CCL is wasted work — the matte has no speckle noise.
+# We check the fraction of pixels in the "transition zone" (partially
+# transparent) and skip despeckle if it's below this threshold.
 DESPECKLE_BYPASS_THRESHOLD = 0.01
 DESPECKLE_TRANSITION_LOW = 0.05
 DESPECKLE_TRANSITION_HIGH = 0.95
@@ -148,61 +151,65 @@ def _wrap_mlx_output(
     need_processed = "processed" in enabled_outputs
     need_postprocess = need_comp or need_processed
 
-    # alpha: uint8 [H,W] → float32 [H,W,1]
+    # --- Normalize MLX uint8 outputs to float32 [0,1] ---
+    # MLX engine outputs uint8 for memory efficiency on Apple Silicon,
+    # but downstream code (despill, compositing, EXR writes) expects float32.
     alpha_raw = raw["alpha"]
-    # Zero-copy when possible: avoid .astype if already float32
     if alpha_raw.dtype == np.uint8:
-        alpha = alpha_raw.astype(np.float32) / np.float32(255.0)
+        alpha_float = alpha_raw.astype(np.float32) / np.float32(255.0)
     else:
-        alpha = np.asarray(alpha_raw, dtype=np.float32)
-    if alpha.ndim == 2:
-        alpha = alpha[:, :, np.newaxis]
+        alpha_float = np.asarray(alpha_raw, dtype=np.float32)
+    if alpha_float.ndim == 2:
+        alpha_float = alpha_float[:, :, np.newaxis]
 
-    # fg: uint8 [H,W,3] → float32 [H,W,3] (sRGB)
     fg_raw = raw["fg"]
     if fg_raw.dtype == np.uint8:
-        fg = fg_raw.astype(np.float32) / np.float32(255.0)
+        fg_float = fg_raw.astype(np.float32) / np.float32(255.0)
     else:
-        fg = np.asarray(fg_raw, dtype=np.float32)
+        fg_float = np.asarray(fg_raw, dtype=np.float32)
 
     result: dict = {
-        "alpha": alpha,
-        "fg": fg,
+        "alpha": alpha_float,
+        "fg": fg_float,
     }
 
     if not need_postprocess:
         return result
 
-    # Apply despeckle — skip if alpha is already clean (low noise)
+    # Adaptive despeckle bypass: count pixels in the "transition zone"
+    # (partially transparent). If nearly all pixels are fully opaque or
+    # fully transparent, the matte is clean and CCL is wasted work.
     if auto_despeckle:
-        # Adaptive bypass: if alpha is mostly binary (near 0 or 1), skip expensive CCL
-        alpha_2d = alpha[:, :, 0] if alpha.ndim == 3 else alpha
-        mid_range = np.count_nonzero((alpha_2d > DESPECKLE_TRANSITION_LOW) & (alpha_2d < DESPECKLE_TRANSITION_HIGH))
-        mid_ratio = mid_range / alpha_2d.size
-        if mid_ratio < DESPECKLE_BYPASS_THRESHOLD:
-            # Less than 1% of pixels in transition zone — matte is clean
-            processed_alpha = alpha
+        alpha_2d = alpha_float[:, :, 0] if alpha_float.ndim == 3 else alpha_float
+        transition_pixel_count = np.count_nonzero(
+            (alpha_2d > DESPECKLE_TRANSITION_LOW) & (alpha_2d < DESPECKLE_TRANSITION_HIGH)
+        )
+        transition_ratio = transition_pixel_count / alpha_2d.size
+        if transition_ratio < DESPECKLE_BYPASS_THRESHOLD:
+            processed_alpha = alpha_float
         else:
-            processed_alpha = cu.clean_matte(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
+            processed_alpha = cu.clean_matte(alpha_float, area_threshold=despeckle_size, dilation=25, blur_size=5)
     else:
-        processed_alpha = alpha
+        processed_alpha = alpha_float
 
-    # Apply despill (MLX stubs this)
-    fg_despilled = cu.despill(fg, green_limit_mode="average", strength=despill_strength)
+    # Despill is disabled inside MLX engine (it lacks the numpy-based impl),
+    # so the adapter applies it here on the normalized float32 output
+    fg_despilled = cu.despill(fg_float, green_limit_mode="average", strength=despill_strength)
 
-    # Colorspace conversion needed for both comp and processed
-    fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
+    # Both comp and processed outputs need linear-space foreground
+    fg_despilled_linear = cu.srgb_to_linear(fg_despilled)
 
     if need_comp:
-        h, w = fg.shape[:2]
-        bg_srgb = _get_checkerboard(w, h)
-        bg_lin = cu.srgb_to_linear(bg_srgb)
-        comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
-        result["comp"] = cu.linear_to_srgb(comp_lin)
+        frame_height, frame_width = fg_float.shape[:2]
+        checkerboard_srgb = _get_checkerboard(frame_width, frame_height)
+        checkerboard_linear = cu.srgb_to_linear(checkerboard_srgb)
+        composite_linear = cu.composite_straight(fg_despilled_linear, checkerboard_linear, processed_alpha)
+        result["comp"] = cu.linear_to_srgb(composite_linear)
 
     if need_processed:
-        fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
-        result["processed"] = np.concatenate([fg_premul_lin, processed_alpha], axis=-1)
+        # EXR output requires linear premultiplied RGBA
+        fg_premultiplied_linear = cu.premultiply(fg_despilled_linear, processed_alpha)
+        result["processed"] = np.concatenate([fg_premultiplied_linear, processed_alpha], axis=-1)
 
     return result
 
@@ -228,47 +235,49 @@ class _MLXEngineAdapter:
     ):
         """Delegate to MLX engine, then normalize output to Torch contract."""
 
-        # MLX engine expects uint8 input — convert if float
+        # MLX engine expects uint8 input — the Torch pipeline uses float32,
+        # so we convert at the adapter boundary to avoid changing callers
         if image.dtype != np.uint8:
-            image_u8 = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
+            image_uint8 = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
         else:
-            image_u8 = image
+            image_uint8 = image
 
         if mask_linear.dtype != np.uint8:
-            mask_u8 = (np.clip(mask_linear, 0.0, 1.0) * 255).astype(np.uint8)
+            mask_uint8 = (np.clip(mask_linear, 0.0, 1.0) * 255).astype(np.uint8)
         else:
-            mask_u8 = mask_linear
+            mask_uint8 = mask_linear
 
-        # Squeeze mask to 2D for MLX (it validates [H,W] or [H,W,1])
-        if mask_u8.ndim == 3:
-            mask_u8 = mask_u8[:, :, 0]
+        # MLX engine validates [H,W] shape for masks
+        if mask_uint8.ndim == 3:
+            mask_uint8 = mask_uint8[:, :, 0]
 
-        t_mlx_start = time.perf_counter()
+        inference_start = time.perf_counter()
         raw = self._engine.process_frame(
-            image_u8,
-            mask_u8,
+            image_uint8,
+            mask_uint8,
             refiner_scale=refiner_scale,
             input_is_linear=input_is_linear,
             fg_is_straight=fg_is_straight,
-            despill_strength=0.0,  # disable MLX stubs — adapter applies these
-            auto_despeckle=False,
+            despill_strength=0.0,  # disable MLX stubs — adapter applies these in _wrap_mlx_output
+            auto_despeckle=False,  # same — handled by adapter for consistency with Torch
             despeckle_size=despeckle_size,
         )
-        t_mlx = time.perf_counter() - t_mlx_start
+        inference_elapsed = time.perf_counter() - inference_start
 
-        t_post_start = time.perf_counter()
+        postprocess_start = time.perf_counter()
         result = _wrap_mlx_output(raw, despill_strength, auto_despeckle, despeckle_size, enabled_outputs)
-        t_post = time.perf_counter() - t_post_start
+        postprocess_elapsed = time.perf_counter() - postprocess_start
 
         logger.debug(
             "MLX frame: inference=%.0fms  postprocess=%.0fms",
-            t_mlx * 1000,
-            t_post * 1000,
+            inference_elapsed * 1000,
+            postprocess_elapsed * 1000,
         )
 
-        # _timing is a side-channel for per-phase profiling — popped by the
-        # writer thread in clip_manager.py. Torch engine does not set this.
-        result["_timing"] = {"mlx_inference": t_mlx, "postprocess": t_post}
+        # _timing is a side-channel for per-phase profiling — consumed by the
+        # writer thread in clip_manager.py via res.pop("_timing").
+        # Torch engine does not set this; only the MLX adapter does.
+        result["_timing"] = {"mlx_inference": inference_elapsed, "postprocess": postprocess_elapsed}
         return result
 
 
