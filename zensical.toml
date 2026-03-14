@@ -8,6 +8,7 @@ nav = [
     { Home = "index.md" },
     { Packages = [
         { "corridorkey-core" = "packages/corridorkey-core.md" },
+        { "corridorkey" = "packages/corridorkey.md" },
     ] },
     { Development = [
         { "Developer Setup" = "dev/developer-setup.md" },
@@ -36,6 +37,22 @@ nav = [
             { "compositing" = "api/corridorkey-core/compositing.md" },
             { "inference-engine" = "api/corridorkey-core/inference-engine.md" },
             { "model-transformer" = "api/corridorkey-core/model-transformer.md" },
+        ] },
+        { "corridorkey" = [
+            { "Overview" = "api/corridorkey/index.md" },
+            { "service" = "api/corridorkey/service.md" },
+            { "pipeline" = "api/corridorkey/pipeline.md" },
+            { "clip-state" = "api/corridorkey/clip-state.md" },
+            { "job-queue" = "api/corridorkey/job-queue.md" },
+            { "protocols" = "api/corridorkey/protocols.md" },
+            { "models" = "api/corridorkey/models.md" },
+            { "errors" = "api/corridorkey/errors.md" },
+            { "project" = "api/corridorkey/project.md" },
+            { "device-utils" = "api/corridorkey/device-utils.md" },
+            { "frame-io" = "api/corridorkey/frame-io.md" },
+            { "ffmpeg-tools" = "api/corridorkey/ffmpeg-tools.md" },
+            { "validators" = "api/corridorkey/validators.md" },
+            { "natural-sort" = "api/corridorkey/natural-sort.md" },
         ] },
     ] },
 ]
@@ -100,7 +117,7 @@ alternate_style = true
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
-paths = ["src"]
+paths = ["src", "packages/corridorkey/src", "packages/corridorkey-core/src"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"
