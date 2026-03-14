@@ -420,6 +420,25 @@ def scan_project_clips(project_dir: str) -> list[ClipEntry]:
         return []
 
 
+def _looks_like_clip(path: str) -> bool:
+    """Return True if *path* itself appears to be a clip root.
+
+    A directory is treated as a clip root when it contains at least one of
+    the recognised input subdirectories (``Frames``, ``Input``, ``Source``).
+
+    Args:
+        path: Absolute path to a directory.
+
+    Returns:
+        True when the directory looks like a clip root.
+    """
+    for subdir in ("Frames", "Input", "Source"):
+        candidate = os.path.join(path, subdir)
+        if os.path.isdir(candidate):
+            return True
+    return False
+
+
 def scan_clips_dir(
     clips_dir: str,
     allow_standalone_videos: bool = True,
@@ -431,6 +450,11 @@ def scan_clips_dir(
 
     For non-Projects directories: scans subdirectories directly as clips
     (legacy behaviour for drag-and-dropped folders).
+
+    If the directory itself looks like a single clip root (contains ``Input/``,
+    ``Frames/``, or ``Source/`` directly), it is treated as a single clip
+    rather than a container of clips.  This handles the common case where a
+    user drags the clip folder itself onto the launcher instead of its parent.
 
     Folders without valid input assets are silently skipped.
 
@@ -452,6 +476,21 @@ def scan_clips_dir(
 
     if is_v2_project(clips_dir):
         return scan_project_clips(clips_dir)
+
+    # If the folder itself is a clip root, treat it as a single clip.
+    if _looks_like_clip(clips_dir):
+        name = os.path.basename(clips_dir)
+        clip = ClipEntry(name=name, root_path=clips_dir)
+        try:
+            clip.find_assets()
+            logger.info(
+                "Dropped folder '%s' is itself a clip root; treating as single clip.",
+                clips_dir,
+            )
+            return [clip]
+        except ClipScanError as e:
+            logger.debug("%s", e)
+            return []
 
     seen_names: set[str] = set()
 
