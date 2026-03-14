@@ -22,6 +22,7 @@ nav = [
     ] },
     { API = [
         { "corridorkey-core" = [
+            { "Overview" = "api/corridorkey-core/index.md" },
             { "compositing" = "api/corridorkey-core/compositing.md" },
             { "inference-engine" = "api/corridorkey-core/inference-engine.md" },
             { "model-transformer" = "api/corridorkey-core/model-transformer.md" },
@@ -95,3 +96,4 @@ paths = ["src"]
 docstring_style = "google"
 inherited_members = true
 show_source = false
+merge_init_into_class = true
