@@ -1,9 +1,0 @@
-ignore_patterns:
-  - specs/**
-code_review:
-  comment_severity_threshold: HIGH
-  max_review_comments: 5
-pull_request_opened:
-  summary: false
-  code_review: true
-  include_drafts: false
