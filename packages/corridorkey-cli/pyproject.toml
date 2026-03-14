@@ -1,16 +1,37 @@
 [project]
 name = "corridorkey-cli"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Rajesh Das", email = "hyperoot.tech@proton.me" }
-]
+description = "Command-line interface for the CorridorKey AI chroma keying pipeline."
 requires-python = ">=3.13"
-dependencies = []
+readme = "README.md"
+authors = [{ name = "Corridor Digital" }]
+maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Environment :: Console",
+]
+
+dependencies = ["corridorkey>=0.1.0", "typer>=0.12", "rich>=13"]
 
 [project.scripts]
-corridorkey-cli = "corridorkey_cli:main"
+corridorkey = "corridorkey_cli:main"
+
+[project.optional-dependencies]
+cuda = ["corridorkey[cuda]"]
+mlx = ["corridorkey[mlx]"]
+
+[dependency-groups]
+dev = ["pytest>=9.0.2"]
+
+[tool.uv.sources]
+corridorkey = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]

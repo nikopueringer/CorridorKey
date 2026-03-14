@@ -11,9 +11,11 @@ dependencies = []
 
 [project.optional-dependencies]
 cuda = ["corridorkey-core[cuda]"]
+mlx = ["corridorkey-core[mlx]"]
 
 [dependency-groups]
 dev = [
+  "corridorkey-cli>=0.1.0",
   "git-cliff>=2.12.0",
   "prek>=0.3.5",
   "pytest>=9.0.2",
@@ -29,3 +31,4 @@ members = ["packages/*"]
 [tool.uv.sources]
 corridorkey-core = { workspace = true }
 corridorkey = { workspace = true }
+corridorkey-cli = { workspace = true }
