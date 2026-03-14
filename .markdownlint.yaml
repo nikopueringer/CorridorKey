@@ -1,0 +1,33 @@
+# Markdownlint configuration
+default: true
+
+# MD010/no-hard-tabs : Hard tabs
+MD010: false
+
+# MD007/ul-indent - Unordered list indentation
+MD007:
+  indent: 4
+
+# MD013/line-length - Line length
+MD013: false
+
+# MD024/no-duplicate-heading - Multiple headings with the same content
+MD024:
+  siblings_only: true
+
+# MD029/ol-prefix - Ordered list item prefix
+MD029:
+  style: ordered
+
+# MD033/no-inline-html - Inline HTML
+MD033:
+  allowed_elements: [a, pre, br]
+
+# MD036/no-emphasis-as-heading
+MD036: false
+
+# MD046/code-block-style
+MD046: false
+
+# MD060/table-column-style : Table column style
+MD060: false
