@@ -701,14 +701,12 @@ def _writer_worker(
             if error_event.is_set():
                 break
 
-            frame_index, frame_stem, inference_result, inference_elapsed = item
+            frame_index, frame_stem, inference_result, inference_elapsed, mlx_phase_timing = item
             phase_times["infer"].append(inference_elapsed)
 
-            # MLX adapter attaches per-phase timing via a "_timing" side-channel;
-            # Torch engine does not. Pop it here so it doesn't leak into output dicts.
-            adapter_timing = inference_result.pop("_timing", None)
-            if adapter_timing and "postprocess" in adapter_timing:
-                phase_times["postprocess"].append(adapter_timing["postprocess"])
+            # MLX adapter provides per-phase timing; Torch engine passes None
+            if mlx_phase_timing and "postprocess" in mlx_phase_timing:
+                phase_times["postprocess"].append(mlx_phase_timing["postprocess"])
 
             write_start = time.perf_counter()
 
@@ -891,9 +889,12 @@ def run_inference(
                 inference_result = engine.process_frame(frame_rgb, alpha_mask, **engine_kwargs)
                 inference_elapsed = time.perf_counter() - inference_start
 
+                # Grab MLX adapter per-phase timing before enqueueing (Torch returns None)
+                mlx_phase_timing = getattr(engine, "last_frame_timing", None)
+
                 if error_event.is_set():
                     break
-                write_q.put((frame_index, frame_stem, inference_result, inference_elapsed))
+                write_q.put((frame_index, frame_stem, inference_result, inference_elapsed, mlx_phase_timing))
 
                 if on_frame_complete:
                     on_frame_complete(frame_index, num_frames)

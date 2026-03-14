@@ -219,6 +219,9 @@ class _MLXEngineAdapter:
 
     def __init__(self, raw_engine):
         self._engine = raw_engine
+        # Per-frame timing for profiling — set after each process_frame call.
+        # clip_manager's writer thread reads this instead of polluting the result dict.
+        self.last_frame_timing: dict[str, float] = {}
         logger.info("MLX adapter active: despill and despeckle are handled by the adapter layer, not native MLX")
 
     def process_frame(
@@ -274,10 +277,9 @@ class _MLXEngineAdapter:
             postprocess_elapsed * 1000,
         )
 
-        # _timing is a side-channel for per-phase profiling — consumed by the
-        # writer thread in clip_manager.py via res.pop("_timing").
-        # Torch engine does not set this; only the MLX adapter does.
-        result["_timing"] = {"mlx_inference": inference_elapsed, "postprocess": postprocess_elapsed}
+        # Store timing on the adapter instance so clip_manager can access it
+        # without polluting the result dict (which tests assert exact keys on)
+        self.last_frame_timing = {"mlx_inference": inference_elapsed, "postprocess": postprocess_elapsed}
         return result
 
 

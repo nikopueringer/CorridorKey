@@ -33,8 +33,8 @@ class CorridorKeyEngine:
 
         # ImageNet normalization constants — the Hiera backbone was pretrained
         # with these values, so inference must use the same transform
-        self.imagenet_mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
-        self.imagenet_std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
+        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
         if mixed_precision or model_precision != torch.float32:
             # Use TF32 tensor cores for matrix multiplications on Ampere+ GPUs.
@@ -186,7 +186,7 @@ class CorridorKeyEngine:
 
         # 3. ImageNet normalization — required because the Hiera backbone
         # was pretrained with this transform; skipping it shifts all activations
-        img_normalized = (img_resized - self.imagenet_mean) / self.imagenet_std
+        img_normalized = (img_resized - self.mean) / self.std
 
         # 4. Prepare input tensor: concatenate normalized RGB + mask as 4-channel input
         # then convert from HWC to BCHW for PyTorch conv layers
