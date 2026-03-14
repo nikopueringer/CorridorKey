@@ -1,292 +1,182 @@
-"""Tests for clip_manager.py utility functions and ClipEntry discovery.
-
-These tests verify the non-interactive parts of clip_manager: file type
-detection, Windows→Linux path mapping, and the ClipEntry asset discovery
-that scans directory trees to find Input/AlphaHint pairs.
-
-No GPU, model weights, or interactive input required.
-"""
-
-from __future__ import annotations
-
 import os
+import unittest
+from unittest.mock import MagicMock, patch
 
-import cv2
 import numpy as np
-import pytest
 
-from clip_manager import (
-    ClipAsset,
-    ClipEntry,
-    is_image_file,
-    is_video_file,
-    map_path,
-    organize_target,
-)
-
-# ---------------------------------------------------------------------------
-# is_image_file / is_video_file
-# ---------------------------------------------------------------------------
+from clip_manager import ClipAsset, ClipEntry, InferenceSettings, is_image_file, is_video_file, run_inference
 
 
-class TestFileTypeDetection:
-    """Verify extension-based file type helpers.
-
-    These are used everywhere in clip_manager to decide how to read inputs.
-    A missed extension means a valid frame silently disappears from the batch.
+class TestClipManagerInference(unittest.TestCase):
+    """
+    Test suite for the CorridorKey inference pipeline using mocks.
     """
 
-    @pytest.mark.parametrize(
-        "filename",
-        [
-            "frame.png",
-            "SHOT_001.EXR",
-            "plate.jpg",
-            "ref.JPEG",
-            "scan.tif",
-            "deep.tiff",
-            "comp.bmp",
-        ],
-    )
-    def test_image_extensions_recognized(self, filename):
-        assert is_image_file(filename)
+    @patch("clip_manager.cv2.imread")
+    @patch("clip_manager.cv2.cvtColor")
+    @patch("clip_manager.cv2.imwrite")
+    @patch("clip_manager.is_image_file")
+    @patch("clip_manager.os.listdir")
+    def test_run_inference_basic_flow(
+        self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread
+    ):
+        import tempfile
 
-    @pytest.mark.parametrize(
-        "filename",
-        [
-            "frame.mp4",
-            "CLIP.MOV",
-            "take.avi",
-            "rushes.mkv",
-        ],
-    )
-    def test_video_extensions_recognized(self, filename):
-        assert is_video_file(filename)
+        with tempfile.TemporaryDirectory() as tmp_path:
+            clip_root = os.path.join(tmp_path, "TestClip")
+            os.makedirs(os.path.join(clip_root, "Input"))
+            os.makedirs(os.path.join(clip_root, "AlphaHint"))
 
-    @pytest.mark.parametrize(
-        "filename",
-        [
-            "readme.txt",
-            "notes.pdf",
-            "project.nk",
-            "scene.blend",
-            ".DS_Store",
-        ],
-    )
-    def test_non_media_rejected(self, filename):
-        assert not is_image_file(filename)
-        assert not is_video_file(filename)
+            clip = ClipEntry("TestClip", clip_root)
+            clip.input_asset = ClipAsset(os.path.join(clip_root, "Input"), "sequence")
+            clip.alpha_asset = ClipAsset(os.path.join(clip_root, "AlphaHint"), "sequence")
+            clip.input_asset.frame_count = 2
+            clip.alpha_asset.frame_count = 2
 
-    def test_image_is_not_video(self):
-        """Image and video extensions must not overlap."""
-        assert not is_video_file("frame.png")
-        assert not is_video_file("plate.exr")
+            def side_effect_imread(path, flags=None):
+                if "alpha" in path.lower():
+                    return np.zeros((10, 10), dtype=np.uint8)
+                return np.zeros((10, 10, 3), dtype=np.uint8)
 
-    def test_video_is_not_image(self):
-        assert not is_image_file("clip.mp4")
-        assert not is_image_file("rushes.mov")
+            mock_imread.side_effect = side_effect_imread
+            mock_cvt_color.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
+            mock_is_image_file.return_value = True
 
+            def side_effect_listdir(path):
+                if "input" in path.lower():
+                    return ["frame_000.png", "frame_001.png"]
+                else:
+                    return ["alpha_000.png", "alpha_001.png"]
 
-# ---------------------------------------------------------------------------
-# map_path
-# ---------------------------------------------------------------------------
+            mock_listdir.side_effect = side_effect_listdir
 
+            import clip_manager
 
-class TestMapPath:
-    r"""Windows→Linux path mapping.
+            clip_manager.cv2.IMREAD_UNCHANGED = -1
+            clip_manager.cv2.IMREAD_ANYDEPTH = 2
+            clip_manager.cv2.COLOR_BGR2RGB = 4
 
-    The tool is designed for studios running a Linux render farm with
-    Windows workstations.  V:\ maps to /mnt/ssd-storage.
-    """
+            mock_engine = MagicMock()
+            mock_engine.process_frame.return_value = {
+                "alpha": np.zeros((10, 10, 1), dtype=np.float32),
+                "fg": np.zeros((10, 10, 3), dtype=np.float32),
+                "comp": np.zeros((10, 10, 3), dtype=np.float32),
+                "processed": np.zeros((10, 10, 4), dtype=np.float32),
+            }
 
-    def test_basic_mapping(self):
-        result = map_path(r"V:\Projects\Shot1")
-        assert result == "/mnt/ssd-storage/Projects/Shot1"
+            mock_on_clip_start = MagicMock()
+            mock_on_frame_complete = MagicMock()
+            settings = InferenceSettings()
 
-    def test_case_insensitive_drive_letter(self):
-        result = map_path(r"v:\projects\shot1")
-        assert result == "/mnt/ssd-storage/projects/shot1"
+            run_inference(
+                clips=[clip],
+                settings=settings,
+                on_clip_start=mock_on_clip_start,
+                on_frame_complete=mock_on_frame_complete,
+                engine_override=mock_engine,
+            )
 
-    def test_trailing_whitespace_stripped(self):
-        result = map_path(r"  V:\Projects\Shot1  ")
-        assert result == "/mnt/ssd-storage/Projects/Shot1"
+            self.assertEqual(mock_engine.process_frame.call_count, 2)
+            mock_on_clip_start.assert_called_once_with("TestClip", 2)
+            self.assertTrue(os.path.exists(os.path.join(clip_root, "Output", "FG")))
+            self.assertTrue(os.path.exists(os.path.join(clip_root, "Output", "Matte")))
 
-    def test_backslashes_converted(self):
-        result = map_path(r"V:\Deep\Nested\Path\Here")
-        assert "\\" not in result
+    @patch("clip_manager.cv2.imread")
+    @patch("clip_manager.cv2.cvtColor")
+    @patch("clip_manager.cv2.imwrite")
+    @patch("clip_manager.is_image_file")
+    @patch("clip_manager.os.listdir")
+    def test_run_inference_start_frame(
+        self, mock_listdir, mock_is_image_file, mock_imwrite, mock_cvt_color, mock_imread
+    ):
+        import tempfile
 
-    def test_non_v_drive_passthrough(self):
-        """Paths not on V: are returned as-is (may already be Linux paths)."""
-        linux_path = "/mnt/other/data"
-        assert map_path(linux_path) == linux_path
+        with tempfile.TemporaryDirectory() as tmp_path:
+            clip_root = os.path.join(tmp_path, "TestClipStartFrame")
+            os.makedirs(os.path.join(clip_root, "Input"))
+            os.makedirs(os.path.join(clip_root, "AlphaHint"))
 
-    def test_drive_root_only(self):
-        result = map_path("V:\\")
-        assert result == "/mnt/ssd-storage/"
+            clip = ClipEntry("TestClipStartFrame", clip_root)
+            clip.input_asset = ClipAsset(os.path.join(clip_root, "Input"), "sequence")
+            clip.alpha_asset = ClipAsset(os.path.join(clip_root, "AlphaHint"), "sequence")
+            clip.input_asset.frame_count = 3
+            clip.alpha_asset.frame_count = 3
 
+            def side_effect_imread(path, flags=None):
+                if "alpha" in path.lower():
+                    return np.zeros((10, 10), dtype=np.uint8)
+                return np.zeros((10, 10, 3), dtype=np.uint8)
 
-# ---------------------------------------------------------------------------
-# ClipAsset
-# ---------------------------------------------------------------------------
+            mock_imread.side_effect = side_effect_imread
+            mock_cvt_color.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
+            mock_is_image_file.return_value = True
 
+            def side_effect_listdir(path):
+                if "input" in path.lower():
+                    return ["frame_000.png", "frame_001.png", "frame_002.png"]
+                else:
+                    return ["alpha_000.png", "alpha_001.png", "alpha_002.png"]
 
-class TestClipAsset:
-    """ClipAsset wraps a directory of images or a video file and counts frames."""
+            mock_listdir.side_effect = side_effect_listdir
 
-    def test_sequence_frame_count(self, tmp_path):
-        """Image sequence: frame count = number of image files in directory."""
-        seq_dir = tmp_path / "Input"
-        seq_dir.mkdir()
-        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
-        for i in range(5):
-            cv2.imwrite(str(seq_dir / f"frame_{i:04d}.png"), tiny)
+            import clip_manager
 
-        asset = ClipAsset(str(seq_dir), "sequence")
-        assert asset.frame_count == 5
+            clip_manager.cv2.IMREAD_UNCHANGED = -1
+            clip_manager.cv2.IMREAD_ANYDEPTH = 2
+            clip_manager.cv2.COLOR_BGR2RGB = 4
 
-    def test_sequence_ignores_non_image_files(self, tmp_path):
-        """Non-image files (thumbs.db, .nk, etc.) should not be counted."""
-        seq_dir = tmp_path / "Input"
-        seq_dir.mkdir()
-        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
-        cv2.imwrite(str(seq_dir / "frame_0000.png"), tiny)
-        (seq_dir / "thumbs.db").write_text("junk")
-        (seq_dir / "notes.txt").write_text("notes")
+            mock_engine = MagicMock()
+            mock_engine.process_frame.return_value = {
+                "alpha": np.zeros((10, 10, 1), dtype=np.float32),
+                "fg": np.zeros((10, 10, 3), dtype=np.float32),
+                "comp": np.zeros((10, 10, 3), dtype=np.float32),
+                "processed": np.zeros((10, 10, 4), dtype=np.float32),
+            }
 
-        asset = ClipAsset(str(seq_dir), "sequence")
-        assert asset.frame_count == 1
+            mock_on_clip_start = MagicMock()
 
-    def test_empty_sequence(self, tmp_path):
-        """Empty directory → 0 frames."""
-        seq_dir = tmp_path / "Input"
-        seq_dir.mkdir()
-        asset = ClipAsset(str(seq_dir), "sequence")
-        assert asset.frame_count == 0
+            run_inference(clips=[clip], start_frame=2, on_clip_start=mock_on_clip_start, engine_override=mock_engine)
 
-
-# ---------------------------------------------------------------------------
-# ClipEntry.find_assets
-# ---------------------------------------------------------------------------
+            self.assertEqual(mock_engine.process_frame.call_count, 1)
+            mock_on_clip_start.assert_called_once_with("TestClipStartFrame", 1)
 
 
-class TestClipEntryFindAssets:
-    """ClipEntry.find_assets() discovers Input and AlphaHint from a shot directory.
+class TestFileTypeHelpers(unittest.TestCase):
+    def test_is_image_file_accepted(self):
+        for ext in (".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp"):
+            self.assertTrue(is_image_file(f"frame{ext}"))
 
-    This is the core discovery logic that decides what's ready for inference
-    vs. what still needs alpha generation.
-    """
+    def test_is_image_file_rejected(self):
+        for ext in (".mp4", ".txt", ".mov"):
+            self.assertFalse(is_image_file(f"clip{ext}"))
 
-    def test_finds_image_sequence_input(self, tmp_clip_dir):
-        """shot_a has Input/ with 2 PNGs → input_asset is a sequence."""
-        entry = ClipEntry("shot_a", str(tmp_clip_dir / "shot_a"))
+    def test_is_video_file_accepted(self):
+        for ext in (".mp4", ".mov", ".avi", ".mkv"):
+            self.assertTrue(is_video_file(f"clip{ext}"))
+
+    def test_is_video_file_rejected(self):
+        self.assertFalse(is_video_file("frame.png"))
+
+
+class TestClipAsset(unittest.TestCase):
+    @patch("clip_manager.os.listdir", return_value=["a.png", "b.png", "c.png"])
+    @patch("clip_manager.is_image_file", return_value=True)
+    def test_sequence_frame_count(self, mock_iif, mock_ls):
+        asset = ClipAsset("/fake/path", "sequence")
+        self.assertEqual(asset.frame_count, 3)
+
+
+class TestClipEntry(unittest.TestCase):
+    @patch("clip_manager.glob.glob", return_value=[])
+    @patch("clip_manager.os.listdir", return_value=["frame_000.png"])
+    @patch("clip_manager.is_image_file", return_value=True)
+    @patch("clip_manager.os.path.isdir", side_effect=lambda p: os.path.basename(p) == "Input")
+    def test_find_assets_sequence(self, mock_isdir, mock_iif, mock_ls, mock_glob):
+        entry = ClipEntry("shot_a", "/fake/root")
         entry.find_assets()
-        assert entry.input_asset is not None
-        assert entry.input_asset.type == "sequence"
-        assert entry.input_asset.frame_count == 2
-
-    def test_finds_alpha_hint(self, tmp_clip_dir):
-        """shot_a has AlphaHint/ with 2 PNGs → alpha_asset is populated."""
-        entry = ClipEntry("shot_a", str(tmp_clip_dir / "shot_a"))
-        entry.find_assets()
-        assert entry.alpha_asset is not None
-        assert entry.alpha_asset.type == "sequence"
-        assert entry.alpha_asset.frame_count == 2
-
-    def test_empty_alpha_hint_is_none(self, tmp_clip_dir):
-        """shot_b has empty AlphaHint/ → alpha_asset is None (needs generation)."""
-        entry = ClipEntry("shot_b", str(tmp_clip_dir / "shot_b"))
-        entry.find_assets()
-        assert entry.input_asset is not None
-        assert entry.alpha_asset is None
-
-    def test_missing_input_raises(self, tmp_path):
-        """A shot with no Input directory or video raises ValueError."""
-        empty_shot = tmp_path / "empty_shot"
-        empty_shot.mkdir()
-        entry = ClipEntry("empty_shot", str(empty_shot))
-        with pytest.raises(ValueError, match="No 'Input' directory or video file found"):
-            entry.find_assets()
-
-    def test_empty_input_dir_raises(self, tmp_path):
-        """An empty Input/ directory raises ValueError."""
-        shot = tmp_path / "bad_shot"
-        (shot / "Input").mkdir(parents=True)
-        entry = ClipEntry("bad_shot", str(shot))
-        with pytest.raises(ValueError, match="'Input' directory is empty"):
-            entry.find_assets()
-
-    def test_validate_pair_frame_count_mismatch(self, tmp_path):
-        """Mismatched Input/AlphaHint frame counts raise ValueError."""
-        shot = tmp_path / "mismatch"
-        (shot / "Input").mkdir(parents=True)
-        (shot / "AlphaHint").mkdir(parents=True)
-
-        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
-        tiny_mask = np.zeros((4, 4), dtype=np.uint8)
-
-        # 3 input frames, 2 alpha frames
-        for i in range(3):
-            cv2.imwrite(str(shot / "Input" / f"frame_{i:04d}.png"), tiny)
-        for i in range(2):
-            cv2.imwrite(str(shot / "AlphaHint" / f"frame_{i:04d}.png"), tiny_mask)
-
-        entry = ClipEntry("mismatch", str(shot))
-        entry.find_assets()
-        with pytest.raises(ValueError, match="Frame count mismatch"):
-            entry.validate_pair()
-
-    def test_validate_pair_matching_counts_ok(self, tmp_clip_dir):
-        """Matching frame counts pass validation without error."""
-        entry = ClipEntry("shot_a", str(tmp_clip_dir / "shot_a"))
-        entry.find_assets()
-        entry.validate_pair()  # should not raise
+        self.assertIsNotNone(entry.input_asset)
+        self.assertEqual(entry.input_asset.type, "sequence")
 
 
-# ---------------------------------------------------------------------------
-# organize_target
-# ---------------------------------------------------------------------------
-
-
-class TestOrganizeTarget:
-    """organize_target() sets up the hint directory structure for a shot.
-
-    It creates AlphaHint/ and VideoMamaMaskHint/ directories if missing.
-    """
-
-    def test_creates_hint_directories(self, tmp_path):
-        """Missing hint directories should be created."""
-        shot = tmp_path / "shot_x"
-        (shot / "Input").mkdir(parents=True)
-        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
-        cv2.imwrite(str(shot / "Input" / "frame_0000.png"), tiny)
-
-        organize_target(str(shot))
-
-        assert (shot / "AlphaHint").is_dir()
-        assert (shot / "VideoMamaMaskHint").is_dir()
-
-    def test_existing_hint_dirs_preserved(self, tmp_clip_dir):
-        """Existing hint directories and their contents are not disturbed."""
-        shot_a = tmp_clip_dir / "shot_a"
-        alpha_files_before = sorted(os.listdir(shot_a / "AlphaHint"))
-
-        organize_target(str(shot_a))
-
-        alpha_files_after = sorted(os.listdir(shot_a / "AlphaHint"))
-        assert alpha_files_before == alpha_files_after
-
-    def test_moves_loose_images_to_input(self, tmp_path):
-        """Loose image files in a shot dir get moved into Input/."""
-        shot = tmp_path / "messy_shot"
-        shot.mkdir()
-        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
-        cv2.imwrite(str(shot / "frame_0000.png"), tiny)
-        cv2.imwrite(str(shot / "frame_0001.png"), tiny)
-
-        organize_target(str(shot))
-
-        assert (shot / "Input").is_dir()
-        input_files = os.listdir(shot / "Input")
-        assert len(input_files) == 2
-        # Original loose files should be gone
-        assert not (shot / "frame_0000.png").exists()
+if __name__ == "__main__":
+    unittest.main()

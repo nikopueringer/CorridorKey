@@ -249,6 +249,10 @@ def run_inference_cmd(
         Optional[int],
         typer.Option("--max-frames", help="Limit frames per clip"),
     ] = None,
+    start_frame: Annotated[
+        int,
+        typer.Option("--start-frame", help="Start inference from this frame index"),
+    ] = 0,
     linear: Annotated[
         Optional[bool],
         typer.Option("--linear/--srgb", help="Input colorspace (default: prompt)"),
@@ -280,7 +284,9 @@ def run_inference_cmd(
     # despeckle_size excluded — sensible default even in headless mode
     required_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
     if required_flags_set:
-        assert linear is not None and despill is not None and despeckle is not None and refiner is not None
+        if any(v is None for v in [linear, despill, despeckle, refiner]):
+            raise ValueError("Missing required flags for inference settings.")
+
         despill_clamped = max(0, min(10, despill))
         settings = InferenceSettings(
             input_is_linear=linear,
@@ -304,6 +310,7 @@ def run_inference_cmd(
             device=ctx.obj["device"],
             backend=backend,
             max_frames=max_frames,
+            start_frame=start_frame,
             settings=settings,
             on_clip_start=ctx_progress.on_clip_start,
             on_frame_complete=ctx_progress.on_frame_complete,
@@ -439,8 +446,8 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
             entry = ClipEntry(os.path.basename(d), d)
             try:
                 entry.find_assets()
-            except (FileNotFoundError, ValueError, OSError):
-                pass
+            except (FileNotFoundError, ValueError, OSError) as e:
+                logger.debug(f"Skipping clip setup for '{d}': {e}")
 
             has_mask = False
             mask_dir = os.path.join(d, "VideoMamaMaskHint")
