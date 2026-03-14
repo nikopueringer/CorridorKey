@@ -29,16 +29,22 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = ["torch==2.10.0", "torchvision==0.25.0"]
+mlx = ["corridorkey-mlx"]
+
+[tool.uv]
+conflicts = [[{ extra = "cuda" }, { extra = "mlx" }]]
 
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+extra = "cuda"
 
 [tool.uv.sources]
 timm = { git = "https://github.com/Raiden129/pytorch-image-models-fix", branch = "fix/hiera-flash-attention-global-4d" }
 torch = [{ index = "pytorch", extra = "cuda" }]
 torchvision = [{ index = "pytorch", extra = "cuda" }]
+corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]

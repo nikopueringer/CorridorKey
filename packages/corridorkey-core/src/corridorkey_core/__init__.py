@@ -1,28 +1,14 @@
 """CorridorKey core library for AI-powered chroma keying.
 
-Exposes the inference engine and post-processing utilities needed to run
-the GreenFormer model and process its outputs. This package has no
-filesystem, pipeline, or UI dependencies and can be embedded in any workflow.
+This package has no filesystem, pipeline, or UI dependencies and can be
+embedded in any workflow.
+
+Public API:
+    create_engine(checkpoint_dir, ...) -> engine
+        Returns an engine with process_frame() matching the Torch output
+        contract, regardless of whether Torch or MLX is running underneath.
 """
 
-from corridorkey_core.compositing import (
-    clean_matte,
-    composite_premul,
-    composite_straight,
-    despill,
-    linear_to_srgb,
-    premultiply,
-    srgb_to_linear,
-)
-from corridorkey_core.inference_engine import CorridorKeyEngine
+from corridorkey_core.engine_factory import create_engine
 
-__all__ = [
-    "CorridorKeyEngine",
-    "clean_matte",
-    "composite_premul",
-    "composite_straight",
-    "despill",
-    "linear_to_srgb",
-    "premultiply",
-    "srgb_to_linear",
-]
+__all__ = ["create_engine"]
