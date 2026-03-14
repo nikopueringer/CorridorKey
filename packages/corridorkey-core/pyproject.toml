@@ -1,0 +1,16 @@
+[project]
+name = "corridorkey-core"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+readme = "README.md"
+authors = [{ name = "Corridor Digital" }]
+maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
+dependencies = []
+
+[project.scripts]
+corridorkey-core = "corridorkey_core:main"
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
