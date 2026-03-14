@@ -49,7 +49,22 @@ class CorridorKeyEngine:
 
         self.model_precision = model_precision
 
-        self.model = self._load_model().to(model_precision)
+        model = self._load_model().to(model_precision)
+
+        # We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
+        if sys.platform == "linux" or sys.platform == "win32":
+            # Try compiling the model. Fallback to eager mode if it fails.
+            try:
+                self.model = torch.compile(model)
+                # Trigger compilation with a dummy input
+                dummy_input = torch.zeros(1, 4, img_size, img_size, dtype=model_precision, device=self.device)
+                with torch.inference_mode():
+                    self.model(dummy_input)
+            except Exception as e:
+                logger.info(f"Model compilation failed with error: {e}")
+                logger.warning("Model compilation failed. Falling back to eager mode.")
+                torch.cuda.empty_cache()
+                self.model = model
 
     def _load_model(self) -> GreenFormer:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
