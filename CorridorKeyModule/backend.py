@@ -109,7 +109,13 @@ def _discover_checkpoint(ext: str) -> Path:
 _checkerboard_cache: dict[tuple[int, int, int, float, float], np.ndarray] = {}
 
 
-def _get_checkerboard(w: int, h: int, checker_size: int = 128, color1: float = 0.15, color2: float = 0.55) -> np.ndarray:
+def _get_checkerboard(
+    w: int,
+    h: int,
+    checker_size: int = 128,
+    color1: float = 0.15,
+    color2: float = 0.55,
+) -> np.ndarray:
     """Return a cached checkerboard pattern, creating it only on first call per resolution."""
     from CorridorKeyModule.core import color_utils as cu
 

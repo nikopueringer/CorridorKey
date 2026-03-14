@@ -737,9 +737,7 @@ def _writer_worker(
 
             if "comp" in enabled_outputs and "comp" in res:
                 comp_srgb = res["comp"]
-                comp_bgr = cv2.cvtColor(
-                    (np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
-                )
+                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
                 cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
             if "processed" in enabled_outputs and "processed" in res:
@@ -843,19 +841,33 @@ def run_inference(
         reader = threading.Thread(
             target=_reader_worker,
             args=(
-                read_q, num_frames, input_cap, alpha_cap,
-                input_files, alpha_files,
-                clip.input_asset.path, clip.alpha_asset.path,
-                settings.input_is_linear, error_event,
+                read_q,
+                num_frames,
+                input_cap,
+                alpha_cap,
+                input_files,
+                alpha_files,
+                clip.input_asset.path,
+                clip.alpha_asset.path,
+                settings.input_is_linear,
+                error_event,
             ),
             daemon=True,
         )
         writer = threading.Thread(
             target=_writer_worker,
             args=(
-                write_q, fg_dir, matte_dir, comp_dir, proc_dir,
-                num_frames, phase_times, on_frame_complete, error_event,
-                settings.enabled_outputs, settings.fast_exr,
+                write_q,
+                fg_dir,
+                matte_dir,
+                comp_dir,
+                proc_dir,
+                num_frames,
+                phase_times,
+                on_frame_complete,
+                error_event,
+                settings.enabled_outputs,
+                settings.fast_exr,
             ),
             daemon=True,
         )
@@ -900,14 +912,15 @@ def run_inference(
             import statistics
 
             warmup_skip = 1
-            logger.info(f"--- Timing summary for {clip.name} (frames {warmup_skip}-{len(phase_times['read'])-1}, median ms) ---")
+            n_frames = len(phase_times["read"]) - 1
+            logger.info(f"--- Timing summary for {clip.name} (frames {warmup_skip}-{n_frames}, median ms) ---")
             for phase, times in phase_times.items():
                 steady = times[warmup_skip:]
                 if steady:
                     med = statistics.median(steady) * 1000
                     total = sum(steady) * 1000
                     logger.info(f"  {phase:>12s}: {med:7.1f} ms/frame  |  {total:8.1f} ms total")
-            all_steady = [sum(t) for t in zip(*(times[warmup_skip:] for times in phase_times.values()))]
+            all_steady = [sum(t) for t in zip(*(times[warmup_skip:] for times in phase_times.values()), strict=False)]
             if all_steady:
                 med_total = statistics.median(all_steady) * 1000
                 logger.info(f"  {'TOTAL':>12s}: {med_total:7.1f} ms/frame")
