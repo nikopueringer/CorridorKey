@@ -35,3 +35,23 @@ services:
       - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
     stdin_open: true
     tty: true
+
+  corridorkey-web:
+    profiles: ["web"]
+    build:
+      context: .
+      dockerfile: web/Dockerfile.web
+    image: corridorkey-web:latest
+    gpus: ${CK_GPUS:-all}
+    ports:
+      - "3000:3000"
+    environment:
+      - OPENCV_IO_ENABLE_OPENEXR=1
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
+      - CK_CLIPS_DIR=/app/Projects
+    volumes:
+      - ./Projects:/app/Projects
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
