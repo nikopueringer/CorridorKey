@@ -26,3 +26,19 @@ description = "Run type checking"
 [tasks.sync-cuda]
 run = "uv sync --extra cuda --all-groups"
 description = "Run uv sync for devs"
+
+[tasks.test]
+run = "uv run pytest packages/corridorkey-core/tests"
+description = "Run fast tests (slow, GPU, and MLX skipped by default)"
+
+[tasks.test-slow]
+run = "uv run pytest packages/corridorkey-core/tests --run-slow"
+description = "Run all CPU tests including slow model forward pass tests"
+
+[tasks.test-gpu]
+run = "uv run pytest packages/corridorkey-core/tests --run-gpu"
+description = "Run GPU tests (requires CUDA)"
+
+[tasks.test-cov]
+run = "uv run pytest packages/corridorkey-core/tests --cov=corridorkey_core --cov-report=term-missing --cov-fail-under=75 --cov-config=packages/corridorkey-core/pyproject.toml"
+description = "Run fast tests with coverage report (fails under 75%)"
