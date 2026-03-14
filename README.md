@@ -26,6 +26,7 @@ Naturally, I have not tested everything. If you encounter errors, please conside
 *   **Resolution Independent:** The engine dynamically scales inference to handle 4K plates while predicting using its native 2048x2048 high-fidelity backbone.
 *   **VFX Standard Outputs:** Natively reads and writes 16-bit and 32-bit Linear float EXR files, preserving true color math for integration in Nuke, Fusion, or Resolve.
 *   **Auto-Cleanup:** Includes a morphological cleanup system to automatically prune any tracking markers or tiny background features that slip through CorridorKey's detection.
+*   **WebUI:** Browser-based interface with drag-and-drop upload, one-click full pipeline, real-time progress, video playback, A/B comparison, and project management. Run via `docker compose --profile web up -d` and open `localhost:3000`.
 
 ## Hardware Requirements
 
@@ -96,14 +97,52 @@ Perhaps in the future, I will implement other generators for the AlphaHint! In t
 
 Please give feedback and share your results!
 
-### Docker (Linux + NVIDIA GPU)
+### WebUI (Browser-based)
 
-If you prefer not to install dependencies locally, you can run CorridorKey in Docker.
+CorridorKey includes a full web interface for managing clips, running inference, and previewing results — no terminal required.
+
+**Quick start with Docker Compose:**
+```bash
+docker compose --profile web up -d --build   # first run builds the image (~5 min)
+# Open http://localhost:3000
+
+# Subsequent runs (no rebuild needed unless code changes):
+docker compose --profile web up -d
+```
+
+**Quick start without Docker:**
+```bash
+uv sync --group dev --extra web          # install web dependencies
+uv sync --group dev --extra web --extra cuda  # with CUDA GPU support
+uv run uvicorn web.api.app:create_app --factory --port 3000
+# Open http://localhost:3000
+```
+
+**WebUI Features:**
+- **Upload & organize** — drag-and-drop videos or zipped frame sequences, organize into projects
+- **Full pipeline** — one-click processing: extract frames → generate alpha hints (GVM/VideoMaMa) → run inference
+- **Real-time progress** — WebSocket-driven progress bars with ETA and fps counter
+- **Frame viewer** — scrub through frames, play as video (ffmpeg-stitched MP4), A/B comparison mode
+- **Download outputs** — download any pass (FG, Matte, Comp, Processed) as ZIP
+- **Job queue** — parallel CPU jobs (extraction) + GPU jobs with configurable VRAM limits
+- **Weight management** — download CorridorKey, GVM, and VideoMaMa weights from HuggingFace directly in Settings
+- **VRAM monitoring** — system-wide GPU memory usage (via nvidia-smi)
+- **Right-click context menus** — rename projects, move clips, batch process, delete
+- **Keyboard shortcuts** — press `?` to see all shortcuts
+
+**Docker notes:**
+- Model weights are volume-mounted and persist across rebuilds
+- Set `CK_CLIPS_DIR` environment variable to change the projects directory
+- The web service uses the `web` Docker Compose profile
+
+### Docker CLI (Linux + NVIDIA GPU)
+
+If you prefer the command-line interface in Docker:
 
 Prerequisites:
 - Docker Engine + Docker Compose plugin installed.
-- NVIDIA driver installed on the host (Linux), with CUDA compatibility for the PyTorch CUDA 12.6 wheels used by this project.
-- NVIDIA Container Toolkit installed and configured for Docker (`nvidia-smi` should work on host, and `docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi` should succeed).
+- NVIDIA driver installed on the host (Linux), with CUDA compatibility for the PyTorch CUDA 12.8 wheels used by this project.
+- NVIDIA Container Toolkit installed and configured for Docker (`nvidia-smi` should work on host, and `docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi` should succeed).
 
 1. Build the image:
    ```bash

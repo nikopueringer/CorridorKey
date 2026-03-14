@@ -24,6 +24,14 @@ CorridorKey_remote.bat
 .ipynb_checkpoints/
 .DS_Store
 
+# Projects / user content
+Projects/
+
+# WebUI
+web/frontend/node_modules/
+web/frontend/build/
+web/frontend/.svelte-kit/
+
 # IDE
 .vscode/
 .idea/
