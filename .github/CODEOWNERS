@@ -1,0 +1,14 @@
+# CODEOWNERS file
+#
+# This file defines individuals or teams responsible for code in specific
+# paths of the repository. When a pull request touches these files, the
+# designated owners will be automatically requested for review.
+#
+# For more details, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Format:
+#   <file pattern>  <github-username-or-team>
+
+# Default owners for all files
+* @nikopueringer
