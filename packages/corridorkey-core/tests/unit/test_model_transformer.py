@@ -15,21 +15,12 @@ from corridorkey_core.model_transformer import (
     RefinerBlock,
 )
 
-# ---------------------------------------------------------------------------
-# MLP
-# ---------------------------------------------------------------------------
-
 
 class TestMLP:
     def test_output_shape(self):
         mlp = MLP(input_dim=128, embed_dim=64)
         x = torch.randn(2, 10, 128)
         assert mlp(x).shape == (2, 10, 64)
-
-
-# ---------------------------------------------------------------------------
-# DecoderHead
-# ---------------------------------------------------------------------------
 
 
 class TestDecoderHead:
@@ -55,21 +46,11 @@ class TestDecoderHead:
         assert out.shape[1] == 3
 
 
-# ---------------------------------------------------------------------------
-# RefinerBlock
-# ---------------------------------------------------------------------------
-
-
 class TestRefinerBlock:
     def test_output_shape_preserved(self):
         block = RefinerBlock(channels=32, dilation=2)
         x = torch.randn(1, 32, 16, 16)
         assert block(x).shape == x.shape
-
-
-# ---------------------------------------------------------------------------
-# CNNRefinerModule
-# ---------------------------------------------------------------------------
 
 
 class TestCNNRefinerModule:
@@ -79,11 +60,6 @@ class TestCNNRefinerModule:
         coarse = torch.randn(1, 4, 64, 64)
         out = refiner(img, coarse)
         assert out.shape == (1, 4, 64, 64)
-
-
-# ---------------------------------------------------------------------------
-# GreenFormer
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

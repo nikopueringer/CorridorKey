@@ -16,10 +16,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 _CHECKPOINT_ENV = "CK_CHECKPOINT_PATH"
 
 
@@ -49,11 +45,6 @@ def sample_frame():
     image = np.random.rand(1080, 1920, 3).astype(np.float32)
     mask = np.random.rand(1080, 1920).astype(np.float32)
     return image, mask
-
-
-# ---------------------------------------------------------------------------
-# Output contract
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.gpu
@@ -108,11 +99,6 @@ class TestProcessFrameContract:
         result = engine.process_frame(image, mask)
         for key, arr in result.items():
             assert arr.dtype == np.float32, f"{key} dtype is {arr.dtype}, expected float32"
-
-
-# ---------------------------------------------------------------------------
-# Input handling
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.gpu

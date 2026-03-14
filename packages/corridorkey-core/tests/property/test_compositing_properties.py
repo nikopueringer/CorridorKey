@@ -21,10 +21,6 @@ from hypothesis import strategies as st
 settings.register_profile("ci", max_examples=100)
 settings.load_profile("ci")
 
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
-
 # Valid normalized float values
 _unit_float = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
 
@@ -38,11 +34,6 @@ def _solid_array(h: int, w: int, r: float, g: float, b: float) -> np.ndarray:
     img[..., 1] = g
     img[..., 2] = b
     return img
-
-
-# ---------------------------------------------------------------------------
-# Color space invariants
-# ---------------------------------------------------------------------------
 
 
 @given(_unit_float)
@@ -81,11 +72,6 @@ def test_linear_to_srgb_is_monotone(value: float):
     x = np.array([value, value + 0.005], dtype=np.float32)
     result = linear_to_srgb(x)
     assert result[1] >= result[0] - 1e-6
-
-
-# ---------------------------------------------------------------------------
-# Compositing invariants
-# ---------------------------------------------------------------------------
 
 
 @given(_unit_float, _unit_float, _small_dim, _small_dim)
@@ -129,11 +115,6 @@ def test_composite_output_in_range(fg_val: float, bg_val: float, h: int, w: int)
     assert result.max() <= 1.0 + 1e-6
 
 
-# ---------------------------------------------------------------------------
-# Premultiply invariants
-# ---------------------------------------------------------------------------
-
-
 @given(_unit_float, _small_dim, _small_dim)
 def test_premultiply_full_alpha_identity(val: float, h: int, w: int):
     """premultiply with alpha=1 must return the foreground unchanged."""
@@ -148,11 +129,6 @@ def test_premultiply_zero_alpha_gives_black(val: float, h: int, w: int):
     fg = _solid_array(h, w, val, val, val)
     alpha = np.zeros((h, w, 1), dtype=np.float32)
     assert np.allclose(premultiply(fg, alpha), 0.0, atol=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Despill invariants
-# ---------------------------------------------------------------------------
 
 
 @given(_unit_float, _unit_float, _small_dim, _small_dim)
@@ -179,11 +155,6 @@ def test_despill_output_in_range(r: float, g: float, b: float, h: int, w: int):
     result = despill(img, strength=1.0)
     assert np.all(result >= -1e-6)
     assert np.all(result <= 1.0 + 1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Checkerboard invariants
-# ---------------------------------------------------------------------------
 
 
 @given(_small_dim, _small_dim)

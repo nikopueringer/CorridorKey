@@ -16,10 +16,6 @@ from corridorkey_core.engine_factory import (
     resolve_backend,
 )
 
-# ---------------------------------------------------------------------------
-# resolve_backend
-# ---------------------------------------------------------------------------
-
 
 class TestResolveBackend:
     def test_none_triggers_auto_detect(self):
@@ -89,11 +85,6 @@ class TestResolveBackend:
             mock_platform.machine.return_value = "arm64"
             result = resolve_backend("mlx")
         assert result == "mlx"
-
-
-# ---------------------------------------------------------------------------
-# discover_checkpoint
-# ---------------------------------------------------------------------------
 
 
 class TestDiscoverCheckpoint:
