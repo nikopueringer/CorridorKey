@@ -130,10 +130,11 @@ uv run uvicorn web.api.app:create_app --factory --port 3000
 - **Right-click context menus** — rename projects, move clips, batch process, delete
 - **Keyboard shortcuts** — press `?` to see all shortcuts
 
-**Docker notes:**
-- Model weights are volume-mounted and persist across rebuilds
-- Set `CK_CLIPS_DIR` environment variable to change the projects directory
-- The web service uses the `web` Docker Compose profile
+**Important notes:**
+- **Clip storage:** The WebUI manages clips under `Projects/`, while the CLI wizard uses `ClipsForInference/`. These directories are independent — clips created in the WebUI won't appear in the CLI and vice versa. Set `CK_CLIPS_DIR` to point at `ClipsForInference/` if you want both to use the same directory.
+- **Mac / MLX:** The WebUI has not been validated on Mac with MLX inference. The server will start and the UI will work, but the VRAM meter will show N/A (nvidia-smi is not available on Mac) and the VRAM concurrency limit for parallel jobs is not enforced on non-CUDA systems.
+- Model weights are volume-mounted and persist across Docker rebuilds.
+- The web service uses the `web` Docker Compose profile.
 
 ### Docker CLI (Linux + NVIDIA GPU)
 

@@ -52,12 +52,18 @@ def _get_free_vram_gb() -> float | None:
 
 
 def _can_start_gpu_job() -> bool:
-    """Check if there's enough free VRAM to start another GPU job."""
+    """Check if there's enough free VRAM to start another GPU job.
+
+    Note: VRAM checking only works on CUDA. On Mac/MLX, _get_free_vram_gb()
+    returns None and this gate is effectively disabled — multiple GPU jobs
+    can run simultaneously with no throttle. MLX unified memory checking
+    is not yet implemented.
+    """
     if _vram_limit_gb <= 0:
         return True  # no limit set
     free = _get_free_vram_gb()
     if free is None:
-        return True  # can't check, allow it
+        return True  # non-CUDA (e.g. MLX) — can't check, allow it
     can = free >= _vram_limit_gb
     if not can:
         logger.debug(f"VRAM check: {free:.1f} GB free < {_vram_limit_gb:.1f} GB limit, waiting")
