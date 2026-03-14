@@ -1,0 +1,17 @@
+[project]
+name = "corridorkey-cli"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Rajesh Das", email = "hyperoot.tech@proton.me" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+corridorkey-cli = "corridorkey_cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
