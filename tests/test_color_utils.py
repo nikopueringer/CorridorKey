@@ -366,6 +366,42 @@ class TestCleanMatte:
         assert result.ndim == 3
         assert result.shape[2] == 1
 
+    def test_all_zero_matte_returns_zeros(self):
+        """An all-zero matte must return all zeros without crashing.
+
+        The connected-components pass on an empty matte must not produce
+        spurious output. Source: README 'Auto-Cleanup' boundary condition.
+        """
+        matte = np.zeros((100, 100), dtype=np.float32)
+        result = cu.clean_matte(matte, area_threshold=300)
+        np.testing.assert_array_equal(result, np.zeros_like(matte))
+
+    def test_all_opaque_matte_preserved(self):
+        """An all-opaque matte must be returned intact.
+
+        The single large component exceeds any reasonable threshold — cleanup
+        must not zero it out. Source: README 'Auto-Cleanup' boundary condition.
+        """
+        matte = np.ones((100, 100), dtype=np.float32)
+        result = cu.clean_matte(matte, area_threshold=300)
+        assert result.min() > 0.9
+
+    def test_idempotent(self):
+        """Running clean_matte twice produces the same result as running it once.
+
+        Tested with dilation=0 and blur_size=0 to isolate the connected-
+        components logic — the pure topological filter is the stable core.
+        Dilation + blur are not idempotent by design (they expand surviving
+        blobs, so a second pass would further expand feathered edges).
+        Source: README 'Auto-Cleanup' boundary condition.
+        """
+        matte = np.zeros((100, 100), dtype=np.float32)
+        matte[20:80, 20:80] = 1.0  # large blob kept
+        matte[5:8, 5:8] = 1.0      # small blob removed on first pass
+        first = cu.clean_matte(matte.copy(), area_threshold=300, dilation=0, blur_size=0)
+        second = cu.clean_matte(first.copy(), area_threshold=300, dilation=0, blur_size=0)
+        np.testing.assert_allclose(first, second, atol=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # create_checkerboard
