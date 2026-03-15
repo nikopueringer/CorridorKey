@@ -44,15 +44,40 @@ uv tool dir
 
 Add the path printed there to your PATH environment variable.
 
+## Clips not detected
+
+If the wizard shows no clips or fewer clips than expected, the most likely cause is that the folder structure is not recognised.
+
+The wizard scans for `Input/`, `Frames/`, or `Source/` subdirectories (case-insensitive). If your footage is in a flat folder without these subdirectories, the wizard will offer to organise it at the start of the session. Choose `y` when prompted.
+
+If you declined the organise prompt and clips are still missing, check that each clip folder contains at least one of:
+
+- `Input/` or `input/` — image sequence or video inside
+- `Frames/` or `frames/` — image sequence
+- `Source/` — video file
+- A video file named `Input.mp4` (or any case/extension) directly in the clip root
+
 ## Clips stuck in RAW state
 
 ```text
  my_shot  RAW  60  -
 ```
 
-RAW means the clip has input frames but no alpha hint. CorridorKey needs an alpha generator package to produce the alpha hint before inference can run. Install one (for example `corridorkey-gbm`) and re-scan.
+RAW means the clip has input frames but no alpha hint. CorridorKey needs an alpha generator package to produce the alpha hint before inference can run. Install one and re-scan.
 
-If you expected the clip to be READY, check that the `AlphaHint/` folder exists inside the clip directory and contains the same number of frames as `Frames/`.
+If you expected the clip to be READY, check that the `AlphaHint/` folder exists inside the clip directory and contains the same number of frames as `Frames/` or `Input/`.
+
+## Clips stuck in EXTRACTING state
+
+```text
+ my_shot  EXTRACTING  0  0
+```
+
+EXTRACTING means a source video was detected but frames have not been extracted yet. This happens automatically when you choose [i] in the wizard. If the clip stays in EXTRACTING after processing:
+
+- Check that FFmpeg is installed (`corridorkey doctor`).
+- Check that the source video is not corrupted (try opening it in a media player).
+- Check the error column in the wizard table for a specific message.
 
 ## CUDA out of memory
 
