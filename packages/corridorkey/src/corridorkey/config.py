@@ -90,9 +90,9 @@ class CorridorKeyConfig(BaseModel):
 
     # Default output formats
     fg_format: str = "exr"
-    matte_format: str = "exr"
+    matte_format: str = "png"
     comp_format: str = "png"
-    processed_format: str = "png"
+    processed_format: str = "exr"
 
     @field_validator("app_dir", "checkpoint_dir", mode="before")
     @classmethod
