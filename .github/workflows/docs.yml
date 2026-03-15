@@ -30,10 +30,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install the project
-        run: uv sync --only-group docs
-
-      - run: uv run zensical build --clean
+      - name: Build the site
+        run: uv run --only-group docs zensical build --clean
 
       - uses: actions/upload-pages-artifact@v4
         with:
