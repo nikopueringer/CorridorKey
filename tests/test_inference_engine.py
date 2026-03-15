@@ -151,22 +151,48 @@ class TestProcessFrameColorSpace:
 class TestProcessFramePostProcessing:
     """Verify post-processing: despill, despeckle, premultiply, composite."""
 
-    def test_despill_strength_variants_dont_crash(self, sample_frame_rgb, sample_mask, mock_greenformer):
+    def test_despill_strength_reduces_green_in_spill_pixels(self, sample_frame_rgb, sample_mask):
+        """despill_strength=1.0 must reduce green in spill pixels; strength=0.0 must leave it unchanged.
+
+        The default mock_greenformer returns uniform gray (R=G=B=0.6) which has no
+        green spill by definition: limit=(R+B)/2=0.6=G so spill_amount=0 always.
+        This test uses a green-heavy fg mock (R=0.2, G=0.8, B=0.2) to force
+        spill_amount > 0 and verify the despill path actually runs and reduces green.
         """
-        Despill at strength 0.0 and 1.0 should both produce valid outputs.
-        Scenario: Process a frame with despill_strength set to 0.0 vs 1.0.
-        Expected: Full despill should produce different pixel values than no despill, even with mock inputs.
-        """
-        engine = _make_engine_with_mock(mock_greenformer)
+        from unittest.mock import MagicMock
+
+        def green_heavy_forward(x):
+            b, c, h, w = x.shape
+            fg = torch.zeros(b, 3, h, w, dtype=torch.float32)
+            fg[:, 0, :, :] = 0.2  # R
+            fg[:, 1, :, :] = 0.8  # G — heavy green spill: G >> (R+B)/2
+            fg[:, 2, :, :] = 0.2  # B
+            return {
+                "alpha": torch.full((b, 1, h, w), 0.8, dtype=torch.float32),
+                "fg": fg,
+            }
+
+        green_mock = MagicMock()
+        green_mock.side_effect = green_heavy_forward
+        green_mock.refiner = None
+        green_mock.use_refiner = False
+
+        engine = _make_engine_with_mock(green_mock)
         result_no_despill = engine.process_frame(sample_frame_rgb, sample_mask, despill_strength=0.0)
         result_full_despill = engine.process_frame(sample_frame_rgb, sample_mask, despill_strength=1.0)
 
         rgb_none = result_no_despill["processed"][:, :, :3]
         rgb_full = result_full_despill["processed"][:, :, :3]
 
-        np.testing.assert_allclose(rgb_none, 0.2548, atol=1e-3)
+        # Both outputs must be valid shapes and in-range
         assert rgb_none.shape == rgb_full.shape
-        np.testing.assert_allclose(rgb_none, rgb_full, atol=1e-7)
+        assert rgb_none.min() >= 0.0
+        assert rgb_full.min() >= 0.0
+
+        # Green channel must be reduced by despill (spill_amount > 0 is guaranteed by construction)
+        assert rgb_full[:, :, 1].mean() < rgb_none[:, :, 1].mean(), (
+            "despill_strength=1.0 should reduce the green channel relative to strength=0.0 when G > (R+B)/2"
+        )
 
     def test_auto_despeckle_toggle(self, sample_frame_rgb, sample_mask, mock_greenformer):
         """auto_despeckle=False should skip clean_matte without crashing."""
