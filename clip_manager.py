@@ -658,6 +658,7 @@ def _reader_worker(
 
             if frame_rgb is None or alpha_mask is None:
                 logger.warning("Skipping frame %d: failed to read input or mask", frame_index)
+                read_q.put((frame_index, frame_stem, None, None, 0.0))
                 continue
 
             # Resize mask to match input dimensions if they differ
@@ -816,8 +817,8 @@ def run_inference(
             on_clip_start(clip.name, num_frames)
 
         # Per-phase timing for the benchmark summary at the end.
-        # list.append is atomic under CPython's GIL — safe for cross-thread use.
-        # If targeting free-threaded Python (3.13t+), these would need a lock.
+        # Each list is only appended by a single thread (read→main, others→writer),
+        # so no cross-thread contention exists regardless of GIL.
         phase_times: dict[str, list[float]] = {"read": [], "infer": [], "postprocess": [], "write": []}
 
         # Async I/O pipeline: three concurrent stages connected by queues.
@@ -873,24 +874,29 @@ def run_inference(
                 frame_index, frame_stem, frame_rgb, alpha_mask, read_elapsed = item
                 phase_times["read"].append(read_elapsed)
 
+                # Skip sentinel: reader couldn't decode this frame
+                if frame_rgb is None or alpha_mask is None:
+                    logger.warning("Main thread: skipping frame %d (read failure)", frame_index)
+                    if on_frame_complete:
+                        on_frame_complete(frame_index, num_frames)
+                    continue
+
                 inference_start = time.perf_counter()
-                engine_kwargs: dict = dict(
+                inference_result = engine.process_frame(
+                    frame_rgb,
+                    alpha_mask,
                     input_is_linear=settings.input_is_linear,
                     fg_is_straight=True,
                     despill_strength=settings.despill_strength,
                     auto_despeckle=settings.auto_despeckle,
                     despeckle_size=settings.despeckle_size,
                     refiner_scale=settings.refiner_scale,
+                    enabled_outputs=settings.enabled_outputs,
                 )
-                # MLX adapter accepts enabled_outputs to skip unneeded post-processing;
-                # Torch engine computes all outputs unconditionally
-                if hasattr(engine, "_engine"):
-                    engine_kwargs["enabled_outputs"] = settings.enabled_outputs
-                inference_result = engine.process_frame(frame_rgb, alpha_mask, **engine_kwargs)
                 inference_elapsed = time.perf_counter() - inference_start
 
-                # Grab MLX adapter per-phase timing before enqueueing (Torch returns None)
-                mlx_phase_timing = getattr(engine, "last_frame_timing", None)
+                # Both engines expose last_frame_timing (MLX populates it, Torch leaves it empty)
+                mlx_phase_timing = engine.last_frame_timing or None
 
                 if error_event.is_set():
                     break

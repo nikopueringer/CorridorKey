@@ -88,7 +88,7 @@ def _validate_mlx_available() -> None:
     except ImportError as err:
         raise RuntimeError(
             "MLX backend requested but corridorkey_mlx is not installed. "
-            "Install with: uv pip install corridorkey-mlx@git+https://github.com/cmoyates/corridorkey-mlx.git"
+            "Install with: uv pip install corridorkey-mlx@git+https://github.com/nikopueringer/corridorkey-mlx.git"
         ) from err
 
 
@@ -117,17 +117,24 @@ def _discover_checkpoint(ext: str) -> Path:
 
 
 @functools.lru_cache(maxsize=4)
-def _get_checkerboard(
+def _get_checkerboard_linear(
     w: int,
     h: int,
     checker_size: int = 128,
     color1: float = 0.15,
     color2: float = 0.55,
 ) -> np.ndarray:
-    """Return a cached checkerboard pattern, creating it only on first call per resolution."""
+    """Return a cached linear-space checkerboard, creating it only on first call per resolution.
+
+    Caches the sRGB→linear conversion so callers don't repeat it every frame.
+    The returned array is read-only to prevent accidental mutation of the cache.
+    """
     from CorridorKeyModule.core import color_utils as cu
 
-    return cu.create_checkerboard(w, h, checker_size=checker_size, color1=color1, color2=color2)
+    checkerboard_srgb = cu.create_checkerboard(w, h, checker_size=checker_size, color1=color1, color2=color2)
+    checkerboard_linear = cu.srgb_to_linear(checkerboard_srgb)
+    checkerboard_linear.flags.writeable = False
+    return checkerboard_linear
 
 
 def _wrap_mlx_output(
@@ -201,8 +208,7 @@ def _wrap_mlx_output(
 
     if need_comp:
         frame_height, frame_width = fg_float.shape[:2]
-        checkerboard_srgb = _get_checkerboard(frame_width, frame_height)
-        checkerboard_linear = cu.srgb_to_linear(checkerboard_srgb)
+        checkerboard_linear = _get_checkerboard_linear(frame_width, frame_height)
         composite_linear = cu.composite_straight(fg_despilled_linear, checkerboard_linear, processed_alpha)
         result["comp"] = cu.linear_to_srgb(composite_linear)
 
@@ -283,7 +289,7 @@ class _MLXEngineAdapter:
         return result
 
 
-DEFAULT_MLX_TILE_SIZE = 768
+DEFAULT_MLX_TILE_SIZE = None  # full-frame (tiling degrades quality)
 DEFAULT_MLX_TILE_OVERLAP = 128
 
 

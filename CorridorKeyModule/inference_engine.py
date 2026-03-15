@@ -50,22 +50,27 @@ class CorridorKeyEngine:
 
         self.model_precision = model_precision
 
-        model = self._load_model().to(model_precision)
+        # Per-frame timing for profiling — matches _MLXEngineAdapter interface
+        # so clip_manager can access timing uniformly via getattr without type checks.
+        # Always empty for Torch (timing is measured externally).
+        self.last_frame_timing: dict[str, float] = {}
+
+        self.model = self._load_model().to(model_precision)
 
         # We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
         if sys.platform == "linux" or sys.platform == "win32":
             # Try compiling the model. Fallback to eager mode if it fails.
             try:
-                self.model = torch.compile(model)
+                compiled_model = torch.compile(self.model)
                 # Trigger compilation with a dummy input
                 dummy_input = torch.zeros(1, 4, img_size, img_size, dtype=model_precision, device=self.device)
                 with torch.inference_mode():
-                    self.model(dummy_input)
+                    compiled_model(dummy_input)
+                self.model = compiled_model
             except Exception as e:
                 logger.info(f"Model compilation failed with error: {e}")
                 logger.warning("Model compilation failed. Falling back to eager mode.")
                 torch.cuda.empty_cache()
-                self.model = model
 
     def _load_model(self) -> GreenFormer:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
@@ -135,6 +140,7 @@ class CorridorKeyEngine:
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
+        enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"}),
     ) -> dict[str, np.ndarray]:
         """
         Process a single frame.
@@ -235,6 +241,18 @@ class CorridorKeyEngine:
 
         # --- Post-processing pipeline ---
 
+        need_comp = "comp" in enabled_outputs
+        need_processed = "processed" in enabled_outputs
+        need_postprocess = need_comp or need_processed
+
+        result: dict[str, np.ndarray] = {
+            "alpha": alpha_fullres,  # Linear, raw prediction (before despeckle)
+            "fg": fg_fullres,  # sRGB, raw prediction (straight/unpremultiplied)
+        }
+
+        if not need_postprocess:
+            return result
+
         # A. Auto-despeckle: remove small disconnected alpha islands
         # (tracking markers, noise) while preserving the main subject
         if auto_despeckle:
@@ -245,31 +263,26 @@ class CorridorKeyEngine:
         # B. Green spill removal on the foreground (still in sRGB)
         fg_despilled = cu.despill(fg_fullres, green_limit_mode="average", strength=despill_strength)
 
-        # C. Premultiply for EXR output.
-        # EXR convention: linear color premultiplied by linear alpha.
-        # We must convert sRGB→linear BEFORE premultiplying to avoid
-        # gamma-curved color values bleeding into the alpha multiply.
+        # Both comp and processed need linear-space foreground
         fg_despilled_linear = cu.srgb_to_linear(fg_despilled)
-        fg_premultiplied_linear = cu.premultiply(fg_despilled_linear, cleaned_alpha)
 
-        # D. Pack RGBA — all channels strictly linear float for compositing software
-        processed_rgba = np.concatenate([fg_premultiplied_linear, cleaned_alpha], axis=-1)
+        if need_processed:
+            # C. Premultiply for EXR output.
+            # EXR convention: linear color premultiplied by linear alpha.
+            fg_premultiplied_linear = cu.premultiply(fg_despilled_linear, cleaned_alpha)
+            # D. Pack RGBA — all channels strictly linear float for compositing software
+            result["processed"] = np.concatenate([fg_premultiplied_linear, cleaned_alpha], axis=-1)
 
-        # 7. Preview composite: FG over checkerboard for visual QC.
-        # All compositing done in linear space, then converted to sRGB for display.
-        checkerboard_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
-        checkerboard_linear = cu.srgb_to_linear(checkerboard_srgb)
+        if need_comp:
+            # Preview composite: FG over checkerboard for visual QC.
+            checkerboard_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
+            checkerboard_linear = cu.srgb_to_linear(checkerboard_srgb)
 
-        if fg_is_straight:
-            composite_linear = cu.composite_straight(fg_despilled_linear, checkerboard_linear, cleaned_alpha)
-        else:
-            composite_linear = cu.composite_premul(fg_despilled_linear, checkerboard_linear, cleaned_alpha)
+            if fg_is_straight:
+                composite_linear = cu.composite_straight(fg_despilled_linear, checkerboard_linear, cleaned_alpha)
+            else:
+                composite_linear = cu.composite_premul(fg_despilled_linear, checkerboard_linear, cleaned_alpha)
 
-        composite_srgb = cu.linear_to_srgb(composite_linear)
+            result["comp"] = cu.linear_to_srgb(composite_linear)
 
-        return {  # type: ignore[return-value]  # cu.* returns ndarray|Tensor but inputs are always ndarray here
-            "alpha": alpha_fullres,  # Linear, raw prediction (before despeckle)
-            "fg": fg_fullres,  # sRGB, raw prediction (straight/unpremultiplied)
-            "comp": composite_srgb,  # sRGB, preview composite over checkerboard
-            "processed": processed_rgba,  # Linear premultiplied RGBA (despeckled + despilled)
-        }
+        return result

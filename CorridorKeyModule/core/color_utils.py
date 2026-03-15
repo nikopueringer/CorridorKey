@@ -49,6 +49,11 @@ _numpy_stack = functools.partial(np.stack, axis=-1)
 
 _SRGB_LUT_SIZE = 65536
 
+# Max kernel size for single-pass cv2 dilation. Larger kernels use iterative
+# dilation instead — morphology ops are O(k²) per pixel, so 11px (area=121)
+# iterated is ~4-5x faster than a single large kernel (e.g. 51px, area=2601).
+_MAX_DILATION_KERNEL_SIZE = 11
+
 
 @functools.lru_cache(maxsize=1)
 def _linear_to_srgb_lut() -> np.ndarray:
@@ -314,14 +319,13 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
     # Dilate the cleaned mask to create a "safe zone" that extends slightly
     # beyond the subject edge — prevents the mask from clipping real detail
     if dilation > 0:
-        # Large kernels are O(k²) per pixel. Iterating with small kernels
-        # achieves equivalent coverage at 4-5x less cost (benchmarked).
-        MAX_SINGLE_KERNEL = 11
         full_kernel_size = int(dilation * 2 + 1)
-        if full_kernel_size > MAX_SINGLE_KERNEL:
-            small_radius = MAX_SINGLE_KERNEL // 2  # 5px per iteration
+        if full_kernel_size > _MAX_DILATION_KERNEL_SIZE:
+            small_radius = _MAX_DILATION_KERNEL_SIZE // 2  # 5px per iteration
             num_iterations = (dilation + small_radius - 1) // small_radius
-            small_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MAX_SINGLE_KERNEL, MAX_SINGLE_KERNEL))
+            small_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (_MAX_DILATION_KERNEL_SIZE, _MAX_DILATION_KERNEL_SIZE)
+            )
             for _ in range(num_iterations):
                 cleaned_mask = cv2.dilate(cleaned_mask, small_kernel)
         else:
