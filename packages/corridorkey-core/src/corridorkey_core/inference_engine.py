@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -84,12 +85,11 @@ class CorridorKeyEngine:  # pragma: no cover
         if sys.platform == "linux" or sys.platform == "win32":
             try:
                 # Point the inductor cache at a stable directory so compiled
-                # kernels are reused across runs (first run still compiles once).
+                # kernels survive across runs — first run compiles once, all
+                # subsequent runs load from cache and skip the ~60s wait.
                 cache_dir = Path.home() / ".cache" / "corridorkey" / "torch_compile"
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                import torch._inductor.config as inductor_cfg
-
-                inductor_cfg.cache_dir = str(cache_dir)
+                os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(cache_dir))
                 self.model = torch.compile(model)
             except Exception as e:
                 logger.warning("Model compilation failed (%s). Falling back to eager mode.", e)

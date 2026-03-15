@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import torch
 
 if TYPE_CHECKING:
     from corridorkey_core.inference_engine import CorridorKeyEngine
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 TORCH_EXT = ".pth"
 MLX_EXT = ".safetensors"
-DEFAULT_IMG_SIZE = 512
+DEFAULT_IMG_SIZE = 2048
 DEFAULT_MLX_TILE_SIZE = 512
 DEFAULT_MLX_TILE_OVERLAP = 64
 
@@ -283,4 +284,6 @@ def create_engine(
     from corridorkey_core.inference_engine import CorridorKeyEngine  # pragma: no cover
 
     logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device or "cpu")  # pragma: no cover
-    return CorridorKeyEngine(checkpoint_path=ckpt, device=device or "cpu", img_size=img_size)  # pragma: no cover
+    return CorridorKeyEngine(
+        checkpoint_path=ckpt, device=device or "cpu", img_size=img_size, model_precision=torch.float16
+    )  # pragma: no cover
