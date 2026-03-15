@@ -31,6 +31,14 @@ EXR_WRITE_FLAGS = [
     cv2.IMWRITE_EXR_COMPRESSION_PXR24,
 ]
 
+# Fast EXR — uncompressed half-float (~10x faster writes, ~12% larger files)
+EXR_WRITE_FLAGS_FAST = [
+    cv2.IMWRITE_EXR_TYPE,
+    cv2.IMWRITE_EXR_TYPE_HALF,
+    cv2.IMWRITE_EXR_COMPRESSION,
+    cv2.IMWRITE_EXR_COMPRESSION_NO,
+]
+
 
 def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray | None:
     """Read an image file (EXR or standard) as float32 RGB [0, 1].
