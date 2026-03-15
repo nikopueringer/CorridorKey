@@ -17,6 +17,8 @@ import numpy as np
 import pytest
 import torch
 
+from CorridorKeyModule.core import color_utils as cu
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -191,7 +193,6 @@ class TestProcessFramePostProcessing:
         # curve; use the piecewise real sRGB transfer functions defined in color_utils.py."
         # The difference between the two at FG=0.6 is ~0.005, which the previous
         # atol=1e-2 was too loose to catch — a gamma 2.2 regression would have passed.
-        from CorridorKeyModule.core import color_utils as cu
         expected_premul = cu.srgb_to_linear(np.float32(0.6)) * 0.8
         np.testing.assert_allclose(alpha, 0.8, atol=1e-5)
         np.testing.assert_allclose(rgb, expected_premul, atol=1e-4)
