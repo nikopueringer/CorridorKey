@@ -376,6 +376,87 @@ class CorridorKeyService:
                 raise JobCancelledError(clip.name, 0) from None
             raise CorridorKeyError(f"Alpha generator '{generator.name}' failed for '{clip.name}': {e}") from e
 
+    def extract_clip(
+        self,
+        clip: ClipEntry,
+        on_progress: Callable[[str, int, int], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Extract a video clip's frames to disk so it can proceed to RAW state.
+
+        Extracts the input video to ``Frames/`` and, if an alpha video asset
+        is present, extracts it to ``AlphaHint/`` in the same pass.
+
+        After successful extraction the clip is re-scanned via ``find_assets``
+        so its state advances to RAW (or READY if alpha was also extracted).
+
+        Args:
+            clip: Clip in EXTRACTING state with a video input_asset.
+            on_progress: Called with (clip_name, current_frame, total_frames).
+            cancel_event: Set to abort extraction mid-way.
+
+        Raises:
+            CorridorKeyError: If the clip has no video input asset or extraction fails.
+        """
+        from corridorkey.ffmpeg_tools import extract_frames, probe_video, write_video_metadata
+
+        if clip.input_asset is None or clip.input_asset.asset_type != "video":
+            raise CorridorKeyError(f"Clip '{clip.name}' has no video input asset to extract")
+
+        video_path = clip.input_asset.path
+        frames_dir = os.path.join(clip.root_path, "Frames")
+        alpha_dir = os.path.join(clip.root_path, "AlphaHint")
+
+        # Probe once so both extractions share the frame count.
+        try:
+            info = probe_video(video_path)
+            total = info.get("frame_count", 0)
+            write_video_metadata(clip.root_path, info)
+        except Exception as e:
+            logger.warning("Clip '%s': video probe failed: %s", clip.name, e)
+            total = 0
+            info = {}
+
+        def _progress(current: int, total_frames: int) -> None:
+            if on_progress:
+                on_progress(clip.name, current, total_frames)
+
+        try:
+            extract_frames(
+                video_path,
+                frames_dir,
+                on_progress=_progress,
+                cancel_event=cancel_event,
+                total_frames=total,
+            )
+        except Exception as e:
+            raise CorridorKeyError(f"Clip '{clip.name}': frame extraction failed: {e}") from e
+
+        if cancel_event and cancel_event.is_set():
+            logger.info("Clip '%s': extraction cancelled", clip.name)
+            return
+
+        # Extract alpha video if present.
+        if clip.alpha_asset is not None and clip.alpha_asset.asset_type == "video":
+            alpha_video_path = clip.alpha_asset.path
+            try:
+                extract_frames(
+                    alpha_video_path,
+                    alpha_dir,
+                    cancel_event=cancel_event,
+                    total_frames=total,
+                )
+            except Exception as e:
+                logger.warning("Clip '%s': alpha extraction failed (continuing): %s", clip.name, e)
+
+        # Re-scan so state advances from EXTRACTING to RAW or READY.
+        try:
+            clip.find_assets()
+        except Exception as e:
+            raise CorridorKeyError(f"Clip '{clip.name}': re-scan after extraction failed: {e}") from e
+
+        logger.info("Clip '%s': extraction complete, state=%s", clip.name, clip.state.value)
+
     def scan_clips(self, clips_dir: str, allow_standalone_videos: bool = True) -> list[ClipEntry]:
         """Scan a directory for clip folders.
 

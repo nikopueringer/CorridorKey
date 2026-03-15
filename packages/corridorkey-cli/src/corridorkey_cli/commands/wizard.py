@@ -61,6 +61,7 @@ def wizard(
         _print_state_table(clips, clips_dir)
 
         ready = [c for c in clips if c.state == ClipState.READY]
+        extracting = [c for c in clips if c.state == ClipState.EXTRACTING]
         skippable = [c for c in clips if c.state in (ClipState.RAW, ClipState.MASKED)]
         errors = [c for c in clips if c.state == ClipState.ERROR]
 
@@ -73,9 +74,15 @@ def wizard(
             console.print(f"[red]{len(errors)} clip(s) in ERROR state.[/red] Inspect errors above.")
 
         # Build action menu
+        actionable = ready + extracting
         actions: list[tuple[str, str]] = []
-        if ready:
-            actions.append(("i", f"Run inference on {len(ready)} READY clip(s)"))
+        if actionable:
+            label_parts = []
+            if ready:
+                label_parts.append(f"{len(ready)} READY")
+            if extracting:
+                label_parts.append(f"{len(extracting)} to extract")
+            actions.append(("i", f"Process {', '.join(label_parts)} clip(s)"))
         actions.append(("r", "Re-scan directory"))
         actions.append(("q", "Quit"))
 
@@ -92,7 +99,7 @@ def wizard(
 
         if choice == "i":
             params, output_config = _prompt_inference_settings(config)
-            _run_inference(service, ready, params, output_config)
+            _run_inference(service, actionable, params, output_config)
             Prompt.ask("\nPress Enter to re-scan")
 
     console.print("[bold green]Goodbye.[/bold green]")
@@ -208,13 +215,35 @@ def _run_inference(
     params: InferenceParams,
     output_config: OutputConfig,
 ) -> None:
-    """Run inference on a list of READY clips with a progress bar."""
+    """Extract (if needed) and run inference on a list of clips with a progress bar."""
     import time
 
     from rich.progress import Progress as RichProgress
     from rich.progress import SpinnerColumn, TextColumn
 
     failed: list[str] = []
+
+    # Extract any EXTRACTING clips first.
+    for clip in clips:
+        if clip.state != ClipState.EXTRACTING:
+            continue
+        total = clip.input_asset.frame_count if clip.input_asset else 0
+        console.print(f"\nExtracting [cyan]{clip.name}[/cyan]  ({total} frames)")
+        with ProgressContext() as prog:
+            try:
+                service.extract_clip(clip, on_progress=prog.on_progress)
+            except Exception as e:
+                console.print(f"  [red]Extraction failed:[/red] {e}")
+                failed.append(clip.name)
+
+    # Filter to clips that are now READY (extraction may have left some RAW).
+    ready_clips = [c for c in clips if c.state == ClipState.READY]
+    if not ready_clips:
+        if failed:
+            console.print(f"\n[red]Failed clips:[/red] {', '.join(failed)}")
+        else:
+            console.print("\n[yellow]No READY clips after extraction.[/yellow]")
+        return
 
     # Pre-load the engine once with a spinner so the user sees activity
     # during the potentially long model load + first-frame compilation.
@@ -228,7 +257,7 @@ def _run_inference(
             spin.add_task("")
             service.load_engine()
 
-    for clip in clips:
+    for clip in ready_clips:
         total = clip.input_asset.frame_count if clip.input_asset else 0
         console.print(f"\nProcessing [cyan]{clip.name}[/cyan]  ({total} frames)")
 

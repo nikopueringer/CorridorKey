@@ -175,13 +175,31 @@ def _process_clip(
             clip.set_error(str(e))
             return ClipSummary(name=clip.name, state=state_name, error=str(e))
 
-    # EXTRACTING - can't process yet
+    # EXTRACTING - extract frames first, then fall through to inference
     if clip.state == ClipState.EXTRACTING:
-        msg = f"Clip '{clip.name}' is still EXTRACTING - skipping"
-        logger.warning(msg)
-        if on_warning:
-            on_warning(msg)
-        return ClipSummary(name=clip.name, state=state_name, skipped=True)
+        try:
+            service.extract_clip(clip, on_progress=on_progress)
+        except CorridorKeyError as e:
+            clip.set_error(str(e))
+            return ClipSummary(name=clip.name, state=state_name, error=str(e))
+
+        # After extraction the clip may be RAW (no alpha) or READY.
+        # RAW without an alpha generator means we can't proceed.
+        if clip.state == ClipState.RAW and alpha_generator is None:
+            msg = f"Clip '{clip.name}' extracted to RAW but no alpha generator provided - skipping"
+            logger.warning(msg)
+            if on_warning:
+                on_warning(msg)
+            return ClipSummary(name=clip.name, state=clip.state.value, skipped=True)
+
+        if clip.state == ClipState.RAW and alpha_generator is not None:
+            try:
+                service.run_alpha_generator(clip, alpha_generator, on_progress=on_progress, on_warning=on_warning)
+            except JobCancelledError:
+                return ClipSummary(name=clip.name, state=clip.state.value, skipped=True)
+            except CorridorKeyError as e:
+                clip.set_error(str(e))
+                return ClipSummary(name=clip.name, state=clip.state.value, error=str(e))
 
     # READY - run inference
     try:

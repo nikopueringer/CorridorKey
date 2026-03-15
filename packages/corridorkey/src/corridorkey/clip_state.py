@@ -277,6 +277,34 @@ class ClipEntry:
             return path
         return None
 
+    def _find_alpha_video(self) -> str | None:
+        """Locate an alpha hint video alongside the input video.
+
+        Checks in priority order:
+          1. ``AlphaHint.<ext>`` in the clip root
+          2. ``{input_stem}_alpha.<ext>`` in the clip root
+          3. ``{input_stem}_matte.<ext>`` in the clip root
+
+        Returns:
+            Absolute path to the alpha video, or None if not found.
+        """
+        # Candidate: AlphaHint.* in clip root
+        for candidate in glob_module.glob(os.path.join(self.root_path, "AlphaHint.*")):
+            if _is_video_file(candidate):
+                return candidate
+
+        # Candidates based on input video stem
+        if self.input_asset is None or self.input_asset.asset_type != "video":
+            return None
+
+        input_stem = os.path.splitext(os.path.basename(self.input_asset.path))[0]
+        for suffix in ("_alpha", "_matte"):
+            for candidate in glob_module.glob(os.path.join(self.root_path, f"{input_stem}{suffix}.*")):
+                if _is_video_file(candidate):
+                    return candidate
+
+        return None
+
     def find_assets(self) -> None:
         """Scan the clip directory for Input, AlphaHint, and mask assets.
 
@@ -294,7 +322,15 @@ class ClipEntry:
         if os.path.isdir(frames_dir) and os.listdir(frames_dir):
             self.input_asset = ClipAsset(frames_dir, "sequence")
         elif os.path.isdir(input_dir) and os.listdir(input_dir):
-            self.input_asset = ClipAsset(input_dir, "sequence")
+            # If Input/ contains only video files (no images), treat it as a video asset.
+            input_videos = [f for f in os.listdir(input_dir) if _is_video_file(f)]
+            input_images = [f for f in os.listdir(input_dir) if _is_image_file(f)]
+            if input_images:
+                self.input_asset = ClipAsset(input_dir, "sequence")
+            elif input_videos:
+                self.input_asset = ClipAsset(os.path.join(input_dir, input_videos[0]), "video")
+            else:
+                raise ClipScanError(f"Clip '{self.name}': Input dir has no image or video files.")
         elif os.path.isdir(source_dir):
             videos = [f for f in os.listdir(source_dir) if _is_video_file(f)]
             if videos:
@@ -323,7 +359,17 @@ class ClipEntry:
 
         alpha_dir = os.path.join(self.root_path, "AlphaHint")
         if os.path.isdir(alpha_dir) and os.listdir(alpha_dir):
-            self.alpha_asset = ClipAsset(alpha_dir, "sequence")
+            alpha_videos = [f for f in os.listdir(alpha_dir) if _is_video_file(f)]
+            alpha_images = [f for f in os.listdir(alpha_dir) if _is_image_file(f)]
+            if alpha_images:
+                self.alpha_asset = ClipAsset(alpha_dir, "sequence")
+            elif alpha_videos:
+                self.alpha_asset = ClipAsset(os.path.join(alpha_dir, alpha_videos[0]), "video")
+        else:
+            # Look for an alpha video: AlphaHint.* or {stem}_alpha.* / {stem}_matte.*
+            alpha_video = self._find_alpha_video()
+            if alpha_video:
+                self.alpha_asset = ClipAsset(alpha_video, "video")
 
         mask_dir = os.path.join(self.root_path, "VideoMamaMaskHint")
         if os.path.isdir(mask_dir) and os.listdir(mask_dir):

@@ -1,40 +1,64 @@
 # Preparing Clips
 
-CorridorKey processes clips that are in the `READY` state. A clip reaches `READY` when it has both input frames and a matching set of alpha hint frames on disk. You provide both.
+CorridorKey processes clips that are in the `READY` state. A clip reaches `READY` when it has both input frames and a matching set of alpha hint frames on disk. You can provide these as pre-extracted image sequences or as video files.
 
-## Required Folder Structure
+## Option 1: Video Files (Recommended)
 
-Each clip must be its own folder containing two subfolders:
+Drop a video file and its corresponding alpha matte video into a folder. CorridorKey extracts the frames automatically before running inference.
+
+```text
+my_shot/
+    my_shot.mp4
+    my_shot_alpha.mp4
+```
+
+Or use `_matte` as the suffix:
+
+```text
+my_shot/
+    my_shot.mp4
+    my_shot_matte.mp4
+```
+
+Or name the alpha video `AlphaHint.mp4`:
+
+```text
+my_shot/
+    my_shot.mp4
+    AlphaHint.mp4
+```
+
+The wizard detects the clip as `EXTRACTING` and extracts both videos to `Frames/` and `AlphaHint/` before running inference. Extraction is resumable — if interrupted, it picks up from where it left off.
+
+If you only have the input video (no alpha), the clip will be `RAW` after extraction and will need an alpha generator package to proceed.
+
+## Option 2: Image Sequences
+
+Provide pre-extracted frame sequences directly:
 
 ```text
 my_shot/
     Frames/
         frame_0001.png
         frame_0002.png
-        frame_0003.png
         ...
     AlphaHint/
         frame_0001.png
         frame_0002.png
-        frame_0003.png
         ...
 ```
 
-`Frames/` holds the green screen input frames. `AlphaHint/` holds the corresponding alpha matte frames, one per input frame. The frame count in both folders must match exactly. If `AlphaHint/` has fewer frames than `Frames/`, the clip stays in `RAW` state and will not be processed.
+`Frames/` holds the green screen input frames. `AlphaHint/` holds the corresponding alpha matte frames, one per input frame. The frame count in both folders must match exactly.
 
 ## Multiple Clips
 
-To process several shots in one session, put each clip in its own subfolder and point the wizard at the parent:
+Put each clip in its own subfolder and point the wizard at the parent:
 
 ```text
 session/
     actor_jump/
-        Frames/
-            frame_0001.png
-            ...
-        AlphaHint/
-            frame_0001.png
-            ...
+        actor_jump.mp4
+        actor_jump_alpha.mp4
     product_spin/
         Frames/
             frame_0001.png
@@ -48,23 +72,26 @@ session/
 corridorkey wizard /path/to/session
 ```
 
-The wizard will find both clips and show them in the state table.
+Video and sequence clips can be mixed in the same session.
 
 ## Alpha Hint Format
 
-The alpha hint frames are greyscale images where white (255) is fully opaque and black (0) is fully transparent. PNG is the recommended format. EXR is also accepted.
+The alpha hint is a greyscale video or image sequence where white is fully opaque and black is fully transparent. PNG is the recommended format for sequences. Any standard video codec works for video alpha.
 
-The alpha hint does not need to be a perfect matte. It is used as a hint to guide the model. A rough garbage matte or a simple threshold mask is sufficient.
+The alpha hint does not need to be a perfect matte. A rough garbage matte or a simple threshold mask is sufficient as a hint to guide the model.
 
 ## Supported Input Formats
 
-Input frames in `Frames/` can be PNG, JPEG, TIFF, or OpenEXR. All frames in a clip must use the same format and resolution.
+| Type | Formats |
+|---|---|
+| Video | MP4, MOV, MKV, AVI, and any format FFmpeg can decode |
+| Image sequence | PNG, JPEG, TIFF, OpenEXR |
 
-For best quality use PNG or EXR. JPEG compression introduces artefacts that can affect matte edges.
+All frames in a sequence clip must use the same format and resolution.
 
 If your input frames are linear light (e.g. EXR from a camera or renderer), enable `input_is_linear` in the wizard settings.
 
-## Frame Naming
+## Frame Naming (Sequences)
 
 Frames must be numbered sequentially. Any consistent zero-padded naming works:
 
@@ -76,13 +103,18 @@ The names in `Frames/` and `AlphaHint/` do not need to match each other. The pip
 
 ## Checking Clip State
 
-Run `corridorkey scan` to verify your clips are in `READY` state before processing:
+Run `corridorkey scan` to verify your clips before processing:
 
 ```shell
 corridorkey scan /path/to/session
 ```
 
-A clip showing `RAW` means `AlphaHint/` is missing or empty. A clip showing `READY` is good to go.
+| State | Meaning |
+|---|---|
+| EXTRACTING | Video detected, frames not yet extracted. Will extract automatically. |
+| READY | Has frames and alpha hint. Ready for inference. |
+| RAW | Has frames but no alpha hint. Needs an alpha generator. |
+| COMPLETE | Already processed. |
 
 ## Related
 
