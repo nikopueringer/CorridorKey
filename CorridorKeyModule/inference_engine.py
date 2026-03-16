@@ -241,7 +241,7 @@ class CorridorKeyEngine:
         bg_srgb_3 = bg_srgb.unsqueeze(-1).expand(-1, -1, 3)
         return cu.srgb_to_linear(bg_srgb_3)
 
-    def _postprocess_gpu(
+    def _postprocess_torch(
         self,
         pred_alpha: torch.Tensor,
         pred_fg: torch.Tensor,
@@ -251,6 +251,7 @@ class CorridorKeyEngine:
         despill_strength: float,
         auto_despeckle: bool,
         despeckle_size: int,
+        generate_comp: bool = False,
     ) -> list[dict[str, np.ndarray]]:
         """Post-process on GPU, transfer final results to CPU.
 
@@ -260,61 +261,65 @@ class CorridorKeyEngine:
         ``.resolve()`` to get the numpy dict later.
         """
         # Resize on GPU using F.interpolate (much faster than cv2 at 4K)
-        alpha_up = TF.resize(
+        alpha = TF.resize(
             pred_alpha.float(),
             [h, w],
             interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
         )
-        fg_up = TF.resize(
+        fg = TF.resize(
             pred_fg.float(),
             [h, w],
             interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
         )
 
         # Convert to HWC on GPU
-        res_alpha = alpha_up.permute(0, 2, 3, 1)  # [B, H, W, 1]
-        res_fg = fg_up.permute(0, 2, 3, 1)  # [B, H, W, 3]
+        alpha = alpha.permute(0, 2, 3, 1)  # [B, H, W, 1]
+        fg = fg.permute(0, 2, 3, 1)  # [B, H, W, 3]
 
         # A. Clean matte
         if auto_despeckle:
-            processed_alpha = self._clean_matte_gpu(res_alpha, despeckle_size, dilation=25, blur_size=5)
+            processed_alpha = self._clean_matte_gpu(alpha, despeckle_size, dilation=25, blur_size=5)
         else:
-            processed_alpha = res_alpha
+            processed_alpha = alpha
 
         # B. Despill on GPU
-        fg_despilled = self._despill_gpu(res_fg, despill_strength)
+        processed_fg = self._despill_gpu(fg, despill_strength)
 
         # C. sRGB → linear on GPU
-        fg_despilled_lin = cu.srgb_to_linear(fg_despilled)
+        processed_fg = cu.srgb_to_linear(processed_fg)
 
         # D. Premultiply on GPU
-        fg_premul_lin = cu.premultiply(fg_despilled_lin, processed_alpha)
+        processed_fg = cu.premultiply(processed_fg, processed_alpha)
 
         # E. Pack RGBA on GPU
-        processed_rgba = torch.cat([fg_premul_lin, processed_alpha], dim=-1)
+        packed_processed = torch.cat([processed_fg, processed_alpha], dim=-1)
 
         # F. Composite
-        bg_lin = self._get_checkerboard_linear_gpu(w, h)
-        if fg_is_straight:
-            comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+        if generate_comp:
+            bg_lin = self._get_checkerboard_linear_gpu(w, h)
+            if fg_is_straight:
+                comp = cu.composite_straight(processed_fg, bg_lin, processed_alpha)
+            else:
+                comp = cu.composite_premul(processed_fg, bg_lin, processed_alpha)
+            comp = cu.linear_to_srgb(comp)  # [H, W, 3] opaque
         else:
-            comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
-        comp_srgb = cu.linear_to_srgb(comp_lin)  # [H, W, 3] opaque
+            del processed_fg, processed_alpha
+            comp = torch.zeros(h, w, 3, device=fg.device, dtype=fg.dtype)
 
-        res_alpha, res_fg, comp_srgb, processed_rgba = (
-            res_alpha.cpu(),
-            res_fg.cpu(),
-            comp_srgb.cpu(),
-            processed_rgba.cpu(),
+        alpha, fg, comp, packed_processed = (
+            alpha.cpu().numpy(),
+            fg.cpu().numpy(),
+            comp.cpu().numpy(),
+            packed_processed.cpu().numpy(),
         )
 
         out = []
-        for i in range(res_alpha.shape[0]):
+        for i in range(alpha.shape[0]):
             result = {
-                "alpha": res_alpha[i].numpy(),
-                "fg": res_fg[i].numpy(),
-                "comp": comp_srgb[i].numpy(),
-                "processed": processed_rgba[i].numpy(),
+                "alpha": alpha[i],
+                "fg": fg[i],
+                "comp": comp[i],
+                "processed": packed_processed[i],
             }
             out.append(result)
         return out
@@ -452,7 +457,7 @@ class CorridorKeyEngine:
         pred_alpha = prediction["alpha"].float()
         pred_fg = prediction["fg"].float()  # Output is sRGB (Sigmoid)
 
-        return self._postprocess_gpu(
+        return self._postprocess_torch(
             pred_alpha, pred_fg, w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
         )[0]
 
@@ -535,7 +540,7 @@ class CorridorKeyEngine:
         if handle:
             handle.remove()
 
-        out = self._postprocess_gpu(
+        out = self._postprocess_torch(
             prediction["alpha"], prediction["fg"], w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
         )
 
