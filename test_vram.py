@@ -21,6 +21,8 @@ def batch_process_frame(engine: CorridorKeyEngine, batch_size: int):
 
 
 def test_vram():
+    torch.backends.cudnn.benchmark = True
+
     print("Loading engine...")
     engine = CorridorKeyEngine(
         checkpoint_path="CorridorKeyModule/checkpoints/CorridorKey_v1.0.pth",
@@ -33,13 +35,19 @@ def test_vram():
     # Reset stats
     torch.cuda.reset_peak_memory_stats()
 
-    iterations = 24
-    batch_size = 6  # works with a 16GB GPU
+    total_seconds = 6
+    batch_size = 2  # works with a 16GB GPU
+    iterations = total_seconds * 24 // batch_size
     print(f"Running {iterations} inference passes...")
     time = timeit.timeit(
         lambda: batch_process_frame(engine, batch_size),
         number=iterations,
-        setup=lambda: batch_process_frame(engine, batch_size),
+        setup=lambda: (
+            batch_process_frame(engine, batch_size),
+            torch.cuda.synchronize(),
+            torch.cuda.empty_cache(),
+            print("Compilation and warmup complete, starting timed runs..."),
+        ),
     )
     print(f"Seconds per frame: {time / (iterations * batch_size):.4f}")
 
