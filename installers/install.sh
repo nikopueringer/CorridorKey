@@ -15,7 +15,7 @@ RED='\033[0;31m'
 RESET='\033[0m'
 
 step() { echo -e "\n${CYAN}>>> $*${RESET}"; }
-ok()   { echo -e "    ${GREEN}[OK]${RESET} $*"; }
+ok() { echo -e "    ${GREEN}[OK]${RESET} $*"; }
 warn() { echo -e "    ${YELLOW}[WARN]${RESET} $*"; }
 fail() { echo -e "\n    ${RED}[ERROR]${RESET} $*"; }
 
@@ -32,35 +32,47 @@ echo ""
 
 # On Apple Silicon, MLX is the only sensible GPU option - skip the NVIDIA choice
 if [[ "$SYSTEM" == "Darwin" && "$ARCH" == "arm64" ]]; then
-    echo "Which build would you like to install?"
-    echo ""
-    echo "  [1] Apple Silicon - M1/M2/M3/M4 (MLX)  <-- recommended for this Mac"
-    echo "  [2] CPU only"
-    echo ""
-    CHOICES=("1" "2")
-    CHOICE=""
-    while [[ ! " ${CHOICES[*]} " =~ " $CHOICE " ]]; do
-        read -rp "Enter choice [1/2]: " CHOICE
-    done
-    case "$CHOICE" in
-        1) PACKAGE="corridorkey-cli[mlx]"; BACKEND="Apple Silicon (MLX)" ;;
-        2) PACKAGE="corridorkey-cli";      BACKEND="CPU" ;;
-    esac
+  echo "Which build would you like to install?"
+  echo ""
+  echo "  [1] Apple Silicon - M1/M2/M3/M4 (MLX)  <-- recommended for this Mac"
+  echo "  [2] CPU only"
+  echo ""
+  CHOICES=("1" "2")
+  CHOICE=""
+  while [[ ! " ${CHOICES[*]} " =~ $CHOICE ]]; do
+    read -rp "Enter choice [1/2]: " CHOICE
+  done
+  case "$CHOICE" in
+  1)
+    PACKAGE="corridorkey-cli[mlx]"
+    BACKEND="Apple Silicon (MLX)"
+    ;;
+  2)
+    PACKAGE="corridorkey-cli"
+    BACKEND="CPU"
+    ;;
+  esac
 else
-    echo "Which GPU do you have?"
-    echo ""
-    echo "  [1] NVIDIA GPU (CUDA)"
-    echo "  [2] No GPU / CPU only"
-    echo ""
-    CHOICES=("1" "2")
-    CHOICE=""
-    while [[ ! " ${CHOICES[*]} " =~ " $CHOICE " ]]; do
-        read -rp "Enter choice [1/2]: " CHOICE
-    done
-    case "$CHOICE" in
-        1) PACKAGE="corridorkey-cli[cuda]"; BACKEND="NVIDIA (CUDA)" ;;
-        2) PACKAGE="corridorkey-cli";       BACKEND="CPU" ;;
-    esac
+  echo "Which GPU do you have?"
+  echo ""
+  echo "  [1] NVIDIA GPU (CUDA)"
+  echo "  [2] No GPU / CPU only"
+  echo ""
+  CHOICES=("1" "2")
+  CHOICE=""
+  while [[ ! " ${CHOICES[*]} " =~ $CHOICE ]]; do
+    read -rp "Enter choice [1/2]: " CHOICE
+  done
+  case "$CHOICE" in
+  1)
+    PACKAGE="corridorkey-cli[cuda]"
+    BACKEND="NVIDIA (CUDA)"
+    ;;
+  2)
+    PACKAGE="corridorkey-cli"
+    BACKEND="CPU"
+    ;;
+  esac
 fi
 
 echo ""
@@ -69,24 +81,24 @@ ok "Selected: $BACKEND"
 step "Checking for uv package manager..."
 
 if ! command -v uv &>/dev/null; then
-    echo "    uv not found. Installing..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
+  echo "    uv not found. Installing..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
 
-    if ! command -v uv &>/dev/null; then
-        fail "uv was installed but is not on PATH."
-        echo "    Close this terminal, open a new one, and run this script again."
-        exit 1
-    fi
+  if ! command -v uv &>/dev/null; then
+    fail "uv was installed but is not on PATH."
+    echo "    Close this terminal, open a new one, and run this script again."
+    exit 1
+  fi
 fi
 ok "uv is ready."
 
 step "Installing $PACKAGE..."
 
 if ! uv tool install "$PACKAGE" --python 3.13; then
-    fail "Installation failed."
-    echo "    Try the CPU build: uv tool install corridorkey-cli"
-    exit 1
+  fail "Installation failed."
+  echo "    Try the CPU build: uv tool install corridorkey-cli"
+  exit 1
 fi
 ok "corridorkey-cli installed."
 
@@ -100,20 +112,20 @@ step "Creating Desktop launcher..."
 
 DESKTOP_DIR=""
 if [[ "$SYSTEM" == "Darwin" ]]; then
-    DESKTOP_DIR="$HOME/Desktop"
+  DESKTOP_DIR="$HOME/Desktop"
 elif [[ -d "$HOME/Desktop" ]]; then
-    DESKTOP_DIR="$HOME/Desktop"
+  DESKTOP_DIR="$HOME/Desktop"
 elif [[ -n "${XDG_DESKTOP_DIR:-}" && -d "$XDG_DESKTOP_DIR" ]]; then
-    DESKTOP_DIR="$XDG_DESKTOP_DIR"
+  DESKTOP_DIR="$XDG_DESKTOP_DIR"
 fi
 
 if [[ -z "$DESKTOP_DIR" ]]; then
-    warn "Could not locate Desktop directory. Skipping launcher creation."
-    warn "Run manually with: corridorkey wizard /path/to/clips"
+  warn "Could not locate Desktop directory. Skipping launcher creation."
+  warn "Run manually with: corridorkey wizard /path/to/clips"
 else
-    if [[ "$SYSTEM" == "Darwin" ]]; then
-        LAUNCHER="$DESKTOP_DIR/CorridorKey.command"
-        cat > "$LAUNCHER" << 'LAUNCHER_EOF'
+  if [[ "$SYSTEM" == "Darwin" ]]; then
+    LAUNCHER="$DESKTOP_DIR/CorridorKey.command"
+    cat >"$LAUNCHER" <<'LAUNCHER_EOF'
 #!/usr/bin/env bash
 # CorridorKey launcher - drag a clips folder onto this in Finder
 if [[ -z "${1:-}" ]]; then
@@ -136,14 +148,14 @@ echo ""
 corridorkey wizard "$TARGET"
 read -rp "Press Enter to close..."
 LAUNCHER_EOF
-        chmod +x "$LAUNCHER"
-        ok "Launcher created: $LAUNCHER"
-        echo "    Drag a clips folder onto 'CorridorKey.command' on your Desktop."
+    chmod +x "$LAUNCHER"
+    ok "Launcher created: $LAUNCHER"
+    echo "    Drag a clips folder onto 'CorridorKey.command' on your Desktop."
 
-    else
-        # Linux .desktop file
-        LAUNCHER="$DESKTOP_DIR/CorridorKey.desktop"
-        cat > "$LAUNCHER" << DESKTOP_EOF
+  else
+    # Linux .desktop file
+    LAUNCHER="$DESKTOP_DIR/CorridorKey.desktop"
+    cat >"$LAUNCHER" <<DESKTOP_EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
@@ -155,11 +167,11 @@ Terminal=true
 Categories=Graphics;Video;
 MimeType=inode/directory;
 DESKTOP_EOF
-        chmod +x "$LAUNCHER"
-        ok "Launcher created: $LAUNCHER"
-        echo "    Drag a clips folder onto 'CorridorKey' on your Desktop."
-        warn "Some Linux desktops may ask you to trust the launcher on first run."
-    fi
+    chmod +x "$LAUNCHER"
+    ok "Launcher created: $LAUNCHER"
+    echo "    Drag a clips folder onto 'CorridorKey' on your Desktop."
+    warn "Some Linux desktops may ask you to trust the launcher on first run."
+  fi
 fi
 
 echo ""
