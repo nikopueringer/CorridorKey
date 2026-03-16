@@ -85,6 +85,7 @@ def read_video_frame_at(
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
         if not ret:
+            logger.warning("Could not read video frame %d from: %s", frame_index, video_path)
             return None
         return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     finally:

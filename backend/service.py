@@ -193,7 +193,7 @@ class CorridorKeyService:
             if not torch.cuda.is_available():
                 return {}
             props = torch.cuda.get_device_properties(0)
-            total_bytes = props.total_mem
+            total_bytes = props.total_memory
             reserved = torch.cuda.memory_reserved(0)
             return {
                 "total": total_bytes / (1024**3),

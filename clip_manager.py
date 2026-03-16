@@ -150,7 +150,7 @@ class ClipEntry:
 
         if target_alpha_dir:
             if not os.listdir(target_alpha_dir):
-                logging.warning(f"Clip '{self.name}': AlphaHint directory exists but is empty. Marking for generation.")
+                logger.warning(f"Clip '{self.name}': AlphaHint directory exists but is empty. Marking for generation.")
                 self.alpha_asset = None
             else:
                 # Check for image sequence first
@@ -161,7 +161,7 @@ class ClipEntry:
                     if video_candidates:
                         self.alpha_asset = ClipAsset(os.path.join(target_alpha_dir, video_candidates[0]), "video")
                     else:
-                        logging.warning(
+                        logger.warning(
                             f"Clip '{self.name}': AlphaHint directory has no valid image or video files."
                             " Marking for generation."
                         )
@@ -598,6 +598,7 @@ def run_inference(
     device=None,
     backend=None,
     max_frames=None,
+    skip_existing=False,
     settings: InferenceSettings | None = None,
     *,
     on_clip_start: Callable[[str, int], None] | None = None,
@@ -670,7 +671,23 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
+        skipped_count = 0
+
         for i in range(num_frames):
+            # Pre-compute output stem for skip-existing check (mirrors how input_stem
+            # is set later: video -> zero-padded index, sequence -> file stem)
+            if clip.input_asset.type == "video":
+                expected_stem = f"{i:05d}"
+            else:
+                expected_stem = os.path.splitext(input_files[i])[0]
+
+            if skip_existing and os.path.exists(os.path.join(comp_dir, f"{expected_stem}.png")):
+                logger.debug("Frame %d already rendered, skipping.", i)
+                skipped_count += 1
+                if on_frame_complete:
+                    on_frame_complete(i, num_frames)
+                continue
+
             # 1. Read Input
             img_srgb = None
             input_stem = f"{i:05d}"
@@ -785,6 +802,13 @@ def run_inference(
             input_cap.release()
         if alpha_cap:
             alpha_cap.release()
+
+        if skip_existing and skipped_count > 0:
+            logger.info(
+                "  Skipped %d of %d frames (outputs already exist).",
+                skipped_count,
+                num_frames,
+            )
 
         # 7. Stitch comp frames into MP4 (if input was video)
         if clip.input_asset and clip.input_asset.type == "video":
@@ -958,14 +982,11 @@ def scan_clips() -> list[ClipEntry]:
             invalid_clips.append((d, f"Unexpected error: {e}"))
 
     if invalid_clips:
-        print("\n" + "=" * 60)
-        print(" INVALID OR SKIPPED CLIPS")
-        print("=" * 60)
+        logger.warning("INVALID OR SKIPPED CLIPS:")
         for name, reason in invalid_clips:
-            print(f"- {name}: {reason}")
-        print("=" * 60 + "\n")
+            logger.warning("  - %s: %s", name, reason)
     else:
-        print("\nAll clip folders appear valid.\n")
+        logger.info("All clip folders appear valid.")
 
     return valid_clips
 

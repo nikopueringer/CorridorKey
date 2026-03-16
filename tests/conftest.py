@@ -2,6 +2,7 @@
 
 import platform
 import sys
+from types import ModuleType
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -118,6 +119,14 @@ def tmp_clip_dir(tmp_path):
 
     cv2.imwrite(str(shot_b / "Input" / "frame_0000.png"), tiny_img)
 
+    # shot_c: Valid candidate (2 frames + Mask sequence)
+    shot_c = tmp_path / "shot_c"
+    for subdir in ["Input", "VideoMamaMaskHint"]:
+        (shot_c / subdir).mkdir(parents=True)
+    for i in range(2):
+        cv2.imwrite(str(shot_c / "Input" / f"frame_{i:04d}.png"), tiny_img)
+        cv2.imwrite(str(shot_c / "VideoMamaMaskHint" / f"mask_{i:04d}.png"), tiny_mask)
+
     return tmp_path
 
 
@@ -146,3 +155,83 @@ def mock_greenformer():
     model.refiner = None
     model.use_refiner = False
     return model
+
+
+# ---------------------------------------------------------------------------
+# VideoMaMa Backend & Staging Fixtures (used by clip_manager tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def silent_backend_injection(monkeypatch):
+    """
+    Mock the inference module globally to prevent real AI loading.
+    """
+
+    parent_mod = ModuleType("VideoMaMaInferenceModule")
+    inference_mod = ModuleType("VideoMaMaInferenceModule.inference")
+
+    def fake_load(device=None):
+        return "fake_handle"
+
+    def fake_run(pipeline, input_frames, mask_frames, **kwargs):
+        yield [np.full_like(f, 255) for f in input_frames]
+
+    inference_mod.load_videomama_model = fake_load
+    inference_mod.run_inference = fake_run
+    monkeypatch.setitem(sys.modules, "VideoMaMaInferenceModule", parent_mod)
+    monkeypatch.setitem(sys.modules, "VideoMaMaInferenceModule.inference", inference_mod)
+
+    yield
+
+
+@pytest.fixture
+def stage_shot(tmp_path):
+    """
+    STAGING: Physically builds the shot directory on demand.
+    Ensures ClipEntry finds its folders regardless of casing/regex.
+    """
+    import cv2
+
+    def _stage(shot_name, create_alpha=False):
+        shot_path = tmp_path / shot_name
+        shot_path.mkdir(parents=True, exist_ok=True)
+
+        for folder_variant in ["Input", "input"]:
+            in_dir = shot_path / folder_variant
+            in_dir.mkdir(exist_ok=True)
+            for i in range(2):
+                img = np.zeros((4, 4, 3), dtype=np.uint8)
+                cv2.imwrite(str(in_dir / f"frame_{i:04d}.png"), img)
+
+        for mask_variant in ["VideoMamaMaskHint", "videomamamaskhint"]:
+            mask_dir = shot_path / mask_variant
+            mask_dir.mkdir(exist_ok=True)
+            cv2.imwrite(str(mask_dir / "mask_0000.png"), np.zeros((4, 4), np.uint8))
+            cv2.imwrite(str(mask_dir / "mask_0001.png"), np.zeros((4, 4), np.uint8))
+
+        if create_alpha:
+            a_dir = shot_path / "AlphaHint"
+            a_dir.mkdir(exist_ok=True)
+            cv2.imwrite(str(a_dir / "frame_0000.png"), np.zeros((4, 4), np.uint8))
+
+        return shot_path
+
+    return _stage
+
+
+@pytest.fixture(autouse=True)
+def sandbox_clip_manager(tmp_path, monkeypatch):
+    """
+    Forces all clip_manager operations into a temporary sandbox.
+    Prevents tests from touching real project files.
+    """
+    import clip_manager
+
+    sandbox = tmp_path / "Clips"
+    sandbox.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(sandbox))
+    monkeypatch.setattr(clip_manager, "organize_clips", MagicMock())
+
+    yield sandbox
