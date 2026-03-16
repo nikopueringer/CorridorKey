@@ -5,9 +5,13 @@ import glob
 import logging
 import os
 import shutil
+import statistics
 import sys
+import threading
+import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from queue import Queue
+from typing import TYPE_CHECKING, Callable, ClassVar
 
 # Enable OpenEXR support in OpenCV — needed for EXR I/O throughout the pipeline.
 # Must be set before any cv2.imread/imwrite calls on .exr files.
@@ -16,7 +20,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
-from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
+from backend.frame_io import EXR_WRITE_FLAGS, EXR_WRITE_FLAGS_FAST
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -38,7 +42,16 @@ class InferenceSettings:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"})
+    fast_exr: bool = False
 
+    VALID_OUTPUTS: ClassVar[frozenset[str]] = frozenset({"fg", "matte", "comp", "processed"})
+
+
+# Async I/O pipeline depth: allows one frame to be read ahead while another
+# is being inferred, hiding I/O latency behind GPU compute. Depth of 2
+# gives double-buffering without excessive memory usage.
+_ASYNC_QUEUE_DEPTH = 2
 
 # Core Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -150,7 +163,7 @@ class ClipEntry:
 
         if target_alpha_dir:
             if not os.listdir(target_alpha_dir):
-                logger.warning(f"Clip '{self.name}': AlphaHint directory exists but is empty. Marking for generation.")
+                logging.warning(f"Clip '{self.name}': AlphaHint directory exists but is empty. Marking for generation.")
                 self.alpha_asset = None
             else:
                 # Check for image sequence first
@@ -161,7 +174,7 @@ class ClipEntry:
                     if video_candidates:
                         self.alpha_asset = ClipAsset(os.path.join(target_alpha_dir, video_candidates[0]), "video")
                     else:
-                        logger.warning(
+                        logging.warning(
                             f"Clip '{self.name}': AlphaHint directory has no valid image or video files."
                             " Marking for generation."
                         )
@@ -593,6 +606,161 @@ def run_videomama(
             traceback.print_exc()
 
 
+_SKIP_SENTINEL = "skipped"
+
+
+def _reader_worker(
+    read_q: Queue,
+    num_frames: int,
+    input_cap: cv2.VideoCapture | None,
+    alpha_cap: cv2.VideoCapture | None,
+    input_files: list[str],
+    alpha_files: list[str],
+    input_asset_path: str,
+    alpha_asset_path: str,
+    input_is_linear: bool,
+    error_event: threading.Event,
+    skip_existing: bool = False,
+    comp_dir: str = "",
+    is_video: bool = False,
+):
+    """Decode input + alpha frames and enqueue them for inference."""
+    from backend.frame_io import read_image_frame, read_mask_frame
+
+    try:
+        for frame_index in range(num_frames):
+            if error_event.is_set():
+                break
+
+            # Compute stem before reading so we can check skip_existing
+            if is_video:
+                frame_stem = f"{frame_index:05d}"
+            else:
+                frame_stem = os.path.splitext(input_files[frame_index])[0]
+
+            # Skip frames whose output already exists (resume partial render)
+            if skip_existing and os.path.exists(os.path.join(comp_dir, f"{frame_stem}.png")):
+                # Still need to advance video captures to stay in sync
+                if input_cap:
+                    input_cap.read()
+                if alpha_cap:
+                    alpha_cap.read()
+                read_q.put((frame_index, frame_stem, _SKIP_SENTINEL, None, 0.0))
+                continue
+
+            read_start = time.perf_counter()
+            frame_rgb = None
+            alpha_mask = None
+
+            # -- Read input frame --
+            if input_cap:
+                ret, raw_frame = input_cap.read()
+                if not ret:
+                    break
+                frame_rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            else:
+                fpath = os.path.join(input_asset_path, input_files[frame_index])
+                # gamma_correct_exr: EXR files are linear, but the model expects sRGB.
+                # If input_is_linear is True, the engine handles the conversion itself,
+                # so we only gamma-correct when the caller says the input is sRGB.
+                frame_rgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
+
+            # -- Read alpha mask --
+            if alpha_cap:
+                ret, raw_frame = alpha_cap.read()
+                if not ret:
+                    break
+                # Alpha videos store the mask in the blue channel by convention
+                alpha_mask = raw_frame[:, :, 2].astype(np.float32) / 255.0
+            else:
+                fpath = os.path.join(alpha_asset_path, alpha_files[frame_index])
+                alpha_mask = read_mask_frame(fpath)
+
+            if frame_rgb is None or alpha_mask is None:
+                logger.warning("Skipping frame %d: failed to read input or mask", frame_index)
+                read_q.put((frame_index, frame_stem, None, None, 0.0))
+                continue
+
+            # Resize mask to match input dimensions if they differ
+            # (e.g. alpha hint generated at different resolution)
+            if alpha_mask.shape[:2] != frame_rgb.shape[:2]:
+                alpha_mask = cv2.resize(
+                    alpha_mask, (frame_rgb.shape[1], frame_rgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                )
+
+            read_elapsed = time.perf_counter() - read_start
+            read_q.put((frame_index, frame_stem, frame_rgb, alpha_mask, read_elapsed))
+    except Exception as e:
+        logger.error("Reader thread error: %s", e)
+        error_event.set()
+    finally:
+        read_q.put(None)  # sentinel
+
+
+def _writer_worker(
+    write_q: Queue,
+    fg_dir: str,
+    matte_dir: str,
+    comp_dir: str,
+    proc_dir: str,
+    phase_times: dict,
+    error_event: threading.Event,
+    enabled_outputs: frozenset[str] = frozenset({"fg", "matte", "comp", "processed"}),
+    fast_exr: bool = False,
+):
+    """Write inference results to disk in a background thread.
+
+    Runs concurrently with inference on the main thread — while the GPU
+    processes frame N+1, this thread writes frame N to disk.
+    """
+    exr_flags = EXR_WRITE_FLAGS_FAST if fast_exr else EXR_WRITE_FLAGS
+    try:
+        while True:
+            item = write_q.get()
+            if item is None:
+                break
+            if error_event.is_set():
+                break
+
+            frame_index, frame_stem, inference_result, inference_elapsed, mlx_phase_timing = item
+            phase_times["infer"].append(inference_elapsed)
+
+            # MLX adapter provides per-phase timing; Torch engine passes None
+            if mlx_phase_timing and "postprocess" in mlx_phase_timing:
+                phase_times["postprocess"].append(mlx_phase_timing["postprocess"])
+
+            write_start = time.perf_counter()
+
+            alpha_matte = inference_result["alpha"]
+            if alpha_matte.ndim == 3:
+                alpha_matte = alpha_matte[:, :, 0]
+
+            if "fg" in enabled_outputs:
+                fg_bgr = cv2.cvtColor(inference_result["fg"], cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(fg_dir, f"{frame_stem}.exr"), fg_bgr, exr_flags)
+
+            if "matte" in enabled_outputs:
+                cv2.imwrite(os.path.join(matte_dir, f"{frame_stem}.exr"), alpha_matte, exr_flags)
+
+            if "comp" in enabled_outputs and "comp" in inference_result:
+                composite_srgb = inference_result["comp"]
+                composite_bgr = cv2.cvtColor(
+                    (np.clip(composite_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR
+                )
+                cv2.imwrite(os.path.join(comp_dir, f"{frame_stem}.png"), composite_bgr)
+
+            if "processed" in enabled_outputs and "processed" in inference_result:
+                processed_rgba = inference_result["processed"]
+                processed_bgra = cv2.cvtColor(processed_rgba, cv2.COLOR_RGBA2BGRA)
+                cv2.imwrite(os.path.join(proc_dir, f"{frame_stem}.exr"), processed_bgra, exr_flags)
+
+            write_elapsed = time.perf_counter() - write_start
+            phase_times["write"].append(write_elapsed)
+    except Exception as e:
+        logger.error(f"Writer thread error: {e}")
+        error_event.set()
+
+
 def run_inference(
     clips,
     device=None,
@@ -619,8 +787,6 @@ def run_inference(
     # Ensure Output Directory exists
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    import numpy as np
 
     if device is None:
         device = resolve_device()
@@ -671,132 +837,138 @@ def run_inference(
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
 
+        # Per-phase timing for the benchmark summary at the end.
+        # Each list is only appended by a single thread (read→main, others→writer),
+        # so no cross-thread contention exists regardless of GIL.
+        phase_times: dict[str, list[float]] = {"read": [], "infer": [], "postprocess": [], "write": []}
+
+        # Async I/O pipeline: three concurrent stages connected by queues.
+        #   reader thread → [read_q] → main thread (inference) → [write_q] → writer thread
+        # This hides disk I/O latency behind GPU compute time.
+        read_q: Queue = Queue(maxsize=_ASYNC_QUEUE_DEPTH)
+        write_q: Queue = Queue(maxsize=_ASYNC_QUEUE_DEPTH)
+        error_event = threading.Event()
+
+        reader = threading.Thread(
+            target=_reader_worker,
+            args=(
+                read_q,
+                num_frames,
+                input_cap,
+                alpha_cap,
+                input_files,
+                alpha_files,
+                clip.input_asset.path,
+                clip.alpha_asset.path,
+                settings.input_is_linear,
+                error_event,
+                skip_existing,
+                comp_dir,
+                clip.input_asset.type == "video",
+            ),
+            daemon=True,
+        )
+        writer = threading.Thread(
+            target=_writer_worker,
+            args=(
+                write_q,
+                fg_dir,
+                matte_dir,
+                comp_dir,
+                proc_dir,
+                phase_times,
+                error_event,
+                settings.enabled_outputs,
+                settings.fast_exr,
+            ),
+            daemon=True,
+        )
+
+        reader.start()
+        writer.start()
+
+        # Main thread runs inference — the GPU-bound bottleneck.
+        # Reader and writer threads handle I/O concurrently.
         skipped_count = 0
-
-        for i in range(num_frames):
-            # Pre-compute output stem for skip-existing check (mirrors how input_stem
-            # is set later: video -> zero-padded index, sequence -> file stem)
-            if clip.input_asset.type == "video":
-                expected_stem = f"{i:05d}"
-            else:
-                expected_stem = os.path.splitext(input_files[i])[0]
-
-            if skip_existing and os.path.exists(os.path.join(comp_dir, f"{expected_stem}.png")):
-                logger.debug("Frame %d already rendered, skipping.", i)
-                skipped_count += 1
-                if on_frame_complete:
-                    on_frame_complete(i, num_frames)
-                continue
-
-            # 1. Read Input
-            img_srgb = None
-            input_stem = f"{i:05d}"
-
-            # Use the settings-defined gamma
-            input_is_linear = settings.input_is_linear
-
-            if input_cap:
-                ret, frame = input_cap.read()
-                if not ret:
+        try:
+            while True:
+                item = read_q.get()
+                if item is None or error_event.is_set():
                     break
-                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img_srgb = img_rgb.astype(np.float32) / 255.0
-                input_stem = f"{i:05d}"
-            else:
-                fpath = os.path.join(clip.input_asset.path, input_files[i])
-                input_stem = os.path.splitext(input_files[i])[0]
 
-                is_exr = fpath.lower().endswith(".exr")
-                if is_exr:
-                    img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
-                    if img_srgb is None:
-                        continue
-                else:
-                    img_bgr = cv2.imread(fpath)
-                    if img_bgr is None:
-                        continue
-                    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                    img_srgb = img_rgb.astype(np.float32) / 255.0
+                frame_index, frame_stem, frame_rgb, alpha_mask, read_elapsed = item
 
-            # 2. Read Alpha (Mask)
-            mask_linear = None
-            if alpha_cap:
-                ret, frame = alpha_cap.read()
-                if not ret:
-                    break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
-            else:
-                fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
-                mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
-
-                if mask_in is None:
+                # Skip sentinel: output already exists (--skip-existing)
+                if frame_rgb is _SKIP_SENTINEL:
+                    skipped_count += 1
+                    if on_frame_complete:
+                        on_frame_complete(frame_index, num_frames)
                     continue
 
-                if mask_in.ndim == 3:
-                    if mask_in.shape[2] == 3:
-                        mask_linear = mask_in[:, :, 0]
-                    else:
-                        mask_linear = mask_in
-                else:
-                    mask_linear = mask_in
+                phase_times["read"].append(read_elapsed)
 
-                if mask_linear.dtype == np.uint8:
-                    mask_linear = mask_linear.astype(np.float32) / 255.0
-                elif mask_linear.dtype == np.uint16:
-                    mask_linear = mask_linear.astype(np.float32) / 65535.0
-                else:
-                    mask_linear = mask_linear.astype(np.float32)
+                # Skip sentinel: reader couldn't decode this frame
+                if frame_rgb is None or alpha_mask is None:
+                    logger.warning("Main thread: skipping frame %d (read failure)", frame_index)
+                    if on_frame_complete:
+                        on_frame_complete(frame_index, num_frames)
+                    continue
 
-            if mask_linear.shape[:2] != img_srgb.shape[:2]:
-                mask_linear = cv2.resize(
-                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                inference_start = time.perf_counter()
+                inference_result = engine.process_frame(
+                    frame_rgb,
+                    alpha_mask,
+                    input_is_linear=settings.input_is_linear,
+                    fg_is_straight=True,
+                    despill_strength=settings.despill_strength,
+                    auto_despeckle=settings.auto_despeckle,
+                    despeckle_size=settings.despeckle_size,
+                    refiner_scale=settings.refiner_scale,
+                    enabled_outputs=settings.enabled_outputs,
                 )
+                inference_elapsed = time.perf_counter() - inference_start
 
-            # 3. Process
-            USE_STRAIGHT_MODEL = True
-            res = engine.process_frame(
-                img_srgb,
-                mask_linear,
-                input_is_linear=input_is_linear,
-                fg_is_straight=USE_STRAIGHT_MODEL,
-                despill_strength=settings.despill_strength,
-                auto_despeckle=settings.auto_despeckle,
-                despeckle_size=settings.despeckle_size,
-                refiner_scale=settings.refiner_scale,
+                # Both engines expose last_frame_timing (MLX populates it, Torch leaves it empty)
+                mlx_phase_timing = engine.last_frame_timing or None
+
+                if error_event.is_set():
+                    break
+                write_q.put((frame_index, frame_stem, inference_result, inference_elapsed, mlx_phase_timing))
+
+                if on_frame_complete:
+                    on_frame_complete(frame_index, num_frames)
+        finally:
+            # Sentinel unblocks writer — prevents deadlock if inference throws
+            write_q.put(None)
+
+        writer.join()
+        reader.join()
+
+        if error_event.is_set():
+            logger.error("Pipeline error — check reader/writer thread logs above")
+
+        # Log per-phase timing summary, skipping first frame (warmup includes
+        # model compilation, JIT, and cold GPU caches — not representative)
+        if len(phase_times["read"]) > 1:
+            warmup_skip = 1
+            steady_state_count = len(phase_times["read"]) - 1
+            logger.info(
+                f"--- Timing summary for {clip.name} (frames {warmup_skip}-{steady_state_count}, median ms) ---"
             )
-
-            pred_fg = res["fg"]  # sRGB
-            pred_alpha = res["alpha"]  # Linear
-
-            # 4. Save (EXR half-float, PXR24 compression — see backend/frame_io.py)
-
-            # Save FG
-            # pred_fg is RGB 0-1 float. Convert to BGR for OpenCV
-            fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(fg_dir, f"{input_stem}.exr"), fg_bgr, EXR_WRITE_FLAGS)
-
-            # Save Matte
-            if pred_alpha.ndim == 3:
-                pred_alpha = pred_alpha[:, :, 0]
-            # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
-
-            # 5. Generate Reference Comp
-            comp_srgb = res["comp"]
-            # Save Comp (PNG 8-bit)
-            comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
-
-            # 6. Save Processed (RGBA EXR)
-            if "processed" in res:
-                # Result is RGBA
-                proc_rgba = res["processed"]
-                # Convert to BGRA for OpenCV
-                proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
-
-            if on_frame_complete:
-                on_frame_complete(i, num_frames)
+            for phase_name, phase_durations in phase_times.items():
+                steady_durations = phase_durations[warmup_skip:]
+                if steady_durations:
+                    median_ms = statistics.median(steady_durations) * 1000
+                    total_ms = sum(steady_durations) * 1000
+                    logger.info(f"  {phase_name:>12s}: {median_ms:7.1f} ms/frame  |  {total_ms:8.1f} ms total")
+            # Sum all phases per-frame to get total pipeline time
+            all_steady = [
+                sum(t) for t in zip(*(durations[warmup_skip:] for durations in phase_times.values()), strict=False)
+            ]
+            if all_steady:
+                med_total = statistics.median(all_steady) * 1000
+                logger.info(f"  {'TOTAL':>12s}: {med_total:7.1f} ms/frame")
+            logger.info("---")
 
         if input_cap:
             input_cap.release()
@@ -982,11 +1154,14 @@ def scan_clips() -> list[ClipEntry]:
             invalid_clips.append((d, f"Unexpected error: {e}"))
 
     if invalid_clips:
-        logger.warning("INVALID OR SKIPPED CLIPS:")
+        print("\n" + "=" * 60)
+        print(" INVALID OR SKIPPED CLIPS")
+        print("=" * 60)
         for name, reason in invalid_clips:
-            logger.warning("  - %s: %s", name, reason)
+            print(f"- {name}: {reason}")
+        print("=" * 60 + "\n")
     else:
-        logger.info("All clip folders appear valid.")
+        print("\nAll clip folders appear valid.\n")
 
     return valid_clips
 

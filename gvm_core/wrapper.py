@@ -114,8 +114,7 @@ class GVMProcessor:
                          noise_type='zeros',
                          mode='matte',
                          write_video=True,
-                         direct_output_dir=None,
-                         progress_callback=None):
+                         direct_output_dir=None):
         """
         Process a single video or directory of images.
         """
@@ -275,9 +274,6 @@ class GVMProcessor:
 
             if writer_alpha: writer_alpha.write(alpha)
             writer_alpha_seq.write(alpha, filenames=filenames)
-
-            if progress_callback is not None:
-                progress_callback(batch_id + 1, len(dataloader))
         
         if writer_alpha: writer_alpha.close()
         writer_alpha_seq.close()

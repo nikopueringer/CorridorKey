@@ -31,6 +31,14 @@ EXR_WRITE_FLAGS = [
     cv2.IMWRITE_EXR_COMPRESSION_PXR24,
 ]
 
+# Fast EXR — uncompressed half-float (~10x faster writes, ~12% larger files)
+EXR_WRITE_FLAGS_FAST = [
+    cv2.IMWRITE_EXR_TYPE,
+    cv2.IMWRITE_EXR_TYPE_HALF,
+    cv2.IMWRITE_EXR_COMPRESSION,
+    cv2.IMWRITE_EXR_COMPRESSION_NO,
+]
+
 
 def read_image_frame(fpath: str, gamma_correct_exr: bool = False) -> np.ndarray | None:
     """Read an image file (EXR or standard) as float32 RGB [0, 1].
@@ -85,7 +93,6 @@ def read_video_frame_at(
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
         if not ret:
-            logger.warning("Could not read video frame %d from: %s", frame_index, video_path)
             return None
         return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     finally:

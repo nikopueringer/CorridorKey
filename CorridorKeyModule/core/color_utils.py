@@ -47,11 +47,49 @@ _torch_stack = functools.partial(torch.stack, dim=-1)
 _numpy_stack = functools.partial(np.stack, axis=-1)
 
 
+_SRGB_LUT_SIZE = 65536
+
+# Max kernel size for single-pass cv2 dilation. Larger kernels use iterative
+# dilation instead — morphology ops are O(k²) per pixel, so 11px (area=121)
+# iterated is ~4-5x faster than a single large kernel (e.g. 51px, area=2601).
+_MAX_DILATION_KERNEL_SIZE = 11
+
+
+@functools.lru_cache(maxsize=1)
+def _linear_to_srgb_lut() -> np.ndarray:
+    """Build a LUT for linear→sRGB conversion. Cached on first use."""
+    t = np.linspace(0.0, 1.0, _SRGB_LUT_SIZE, dtype=np.float64)
+    result = np.where(t <= 0.0031308, t * 12.92, 1.055 * np.power(t, 1.0 / 2.4) - 0.055)
+    return result.astype(np.float32)
+
+
+@functools.lru_cache(maxsize=1)
+def _srgb_to_linear_lut() -> np.ndarray:
+    """Build a LUT for sRGB→linear conversion. Cached on first use."""
+    t = np.linspace(0.0, 1.0, _SRGB_LUT_SIZE, dtype=np.float64)
+    result = np.where(t <= 0.04045, t / 12.92, np.power((t + 0.055) / 1.055, 2.4))
+    return result.astype(np.float32)
+
+
+def _apply_lut(values: np.ndarray, lut: np.ndarray) -> np.ndarray:
+    """Apply a [0,1]→[0,1] LUT to a float32 array via quantized index lookup.
+
+    Avoids expensive per-pixel np.power calls by quantizing float values into
+    LUT indices. Max error vs analytic sRGB: ~0.0002 (imperceptible).
+    """
+    # Quantize continuous [0,1] floats into discrete LUT bin indices
+    quantized_indices = np.clip(values * (_SRGB_LUT_SIZE - 1), 0, _SRGB_LUT_SIZE - 1).astype(np.uint16)
+    return lut[quantized_indices]
+
+
 def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
     Converts Linear to sRGB using the official piecewise sRGB transfer function.
     Supports both Numpy arrays and PyTorch tensors.
+    Uses LUT acceleration for numpy arrays (avoids np.power).
     """
+    if not _is_tensor(x):
+        return _apply_lut(np.clip(x, 0.0, 1.0, dtype=np.float32), _linear_to_srgb_lut())
     x = _clamp(x, 0.0)
     mask = x <= 0.0031308
     return _where(mask, x * 12.92, 1.055 * _power(x, 1.0 / 2.4) - 0.055)
@@ -61,7 +99,10 @@ def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
     Converts sRGB to Linear using the official piecewise sRGB transfer function.
     Supports both Numpy arrays and PyTorch tensors.
+    Uses LUT acceleration for numpy arrays (avoids np.power).
     """
+    if not _is_tensor(x):
+        return _apply_lut(np.clip(x, 0.0, 1.0, dtype=np.float32), _srgb_to_linear_lut())
     x = _clamp(x, 0.0)
     mask = x <= 0.04045
     return _where(mask, x / 12.92, _power((x + 0.055) / 1.055, 2.4))
@@ -214,33 +255,37 @@ def despill(
     if strength <= 0.0:
         return image
 
-    tensor = _is_tensor(image)
-    _maximum = _if_tensor(tensor, torch.max, np.maximum)
-    _stack = _if_tensor(tensor, _torch_stack, _numpy_stack)
+    is_torch = _is_tensor(image)
+    _maximum = _if_tensor(is_torch, torch.max, np.maximum)
+    _stack = _if_tensor(is_torch, _torch_stack, _numpy_stack)
 
     r = image[..., 0]
     g = image[..., 1]
     b = image[..., 2]
 
+    # Green limit: the maximum green value that isn't considered "spill".
+    # Anything above this threshold is excess green reflected from the screen.
     if green_limit_mode == "max":
-        limit = _maximum(r, b)
+        green_limit = _maximum(r, b)
     else:
-        limit = (r + b) / 2.0
+        green_limit = (r + b) / 2.0
 
+    # Spill amount: how much green exceeds the limit (clamped to non-negative)
     if isinstance(image, torch.Tensor):
-        # PyTorch Impl — g/limit are Tensor since image is Tensor
-        diff: torch.Tensor = g - limit  # type: ignore[assignment]
-        spill_amount = torch.clamp(diff, min=0.0)
+        green_excess: torch.Tensor = g - green_limit  # type: ignore[assignment]
+        spill_amount = torch.clamp(green_excess, min=0.0)
     else:
-        # Numpy Impl
-        spill_amount = np.maximum(g - limit, 0.0)
+        spill_amount = np.maximum(g - green_limit, 0.0)
 
-    g_new = g - spill_amount
-    r_new = r + (spill_amount * 0.5)
-    b_new = b + (spill_amount * 0.5)
+    # Redistribute spill energy: subtract from green, split evenly into R and B
+    # to preserve overall luminance while removing the green cast
+    g_corrected = g - spill_amount
+    r_corrected = r + (spill_amount * 0.5)
+    b_corrected = b + (spill_amount * 0.5)
 
-    despilled = _stack([r_new, g_new, b_new])
+    despilled = _stack([r_corrected, g_corrected, b_corrected])
 
+    # Partial strength: blend between original and fully despilled
     if strength < 1.0:
         return image * (1.0 - strength) + despilled * strength
 
@@ -252,44 +297,52 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
     alpha_np: Numpy array [H, W] or [H, W, 1] float (0.0 - 1.0)
     """
-    # Needs to be 2D
-    is_3d = False
+    had_channel_dim = False
     if alpha_np.ndim == 3:
-        is_3d = True
+        had_channel_dim = True
         alpha_np = alpha_np[:, :, 0]
 
-    # Threshold to binary
-    mask_8u = (alpha_np > 0.5).astype(np.uint8) * 255
+    # Threshold to binary for connected component analysis
+    binary_mask = (alpha_np > 0.5).astype(np.uint8) * 255
 
-    # Find connected components
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_8u, connectivity=8)
+    # Find connected components — each isolated region gets a unique label
+    num_labels, label_map, stats, _centroids = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
 
-    # Create an empty mask for the cleaned components
-    cleaned_mask = np.zeros_like(mask_8u)
+    # Vectorized label filtering: build a lookup table marking which labels to keep.
+    # Label 0 is always background; labels with area >= threshold are real subject.
+    # Small islands (tracking markers, noise) get zeroed out.
+    component_areas = stats[:, cv2.CC_STAT_AREA]
+    keep_label = np.zeros(num_labels, dtype=np.uint8)
+    keep_label[1:] = (component_areas[1:] >= area_threshold).astype(np.uint8)
+    cleaned_mask = (keep_label[label_map] * 255).astype(np.uint8)
 
-    # Keep components larger than the threshold (skip label 0, which is background)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
-            cleaned_mask[labels == i] = 255
-
-    # Dilate
+    # Dilate the cleaned mask to create a "safe zone" that extends slightly
+    # beyond the subject edge — prevents the mask from clipping real detail
     if dilation > 0:
-        kernel_size = int(dilation * 2 + 1)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        cleaned_mask = cv2.dilate(cleaned_mask, kernel)
+        full_kernel_size = int(dilation * 2 + 1)
+        if full_kernel_size > _MAX_DILATION_KERNEL_SIZE:
+            small_radius = _MAX_DILATION_KERNEL_SIZE // 2  # 5px per iteration
+            num_iterations = (dilation + small_radius - 1) // small_radius
+            small_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (_MAX_DILATION_KERNEL_SIZE, _MAX_DILATION_KERNEL_SIZE)
+            )
+            for _ in range(num_iterations):
+                cleaned_mask = cv2.dilate(cleaned_mask, small_kernel)
+        else:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (full_kernel_size, full_kernel_size))
+            cleaned_mask = cv2.dilate(cleaned_mask, kernel)
 
-    # Blur
+    # Soft edge: blur the binary safe zone to avoid hard cutoff artifacts
     if blur_size > 0:
-        b_size = int(blur_size * 2 + 1)
-        cleaned_mask = cv2.GaussianBlur(cleaned_mask, (b_size, b_size), 0)
+        blur_kernel_size = int(blur_size * 2 + 1)
+        cleaned_mask = cv2.GaussianBlur(cleaned_mask, (blur_kernel_size, blur_kernel_size), 0)
 
-    # Convert back to 0-1 float
+    # The safe zone acts as a multiplier: 1.0 inside subject region, 0.0 outside,
+    # with a soft gradient at the boundary from the blur step
     safe_zone = cleaned_mask.astype(np.float32) / 255.0
-
-    # Multiply original alpha by the safe zone
     result_alpha = alpha_np * safe_zone
 
-    if is_3d:
+    if had_channel_dim:
         result_alpha = result_alpha[:, :, np.newaxis]
 
     return result_alpha

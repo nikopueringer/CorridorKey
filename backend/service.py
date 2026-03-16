@@ -44,6 +44,7 @@ from .errors import (
 )
 from .frame_io import (
     EXR_WRITE_FLAGS,
+    EXR_WRITE_FLAGS_FAST,
     read_image_frame,
     read_mask_frame,
     read_video_frame_at,
@@ -107,6 +108,7 @@ class OutputConfig:
     comp_format: str = "png"
     processed_enabled: bool = True
     processed_format: str = "exr"
+    fast_exr: bool = False  # uncompressed half-float — ~10x faster, ~12% larger
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -193,7 +195,7 @@ class CorridorKeyService:
             if not torch.cuda.is_available():
                 return {}
             props = torch.cuda.get_device_properties(0)
-            total_bytes = props.total_memory
+            total_bytes = props.total_mem
             reserved = torch.cuda.memory_reserved(0)
             return {
                 "total": total_bytes / (1024**3),
@@ -444,6 +446,7 @@ class CorridorKeyService:
         fmt: str,
         clip_name: str,
         frame_index: int,
+        fast_exr: bool = False,
     ) -> None:
         """Write a single image in the requested format."""
         if fmt == "exr":
@@ -452,7 +455,8 @@ class CorridorKeyService:
                 img = img.astype(np.float32) / 255.0
             elif img.dtype != np.float32:
                 img = img.astype(np.float32)
-            validate_write(cv2.imwrite(path, img, EXR_WRITE_FLAGS), clip_name, frame_index, path)
+            flags = EXR_WRITE_FLAGS_FAST if fast_exr else EXR_WRITE_FLAGS
+            validate_write(cv2.imwrite(path, img, flags), clip_name, frame_index, path)
         else:
             # PNG 8-bit
             if img.dtype != np.uint8:
@@ -511,7 +515,7 @@ class CorridorKeyService:
         if cfg.fg_enabled:
             fg_bgr = cv2.cvtColor(pred_fg, cv2.COLOR_RGB2BGR)
             fg_path = os.path.join(dirs["fg"], f"{input_stem}.{cfg.fg_format}")
-            self._write_image(fg_bgr, fg_path, cfg.fg_format, clip_name, frame_index)
+            self._write_image(fg_bgr, fg_path, cfg.fg_format, clip_name, frame_index, cfg.fast_exr)
 
         # Matte
         if cfg.matte_enabled:
@@ -519,7 +523,7 @@ class CorridorKeyService:
             if alpha.ndim == 3:
                 alpha = alpha[:, :, 0]
             matte_path = os.path.join(dirs["matte"], f"{input_stem}.{cfg.matte_format}")
-            self._write_image(alpha, matte_path, cfg.matte_format, clip_name, frame_index)
+            self._write_image(alpha, matte_path, cfg.matte_format, clip_name, frame_index, cfg.fast_exr)
 
         # Comp
         if cfg.comp_enabled:
@@ -529,14 +533,14 @@ class CorridorKeyService:
                 cv2.COLOR_RGB2BGR,
             )
             comp_path = os.path.join(dirs["comp"], f"{input_stem}.{cfg.comp_format}")
-            self._write_image(comp_bgr, comp_path, cfg.comp_format, clip_name, frame_index)
+            self._write_image(comp_bgr, comp_path, cfg.comp_format, clip_name, frame_index, cfg.fast_exr)
 
         # Processed (RGBA premultiplied)
         if cfg.processed_enabled and "processed" in res:
             proc_rgba = res["processed"]
             proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
             proc_path = os.path.join(dirs["processed"], f"{input_stem}.{cfg.processed_format}")
-            self._write_image(proc_bgra, proc_path, cfg.processed_format, clip_name, frame_index)
+            self._write_image(proc_bgra, proc_path, cfg.processed_format, clip_name, frame_index, cfg.fast_exr)
 
     # --- Processing ---
 
