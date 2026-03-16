@@ -4,18 +4,35 @@ import logging
 import math
 import os
 import sys
+from functools import lru_cache
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision
-import torchvision.transforms.functional as TF
+import torchvision.transforms.v2 as T
+import torchvision.transforms.v2.functional as TF
 
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=4)
+def _get_checkerboard_linear_torch(w: int, h: int, device: torch.device) -> torch.Tensor:
+    """Return a cached checkerboard tensor [3, H, W] on device in linear space."""
+    print("Uncached checkerboard generation on GPU...")
+    checker_size = 128
+    y_coords = torch.arange(h, device=device) // checker_size
+    x_coords = torch.arange(w, device=device) // checker_size
+    y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+    checker = ((x_grid + y_grid) % 2).float()
+    # Map 0 -> 0.15, 1 -> 0.55 (sRGB), then convert to linear before caching
+    bg_srgb = checker * 0.4 + 0.15  # [H, W]
+    bg_srgb_3 = bg_srgb.unsqueeze(0).expand(3, -1, -1)
+    return cu.srgb_to_linear(bg_srgb_3)
 
 
 class CorridorKeyEngine:
@@ -33,8 +50,8 @@ class CorridorKeyEngine:
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
 
-        self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device).reshape(3, 1, 1)
-        self.std = torch.tensor([0.229, 0.224, 0.225], dtype=model_precision, device=self.device).reshape(3, 1, 1)
+        self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device)
+        self.std = torch.tensor([0.229, 0.224, 0.225], dtype=model_precision, device=self.device)
 
         if mixed_precision or model_precision != torch.float32:
             # Use faster matrix multiplication implementation
@@ -49,22 +66,7 @@ class CorridorKeyEngine:
 
         self.model_precision = model_precision
 
-        model = self._load_model().to(model_precision)
-
-        # We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
-        if sys.platform == "linux" or sys.platform == "win32":
-            # Try compiling the model. Fallback to eager mode if it fails.
-            try:
-                self.model = torch.compile(model)
-                # Trigger compilation with a dummy input
-                dummy_input = torch.zeros(1, 4, img_size, img_size, dtype=model_precision, device=self.device)
-                with torch.inference_mode():
-                    self.model(dummy_input)
-            except Exception as e:
-                logger.info(f"Model compilation failed with error: {e}")
-                logger.warning("Model compilation failed. Falling back to eager mode.")
-                torch.cuda.empty_cache()
-                self.model = model
+        self.model = self._load_model().to(model_precision)
 
     def _load_model(self) -> GreenFormer:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
@@ -121,9 +123,29 @@ class CorridorKeyEngine:
         if len(unexpected) > 0:
             print(f"[Warning] Unexpected keys: {unexpected}")
 
+        model = model.to(self.model_precision)
+
         # We only tested compilation on Windows and Linux. For other platforms compilation is disabled as a precaution.
         if sys.platform == "linux" or sys.platform == "win32":
-            model = torch.compile(model)
+            # Try compiling the model. Fallback to eager mode if it fails.
+            try:
+                compiled_model = torch.compile(model, mode="max-autotune")
+                # Trigger compilation with a dummy input
+                dummy_input = torch.zeros(
+                    1, 4, self.img_size, self.img_size, dtype=self.model_precision, device=self.device
+                ).to(memory_format=torch.channels_last)
+                with torch.inference_mode():
+                    compiled_model(dummy_input)
+                model = compiled_model
+
+                self._preprocess_input = torch.compile(self._preprocess_input, mode="max-autotune")
+                self._despill_gpu = torch.compile(self._despill_gpu, mode="max-autotune")
+                self._clean_matte_gpu = torch.compile(self._clean_matte_gpu, mode="max-autotune")
+
+            except Exception as e:
+                print(f"Model compilation failed with error: {e}")
+                logger.warning("Model compilation failed. Falling back to eager mode.")
+                torch.cuda.empty_cache()
 
         return model
 
@@ -133,39 +155,30 @@ class CorridorKeyEngine:
         # 2. Resize to Model Size
         # If input is linear, we resize in linear to preserve energy/highlights,
         # THEN convert to sRGB for the model.
+        image_batch = TF.resize(
+            image_batch,
+            [self.img_size, self.img_size],
+            interpolation=T.InterpolationMode.BILINEAR,
+        )
         if input_is_linear:
-            # TODO: Check if interpolation is comparable to cv2.INTER_LINEAR (probably close enough)
-            img_resized_lin = TF.resize(
-                image_batch,
-                [self.img_size, self.img_size],
-                interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
-            )
-            # Convert to sRGB for Model
-            img_resized = cu.linear_to_srgb(img_resized_lin)
-        else:
-            # Standard sRGB Resize
-            img_resized = TF.resize(
-                image_batch,
-                [self.img_size, self.img_size],
-                interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
-            )
+            image_batch = cu.linear_to_srgb(image_batch)
 
-        mask_resized = TF.resize(
+        mask_batch_linear = TF.resize(
             mask_batch_linear,
             [self.img_size, self.img_size],
-            interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
+            interpolation=T.InterpolationMode.BILINEAR,
         )
 
         # 3. Normalize (ImageNet)
         # Model expects sRGB input normalized
-        img_norm = (img_resized - self.mean) / self.std
+        image_batch = TF.normalize(image_batch, self.mean, self.std)
 
         # 4. Prepare Tensor
-        inp_concat = torch.concat((img_norm, mask_resized), -3)  # [4, H, W]
+        inp_concat = torch.concat((image_batch, mask_batch_linear), -3)  # [4, H, W]
 
         return inp_concat
 
-    def _postprocess_cpu(
+    def _postprocess_opencv(
         self,
         pred_alpha: torch.Tensor,
         pred_fg: torch.Tensor,
@@ -229,18 +242,6 @@ class CorridorKeyEngine:
             "processed": processed_rgba,  # Linear/Premul, RGBA, Garbage Matted & Despilled
         }
 
-    def _get_checkerboard_linear_gpu(self, w: int, h: int) -> torch.Tensor:
-        """Return a cached checkerboard tensor [H, W, 3] on device in linear space."""
-        checker_size = 128
-        y_coords = torch.arange(h, device=self.device) // checker_size
-        x_coords = torch.arange(w, device=self.device) // checker_size
-        y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
-        checker = ((x_grid + y_grid) % 2).float()
-        # Map 0 -> 0.15, 1 -> 0.55 (sRGB), then convert to linear before caching
-        bg_srgb = checker * 0.4 + 0.15  # [H, W]
-        bg_srgb_3 = bg_srgb.unsqueeze(-1).expand(-1, -1, 3)
-        return cu.srgb_to_linear(bg_srgb_3)
-
     def _postprocess_torch(
         self,
         pred_alpha: torch.Tensor,
@@ -251,7 +252,7 @@ class CorridorKeyEngine:
         despill_strength: float,
         auto_despeckle: bool,
         despeckle_size: int,
-        generate_comp: bool = False,
+        generate_comp: bool = True,
     ) -> list[dict[str, np.ndarray]]:
         """Post-process on GPU, transfer final results to CPU.
 
@@ -272,9 +273,8 @@ class CorridorKeyEngine:
             interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
         )
 
-        # Convert to HWC on GPU
-        alpha = alpha.permute(0, 2, 3, 1)  # [B, H, W, 1]
-        fg = fg.permute(0, 2, 3, 1)  # [B, H, W, 3]
+        del pred_fg, pred_alpha
+        torch.cuda.empty_cache()
 
         # A. Clean matte
         if auto_despeckle:
@@ -292,11 +292,11 @@ class CorridorKeyEngine:
         processed_fg = cu.premultiply(processed_fg, processed_alpha)
 
         # E. Pack RGBA on GPU
-        packed_processed = torch.cat([processed_fg, processed_alpha], dim=-1)
+        packed_processed = torch.cat([processed_fg, processed_alpha], dim=1)
 
         # F. Composite
         if generate_comp:
-            bg_lin = self._get_checkerboard_linear_gpu(w, h)
+            bg_lin = _get_checkerboard_linear_torch(w, h, self.device)
             if fg_is_straight:
                 comp = cu.composite_straight(processed_fg, bg_lin, processed_alpha)
             else:
@@ -304,13 +304,13 @@ class CorridorKeyEngine:
             comp = cu.linear_to_srgb(comp)  # [H, W, 3] opaque
         else:
             del processed_fg, processed_alpha
-            comp = torch.zeros(h, w, 3, device=fg.device, dtype=fg.dtype)
+            comp = [None] * alpha.shape[0]  # placeholder
 
         alpha, fg, comp, packed_processed = (
-            alpha.cpu().numpy(),
-            fg.cpu().numpy(),
-            comp.cpu().numpy(),
-            packed_processed.cpu().numpy(),
+            alpha.cpu().permute(0, 2, 3, 1).numpy(),
+            fg.cpu().permute(0, 2, 3, 1).numpy(),
+            comp.cpu().permute(0, 2, 3, 1).numpy() if generate_comp else comp,
+            packed_processed.cpu().permute(0, 2, 3, 1).numpy(),
         )
 
         out = []
@@ -325,7 +325,6 @@ class CorridorKeyEngine:
         return out
 
     @staticmethod
-    @torch.compile()
     def _clean_matte_gpu(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
         """Fully GPU matte cleanup using morphological operations.
 
@@ -339,8 +338,7 @@ class CorridorKeyEngine:
         """
         _device = alpha.device
         # alpha: [H, W, 1]
-        a2d = alpha[..., 0]
-        mask = (a2d > 0.5).float().unsqueeze(-3)  # [B, 1, H, W]
+        mask = (alpha > 0.5).float()  # [B, 1, H, W]
 
         # Erode: kill spots smaller than area_threshold
         # A circle of area A has radius r = sqrt(A / pi)
@@ -361,22 +359,21 @@ class CorridorKeyEngine:
             k = int(blur_size * 2 + 1)
             mask = TF.gaussian_blur(mask, [k, k])
 
-        safe = mask.squeeze(0).squeeze(0)  # [H, W]
-        return (a2d * safe).unsqueeze(-1)  # [H, W, 1]
+        safe = mask
+        return alpha * safe
 
     @staticmethod
-    @torch.compile()
     def _despill_gpu(image: torch.Tensor, strength: float) -> torch.Tensor:
         """GPU despill — keeps data on device."""
         if strength <= 0.0:
             return image
-        r, g, b = image[..., 0], image[..., 1], image[..., 2]
+        r, g, b = image[:, 0], image[:, 1], image[:, 2]
         limit = (r + b) / 2.0
         spill = torch.clamp(g - limit, min=0.0)
         g_new = g - spill
         r_new = r + spill * 0.5
         b_new = b + spill * 0.5
-        despilled = torch.stack([r_new, g_new, b_new], dim=-1)
+        despilled = torch.stack([r_new, g_new, b_new], dim=1)
         if strength < 1.0:
             return image * (1.0 - strength) + despilled * strength
         return despilled
@@ -472,7 +469,6 @@ class CorridorKeyEngine:
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
-        num_workers: int = torch.multiprocessing.cpu_count() // 2,
     ) -> list[dict[str, np.ndarray]]:
         """
         Process a single frame.
@@ -489,33 +485,32 @@ class CorridorKeyEngine:
             despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
             auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
             despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
-            num_workers: int. Number of worker threads used for post-processing
         Returns:
              list[dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}]
         """
-        image_was_uint8 = images.dtype == np.uint8
-        mask_was_uint8 = masks_linear.dtype == np.uint8
+        bs, h, w = images.shape[:3]
 
-        # immediately casting to float is fine since fp16 can represent all uint8 values exactly
-        image = torch.from_numpy(images).to(self.model_precision).to(self.device)
-        mask_linear = torch.from_numpy(masks_linear).to(self.model_precision).to(self.device)
         # 1. Inputs Check & Normalization
-        if image_was_uint8:
-            image = image / 255.0
+        images = (
+            TF.to_dtype(
+                torch.from_numpy(images).permute((0, 3, 1, 2)),
+                self.model_precision,
+                scale=True,
+            )
+            .pin_memory()
+            .to(self.device, non_blocking=True)
+        )
+        masks_linear = (
+            TF.to_dtype(
+                torch.from_numpy(masks_linear.reshape((bs, h, w, 1))).permute((0, 3, 1, 2)),
+                self.model_precision,
+                scale=True,
+            )
+            .pin_memory()
+            .to(self.device, non_blocking=True)
+        )
 
-        if mask_was_uint8:
-            mask_linear = mask_linear / 255.0
-
-        bs, h, w = image.shape[:3]
-
-        # Ensure Mask Shape
-        if mask_linear.ndim == 3:
-            mask_linear = mask_linear.unsqueeze(-1)
-
-        image = image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        mask_linear = mask_linear.permute(0, 3, 1, 2)  # [B, C, H, W]
-
-        inp_t = self._preprocess_input(image, mask_linear, input_is_linear)
+        inp_t = self._preprocess_input(images, masks_linear, input_is_linear)
 
         # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
         torch.cuda.empty_cache()
@@ -535,13 +530,19 @@ class CorridorKeyEngine:
 
         # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
         del inp_t
-        torch.cuda.empty_cache()
 
         if handle:
             handle.remove()
 
         out = self._postprocess_torch(
-            prediction["alpha"], prediction["fg"], w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
+            prediction["alpha"],
+            prediction["fg"],
+            w,
+            h,
+            fg_is_straight,
+            despill_strength,
+            auto_despeckle,
+            despeckle_size,
         )
 
         return out
