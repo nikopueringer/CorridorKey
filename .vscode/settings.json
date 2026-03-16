@@ -25,7 +25,8 @@
   "ty.inlayHints.variableTypes": false,
   "yaml.schemas": {
     "https://json.schemastore.org/github-issue-forms.json": [
-      ".github/ISSUE_TEMPLATE/*.yml"
+      ".github/ISSUE_TEMPLATE/*.yml",
+      "!.github/ISSUE_TEMPLATE/config.yml"
     ]
   }
 }
