@@ -163,9 +163,13 @@ def mock_greenformer():
 
 
 @pytest.fixture(autouse=True)
-def silent_backend_injection():
-    """Mock the inference module globally to prevent real AI loading."""
-    mock_mod = ModuleType("VideoMaMaInferenceModule.inference")
+def silent_backend_injection(monkeypatch):
+    """
+    Mock the inference module globally to prevent real AI loading.
+    """
+
+    parent_mod = ModuleType("VideoMaMaInferenceModule")
+    inference_mod = ModuleType("VideoMaMaInferenceModule.inference")
 
     def fake_load(device=None):
         return "fake_handle"
@@ -173,16 +177,12 @@ def silent_backend_injection():
     def fake_run(pipeline, input_frames, mask_frames, **kwargs):
         yield [np.full_like(f, 255) for f in input_frames]
 
-    mock_mod.load_videomama_model = fake_load
-    mock_mod.run_inference = fake_run
-
-    sys.modules["VideoMaMaInferenceModule"] = ModuleType("VideoMaMaInferenceModule")
-    sys.modules["VideoMaMaInferenceModule.inference"] = mock_mod
+    inference_mod.load_videomama_model = fake_load
+    inference_mod.run_inference = fake_run
+    monkeypatch.setitem(sys.modules, "VideoMaMaInferenceModule", parent_mod)
+    monkeypatch.setitem(sys.modules, "VideoMaMaInferenceModule.inference", inference_mod)
 
     yield
-
-    sys.modules.pop("VideoMaMaInferenceModule.inference", None)
-    sys.modules.pop("VideoMaMaInferenceModule", None)
 
 
 @pytest.fixture
@@ -221,7 +221,7 @@ def stage_shot(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def sandbox_clip_manager(tmp_path):
+def sandbox_clip_manager(tmp_path, monkeypatch):
     """
     Forces all clip_manager operations into a temporary sandbox.
     Prevents tests from touching real project files.
@@ -231,13 +231,7 @@ def sandbox_clip_manager(tmp_path):
     sandbox = tmp_path / "Clips"
     sandbox.mkdir(parents=True, exist_ok=True)
 
-    orig_clips_dir = clip_manager.CLIPS_DIR
-    orig_organize = clip_manager.organize_clips
-
-    clip_manager.CLIPS_DIR = str(sandbox)
-    clip_manager.organize_clips = MagicMock()
+    monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(sandbox))
+    monkeypatch.setattr(clip_manager, "organize_clips", MagicMock())
 
     yield sandbox
-
-    clip_manager.CLIPS_DIR = orig_clips_dir
-    clip_manager.organize_clips = orig_organize

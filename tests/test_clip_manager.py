@@ -822,7 +822,65 @@ class TestScanClips:
     """
     Tests for the scan_clips file orchestrator.
     Ensures directory health, automatic organization, and validation reporting.
+    Added additions from #118
     """
+
+    def test_creates_clips_dir_and_returns_empty_if_missing(self, tmp_path, monkeypatch):
+        """A missing CLIPS_DIR is created automatically and [] is returned."""
+        import clip_manager
+
+        missing = str(tmp_path / "ClipsForInference")
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", missing)
+
+        result = scan_clips()
+
+        assert result == []
+        assert os.path.isdir(missing)
+
+    def test_returns_clips_with_valid_input(self, tmp_clip_dir, monkeypatch):
+        """Clips whose Input directories exist are included in the result."""
+        import clip_manager
+
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert "shot_a" in names
+        assert "shot_b" in names  # valid input even without alpha
+
+    def test_excludes_frame_count_mismatch(self, tmp_clip_dir, monkeypatch):
+        """A clip with mismatched Input/AlphaHint frame counts is excluded."""
+        import clip_manager
+
+        mismatch = tmp_clip_dir / "mismatch_shot"
+        (mismatch / "Input").mkdir(parents=True)
+        (mismatch / "AlphaHint").mkdir()
+        tiny = np.zeros((4, 4, 3), dtype=np.uint8)
+        tiny_mask = np.zeros((4, 4), dtype=np.uint8)
+        for i in range(3):
+            cv2.imwrite(str(mismatch / "Input" / f"frame_{i:04d}.png"), tiny)
+        cv2.imwrite(str(mismatch / "AlphaHint" / "frame_0000.png"), tiny_mask)
+
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert "mismatch_shot" not in names
+        assert "shot_a" in names  # valid shot still found
+
+    def test_skips_hidden_and_underscore_dirs(self, tmp_clip_dir, monkeypatch):
+        """Directories starting with '.' or '_' are never returned."""
+        import clip_manager
+
+        (tmp_clip_dir / ".hidden").mkdir()
+        (tmp_clip_dir / "_temp").mkdir()
+        monkeypatch.setattr(clip_manager, "CLIPS_DIR", str(tmp_clip_dir))
+
+        result = scan_clips()
+        names = {c.name for c in result}
+
+        assert ".hidden" not in names
+        assert "_temp" not in names
 
     def test_noise_filter_skips_hidden_folders(self, sandbox_clip_manager):
         """
