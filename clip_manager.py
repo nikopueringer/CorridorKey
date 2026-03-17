@@ -754,16 +754,16 @@ def run_inference(
 
             # 3. Process
             USE_STRAIGHT_MODEL = True
-            res = engine.process_frame(
-                img_srgb,
-                mask_linear,
+            res = engine.batch_process_frames(
+                img_srgb[np.newaxis, :],
+                mask_linear[np.newaxis, :],
                 input_is_linear=input_is_linear,
                 fg_is_straight=USE_STRAIGHT_MODEL,
                 despill_strength=settings.despill_strength,
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
-            )
+            )[0]
 
             pred_fg = res["fg"]  # sRGB
             pred_alpha = res["alpha"]  # Linear
@@ -782,10 +782,11 @@ def run_inference(
             cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
             # 5. Generate Reference Comp
-            comp_srgb = res["comp"]
-            # Save Comp (PNG 8-bit)
-            comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+            if res["comp"] is not None:
+                comp_srgb = res["comp"]
+                # Save Comp (PNG 8-bit)
+                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
             # 6. Save Processed (RGBA EXR)
             if "processed" in res:

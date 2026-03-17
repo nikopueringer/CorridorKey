@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=4)
 def _get_checkerboard_linear_torch(w: int, h: int, device: torch.device) -> torch.Tensor:
     """Return a cached checkerboard tensor [3, H, W] on device in linear space."""
-    print("Uncached checkerboard generation on GPU...")
     checker_size = 128
     y_coords = torch.arange(h, device=device) // checker_size
     x_coords = torch.arange(w, device=device) // checker_size
@@ -494,7 +493,7 @@ class CorridorKeyEngine:
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
-        generate_comp: bool = False,
+        generate_comp: bool = True,
         post_process_on_gpu: bool = True,
     ) -> list[dict[str, np.ndarray]]:
         """
@@ -512,28 +511,24 @@ class CorridorKeyEngine:
             despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
             auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
             despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
+            generate_comp: bool. If True, also generates a composite on checkerboard for quick checking.
+            post_process_on_gpu: bool. If True, performs post-processing on GPU using PyTorch instead of OpenCV.
         Returns:
              list[dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}]
         """
         bs, h, w = images.shape[:3]
 
         # 1. Inputs Check & Normalization
-        images = (
-            TF.to_dtype(
-                torch.from_numpy(images).permute((0, 3, 1, 2)),
-                self.model_precision,
-                scale=True,
-            )
-            .to(self.device, non_blocking=True)
-        )
-        masks_linear = (
-            TF.to_dtype(
-                torch.from_numpy(masks_linear.reshape((bs, h, w, 1))).permute((0, 3, 1, 2)),
-                self.model_precision,
-                scale=True,
-            )
-            .to(self.device, non_blocking=True)
-        )
+        images = TF.to_dtype(
+            torch.from_numpy(images).permute((0, 3, 1, 2)),
+            self.model_precision,
+            scale=True,
+        ).to(self.device, non_blocking=True)
+        masks_linear = TF.to_dtype(
+            torch.from_numpy(masks_linear.reshape((bs, h, w, 1))).permute((0, 3, 1, 2)),
+            self.model_precision,
+            scale=True,
+        ).to(self.device, non_blocking=True)
 
         inp_t = self._preprocess_input(images, masks_linear, input_is_linear)
 
