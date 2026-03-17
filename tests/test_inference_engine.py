@@ -251,14 +251,26 @@ class TestNvidiaGPUProcess:
     @pytest.mark.gpu
     def test_process_frame_on_gpu(self, sample_frame_rgb, sample_mask, mock_greenformer):
         """
-        Scenario: Process a frame using a CUDA-configured engine to verify cross-device compatibility.
-        Expected: The mock model detects the GPU input and returns matching tensors without a device mismatch error.
+        Scenario: Process a frame using a CUDA-configured engine.
+        Expected: Input tensors are moved to CUDA before the model is called,
+        confirmed by asserting the device of the tensor the mock received.
         """
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
+
+        captured_device: list[torch.device] = []
+        original_side_effect = mock_greenformer.side_effect
+
+        def spy_forward(x):
+            captured_device.append(x.device)
+            return original_side_effect(x)
+
+        mock_greenformer.side_effect = spy_forward
 
         engine = _make_engine_with_mock(mock_greenformer)
         engine.device = torch.device("cuda")
 
         result = engine.process_frame(sample_frame_rgb, sample_mask)
         assert result["alpha"].dtype == np.float32
+        assert len(captured_device) == 1, "Model should be called exactly once"
+        assert captured_device[0].type == "cuda", f"Expected model input on cuda, got {captured_device[0]}"
