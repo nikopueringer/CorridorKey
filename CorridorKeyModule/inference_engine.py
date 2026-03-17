@@ -337,7 +337,6 @@ class CorridorKeyEngine:
         eliminates it.
         """
         _device = alpha.device
-        # alpha: [H, W, 1]
         mask = (alpha > 0.5).float()  # [B, 1, H, W]
 
         # Erode: kill spots smaller than area_threshold
@@ -351,16 +350,17 @@ class CorridorKeyEngine:
 
         # Dilate back to restore edges of large regions
         dilate_r = erode_r + (dilation if dilation > 0 else 0)
-        dilate_k = dilate_r * 2 + 1
-        mask = F.max_pool2d(mask, dilate_k, stride=1, padding=dilate_r)
+        # How many applications with kernel size 5 are needed to achieve the desired dilation radius
+        repeats = dilate_r // 2
+        for _ in range(repeats):
+            mask = F.max_pool2d(mask, 5, stride=1, padding=2)
 
         # Blur for soft edges
         if blur_size > 0:
             k = int(blur_size * 2 + 1)
             mask = TF.gaussian_blur(mask, [k, k])
 
-        safe = mask
-        return alpha * safe
+        return alpha * mask
 
     @staticmethod
     def _despill_gpu(image: torch.Tensor, strength: float) -> torch.Tensor:
