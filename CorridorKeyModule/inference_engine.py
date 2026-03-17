@@ -48,6 +48,7 @@ class CorridorKeyEngine:
         self.model_precision = model_precision
 
         model = self._load_model().to(model_precision)
+        self.model = model
 
         # We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
         if sys.platform == "linux" or sys.platform == "win32":

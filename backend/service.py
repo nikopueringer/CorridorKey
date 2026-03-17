@@ -13,7 +13,6 @@ Model Residency Policy:
 
 from __future__ import annotations
 
-import glob as glob_module
 import json
 import logging
 import os
@@ -290,29 +289,12 @@ class CorridorKeyService:
             return self._engine
 
         try:
-            from CorridorKeyModule.inference_engine import CorridorKeyEngine
+            from CorridorKeyModule.backend import create_engine
         except ImportError as exc:
             raise RuntimeError("CorridorKeyModule is not installed. Run: uv sync") from exc
 
-        ckpt_dir = os.path.join(BASE_DIR, "CorridorKeyModule", "checkpoints")
-        ckpt_files = glob_module.glob(os.path.join(ckpt_dir, "*.pth"))
-
-        if len(ckpt_files) == 0:
-            raise FileNotFoundError(f"No .pth checkpoint found in {ckpt_dir}")
-        elif len(ckpt_files) > 1:
-            raise ValueError(
-                f"Multiple checkpoints found in {ckpt_dir}. "
-                f"Please ensure only one exists: {[os.path.basename(f) for f in ckpt_files]}"
-            )
-
-        ckpt_path = ckpt_files[0]
-        logger.info(f"Loading checkpoint: {os.path.basename(ckpt_path)}")
         t0 = time.monotonic()
-        self._engine = CorridorKeyEngine(
-            checkpoint_path=ckpt_path,
-            device=self._device,
-            img_size=2048,
-        )
+        self._engine = create_engine(backend="torch", device=self._device, img_size=2048)
         logger.info(f"Engine loaded in {time.monotonic() - t0:.1f}s")
         return self._engine
 

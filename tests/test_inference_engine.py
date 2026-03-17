@@ -16,6 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+from unittest import mock
 
 from CorridorKeyModule.core import color_utils as cu
 
@@ -44,6 +45,36 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     engine.mixed_precision = True
     return engine
 
+
+# ---------------------------------------------------------------------------
+# __init__ regression coverage
+# ---------------------------------------------------------------------------
+
+
+class _InitDummyModel:
+    def __init__(self):
+        self.to_calls = []
+
+    def to(self, arg):
+        self.to_calls.append(arg)
+        return self
+
+
+class TestEngineInitialization:
+    def test_non_compiled_platform_still_sets_model(self):
+        """macOS/eager path must still assign self.model before first inference."""
+        from CorridorKeyModule.inference_engine import CorridorKeyEngine
+
+        dummy_model = _InitDummyModel()
+
+        with (
+            mock.patch("CorridorKeyModule.inference_engine.CorridorKeyEngine._load_model", return_value=dummy_model),
+            mock.patch("CorridorKeyModule.inference_engine.sys.platform", "darwin"),
+        ):
+            engine = CorridorKeyEngine(checkpoint_path="/fake/checkpoint.pth", device="cpu")
+
+        assert engine.model is dummy_model
+        assert dummy_model.to_calls == [torch.float32]
 
 # ---------------------------------------------------------------------------
 # process_frame output structure

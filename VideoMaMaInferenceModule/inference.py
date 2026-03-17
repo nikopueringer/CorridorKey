@@ -12,6 +12,8 @@ from PIL import Image
 from typing import List, Union, Optional
 from pathlib import Path
 
+from CorridorKeyModule.model_assets import ensure_videomama_weights
+
 # Add current directory to path so that pipeline.py's intra-package imports
 # (e.g. "from pipeline import ...") resolve when this module is imported from
 # outside the VideoMaMaInferenceModule directory.  This is a workaround for the
@@ -37,12 +39,13 @@ def load_videomama_model(base_model_path: Optional[str] = None, unet_checkpoint_
     Returns:
         VideoInferencePipeline: Loaded pipeline instance.
     """
-    # Default to local checkpoints if not provided
-    if base_model_path is None:
-        base_model_path = os.path.join(current_dir, "checkpoints", "stable-video-diffusion-img2vid-xt")
-    
-    if unet_checkpoint_path is None:
-        unet_checkpoint_path = os.path.join(current_dir, "checkpoints", "VideoMaMa")
+    checkpoints_dir = os.path.join(current_dir, "checkpoints")
+    if base_model_path is None or unet_checkpoint_path is None:
+        ensured_base_path, ensured_unet_path = ensure_videomama_weights(checkpoints_dir)
+        if base_model_path is None:
+            base_model_path = str(ensured_base_path)
+        if unet_checkpoint_path is None:
+            unet_checkpoint_path = str(ensured_unet_path)
 
     print(f"Loading Base model from {base_model_path}...")
     print(f"Loading VideoMaMa UNet from {unet_checkpoint_path}...")
@@ -198,4 +201,3 @@ def save_video(frames: List[np.ndarray], output_path: str, fps: float):
     
     out.release()
     print(f"Saved video to {output_path}")
-
