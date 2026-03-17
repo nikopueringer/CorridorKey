@@ -16,6 +16,8 @@ from torchvision.transforms import ToTensor, Resize, Compose
 from diffusers import AutoencoderKLTemporalDecoder, FlowMatchEulerDiscreteScheduler
 from tqdm import tqdm
 
+from CorridorKeyModule.model_assets import ensure_gvm_weights
+
 # Relative imports from the internal gvm package
 # Assuming this file is inside gvm_core/
 from .gvm.pipelines.pipeline_gvm import GVMPipeline
@@ -70,6 +72,7 @@ class GVMProcessor:
         # Resolve default weights path relative to this file
         if model_base is None:
             model_base = osp.join(osp.dirname(__file__), "weights")
+            ensure_gvm_weights(model_base)
             
         self.model_base = model_base
         self.unet_base = unet_base

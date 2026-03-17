@@ -3,6 +3,8 @@
 import errno
 import logging
 import os
+import sys
+from types import ModuleType
 from unittest import mock
 
 import numpy as np
@@ -17,6 +19,7 @@ from CorridorKeyModule.backend import (
     _discover_checkpoint,
     _ensure_torch_checkpoint,
     _wrap_mlx_output,
+    create_engine,
     resolve_backend,
 )
 
@@ -201,6 +204,43 @@ class TestDiscoverCheckpoint:
 
         assert any("Downloading" in msg for msg in caplog.messages)
         assert any("saved" in msg.lower() for msg in caplog.messages)
+
+
+class TestCreateEngineBootstrap:
+    def test_auto_backend_bootstraps_assets_before_engine_load(self, tmp_path):
+        ensured_kwargs = {}
+
+        def fake_ensure(**kwargs):
+            ensured_kwargs.update(kwargs)
+            (tmp_path / "model.pth").touch()
+
+        inference_mod = ModuleType("CorridorKeyModule.inference_engine")
+
+        class DummyEngine:
+            def __init__(self, checkpoint_path: str, device: str, img_size: int):
+                self.checkpoint_path = checkpoint_path
+                self.device = device
+                self.img_size = img_size
+
+        inference_mod.CorridorKeyEngine = DummyEngine
+
+        with (
+            mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)),
+            mock.patch("CorridorKeyModule.backend.ensure_corridorkey_assets", side_effect=fake_ensure),
+            mock.patch("CorridorKeyModule.backend.resolve_backend", return_value="torch"),
+            mock.patch.dict(sys.modules, {"CorridorKeyModule.inference_engine": inference_mod}),
+        ):
+            engine = create_engine(backend="auto", device="cpu", img_size=1024)
+
+        assert ensured_kwargs == {
+            "ensure_torch": True,
+            "ensure_mlx": False,
+            "download_mlx_if_available": True,
+            "checkpoint_dir": str(tmp_path),
+        }
+        assert engine.checkpoint_path == str(tmp_path / "model.pth")
+        assert engine.device == "cpu"
+        assert engine.img_size == 1024
 
 
 # --- _wrap_mlx_output ---
