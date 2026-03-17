@@ -13,10 +13,11 @@ Why mock the model?
 
 from __future__ import annotations
 
+from unittest import mock
+
 import numpy as np
 import pytest
 import torch
-from unittest import mock
 
 from CorridorKeyModule.core import color_utils as cu
 
