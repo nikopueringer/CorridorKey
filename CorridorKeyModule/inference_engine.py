@@ -188,6 +188,7 @@ class CorridorKeyEngine:
         despill_strength: float,
         auto_despeckle: bool,
         despeckle_size: int,
+        generate_comp: bool,
     ) -> dict[str, np.ndarray]:
         # 6. Post-Process (Resize Back to Original Resolution)
         # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
@@ -224,16 +225,19 @@ class CorridorKeyEngine:
 
         # 7. Composite (on Checkerboard) for checking
         # Generate Dark/Light Gray Checkerboard (in sRGB, convert to Linear)
-        bg_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
-        bg_lin = cu.srgb_to_linear(bg_srgb)
+        if generate_comp:
+            bg_srgb = cu.create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
+            bg_lin = cu.srgb_to_linear(bg_srgb)
 
-        if fg_is_straight:
-            comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+            if fg_is_straight:
+                comp_lin = cu.composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
+            else:
+                # If premultiplied model, we shouldn't multiply again (though our pipeline forces straight)
+                comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
+
+            comp_srgb = cu.linear_to_srgb(comp_lin)
         else:
-            # If premultiplied model, we shouldn't multiply again (though our pipeline forces straight)
-            comp_lin = cu.composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
-
-        comp_srgb = cu.linear_to_srgb(comp_lin)
+            comp_srgb = None
 
         return {  # type: ignore[return-value]  # cu.* returns ndarray|Tensor but inputs are always ndarray here
             "alpha": res_alpha,  # Linear, Raw Prediction
@@ -252,7 +256,7 @@ class CorridorKeyEngine:
         despill_strength: float,
         auto_despeckle: bool,
         despeckle_size: int,
-        generate_comp: bool = True,
+        generate_comp: bool,
     ) -> list[dict[str, np.ndarray]]:
         """Post-process on GPU, transfer final results to CPU.
 
@@ -469,6 +473,8 @@ class CorridorKeyEngine:
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
+        generate_comp: bool = False,
+        post_process_on_gpu: bool = True,
     ) -> list[dict[str, np.ndarray]]:
         """
         Process a single frame.
@@ -497,7 +503,6 @@ class CorridorKeyEngine:
                 self.model_precision,
                 scale=True,
             )
-            .pin_memory()
             .to(self.device, non_blocking=True)
         )
         masks_linear = (
@@ -506,7 +511,6 @@ class CorridorKeyEngine:
                 self.model_precision,
                 scale=True,
             )
-            .pin_memory()
             .to(self.device, non_blocking=True)
         )
 
@@ -534,15 +538,36 @@ class CorridorKeyEngine:
         if handle:
             handle.remove()
 
-        out = self._postprocess_torch(
-            prediction["alpha"],
-            prediction["fg"],
-            w,
-            h,
-            fg_is_straight,
-            despill_strength,
-            auto_despeckle,
-            despeckle_size,
-        )
+        if post_process_on_gpu:
+            out = self._postprocess_torch(
+                prediction["alpha"],
+                prediction["fg"],
+                w,
+                h,
+                fg_is_straight,
+                despill_strength,
+                auto_despeckle,
+                despeckle_size,
+                generate_comp,
+            )
+        else:
+            # Move prediction to CPU before post-processing
+            pred_alpha = prediction["alpha"].cpu().float()
+            pred_fg = prediction["fg"].cpu().float()
+
+            out = []
+            for i in range(bs):
+                result = self._postprocess_opencv(
+                    pred_alpha[i],
+                    pred_fg[i],
+                    w,
+                    h,
+                    fg_is_straight,
+                    despill_strength,
+                    auto_despeckle,
+                    despeckle_size,
+                    generate_comp,
+                )
+                out.append(result)
 
         return out
