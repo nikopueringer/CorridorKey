@@ -8,6 +8,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -69,6 +70,9 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    # Compress responses > 1KB (speeds up file transfers to nodes)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # API routes
     app.include_router(clips.router)

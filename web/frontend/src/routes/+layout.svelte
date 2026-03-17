@@ -25,7 +25,18 @@
 		return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 	}
 
+	function sendBrowserNotification(title: string, body: string) {
+		if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+			new Notification(title, { body, icon: '/Corridor_Digital_Logo.svg' });
+		}
+	}
+
 	onMount(() => {
+		// Request notification permission
+		if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+			Notification.requestPermission();
+		}
+
 		connect();
 		refreshDevice();
 		refreshVRAM();
@@ -45,9 +56,15 @@
 			} else if (msg.type === 'job:status') {
 				const d = msg.data as { job_id: string; status: string; error?: string };
 				updateJobFromWS(d.job_id, { status: d.status, error_message: d.error ?? null });
-				if (d.status === 'completed') toast.success(`Job completed: ${d.job_id}`);
-				else if (d.status === 'failed') toast.error(`Job failed: ${d.error ?? d.job_id}`);
-				else if (d.status === 'cancelled') toast.warning(`Job cancelled: ${d.job_id}`);
+				if (d.status === 'completed') {
+					toast.success(`Job completed: ${d.job_id}`);
+					sendBrowserNotification('Job Completed', `Job ${d.job_id} finished successfully`);
+				} else if (d.status === 'failed') {
+					toast.error(`Job failed: ${d.error ?? d.job_id}`);
+					sendBrowserNotification('Job Failed', d.error ?? `Job ${d.job_id} failed`);
+				} else if (d.status === 'cancelled') {
+					toast.warning(`Job cancelled: ${d.job_id}`);
+				}
 				refreshJobs();
 				refreshClips();
 			} else if (msg.type === 'job:warning') {
