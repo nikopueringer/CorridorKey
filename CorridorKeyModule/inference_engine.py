@@ -191,8 +191,8 @@ class CorridorKeyEngine:
     ) -> dict[str, np.ndarray]:
         # 6. Post-Process (Resize Back to Original Resolution)
         # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
-        res_alpha = pred_alpha.permute(1, 2, 0).numpy()
-        res_fg = pred_fg.permute(1, 2, 0).numpy()
+        res_alpha = pred_alpha.permute(1, 2, 0).cpu().numpy()
+        res_fg = pred_fg.permute(1, 2, 0).cpu().numpy()
         res_alpha = cv2.resize(res_alpha, (w, h), interpolation=cv2.INTER_LANCZOS4)
         res_fg = cv2.resize(res_fg, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
@@ -299,7 +299,7 @@ class CorridorKeyEngine:
 
         # F. Composite
         if generate_comp:
-            bg_lin = _get_checkerboard_linear_torch(w, h, self.device)
+            bg_lin = _get_checkerboard_linear_torch(w, h, processed_fg.device)
             if fg_is_straight:
                 comp = cu.composite_straight(processed_fg, bg_lin, processed_alpha)
             else:
@@ -385,6 +385,8 @@ class CorridorKeyEngine:
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
+        generate_comp: bool = True,
+        post_process_on_gpu: bool = True,
     ) -> dict[str, np.ndarray]:
         """
         Process a single frame.
@@ -447,12 +449,31 @@ class CorridorKeyEngine:
         if handle:
             handle.remove()
 
-        pred_alpha = prediction["alpha"].float()
-        pred_fg = prediction["fg"].float()  # Output is sRGB (Sigmoid)
-
-        return self._postprocess_torch(
-            pred_alpha, pred_fg, w, h, fg_is_straight, despill_strength, auto_despeckle, despeckle_size
-        )[0]
+        if post_process_on_gpu:
+            out = self._postprocess_torch(
+                prediction["alpha"].float(),
+                prediction["fg"].float(),
+                w,
+                h,
+                fg_is_straight,
+                despill_strength,
+                auto_despeckle,
+                despeckle_size,
+                generate_comp,
+            )[0]  # batch of 1, take first element
+        else:
+            out = self._postprocess_opencv(
+                prediction["alpha"][0].float(),
+                prediction["fg"][0].float(),
+                w,
+                h,
+                fg_is_straight,
+                despill_strength,
+                auto_despeckle,
+                despeckle_size,
+                generate_comp,
+            )
+        return out
 
     @torch.inference_mode()
     def batch_process_frames(
