@@ -251,15 +251,18 @@ def despill(
 def connected_components(mask: torch.Tensor, min_component_width=1, max_iterations=100) -> torch.Tensor:
     """
     Adapted from: https://gist.github.com/efirdc/5d8bd66859e574c683a504a4690ae8bc
-    mask: torch Tensor [B, 1, H, W] binary 1 or 0
-    min_component_width: Minimum width of connected components that are separated instead of merged.
-    max_iterations: Maximum number of flood fill iterations. Adjust based on expected component sizes.
+    Args:
+        mask: torch Tensor [B, 1, H, W] binary 1 or 0
+        min_component_width: int. Minimum width of connected components that are separated instead of merged.
+        max_iterations: int. Maximum number of flood fill iterations. Adjust based on expected component sizes.
+    Returns:
+        comp: torch Tensor [B, 1, H, W] with connected component labels (0 = background, 1..N = components)
     """
     bs, _, H, W = mask.shape
 
     # Reference implementation uses torch.arange instead of torch.randperm
     # torch.randperm converges considerably faster and more uniformly
-    comp = torch.randperm(W * H).repeat(bs, 1).view(mask.shape).float().to(mask.device)
+    comp = (torch.randperm(W * H) + 1).repeat(bs, 1).view(mask.shape).float().to(mask.device)
     comp[mask != 1] = 0
 
     prev_comp = torch.zeros_like(comp)
