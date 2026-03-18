@@ -6,6 +6,7 @@ from collections.abc import Callable
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 def _is_tensor(x: np.ndarray | torch.Tensor) -> bool:
@@ -245,6 +246,41 @@ def despill(
         return image * (1.0 - strength) + despilled * strength
 
     return despilled
+
+
+def connected_components(mask: torch.Tensor, min_component_width=1, max_iterations=100) -> torch.Tensor:
+    """
+    Adapted from: https://gist.github.com/efirdc/5d8bd66859e574c683a504a4690ae8bc
+    mask: torch Tensor [B, 1, H, W] binary 1 or 0
+    min_component_width: Minimum width of connected components that are separated instead of merged.
+    max_iterations: Maximum number of flood fill iterations. Adjust based on expected component sizes.
+    """
+    bs, _, H, W = mask.shape
+
+    # Reference implementation uses torch.arange instead of torch.randperm
+    # torch.randperm converges considerably faster and more uniformly
+    comp = torch.randperm(W * H).repeat(bs, 1).view(mask.shape).float().to(mask.device)
+    comp[mask != 1] = 0
+
+    prev_comp = torch.zeros_like(comp)
+
+    iteration = 0
+
+    while not torch.equal(comp, prev_comp) and iteration < max_iterations:
+        prev_comp = comp.clone()
+        comp[mask == 1] = F.max_pool2d(
+            comp, kernel_size=(2 * min_component_width) + 1, stride=1, padding=min_component_width
+        )[mask == 1]
+        iteration += 1
+
+    comp = comp.long()
+    # Relabel components to have contiguous labels starting from 1
+    unique_labels = torch.unique(comp)
+    label_map = torch.zeros(unique_labels.max().item() + 1, dtype=torch.long, device=mask.device)
+    label_map[unique_labels] = torch.arange(len(unique_labels), device=mask.device)
+    comp = label_map[comp]
+
+    return comp
 
 
 def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5) -> np.ndarray:

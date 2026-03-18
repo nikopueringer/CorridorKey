@@ -329,34 +329,27 @@ class CorridorKeyEngine:
 
     @staticmethod
     def _clean_matte_gpu(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
-        """Fully GPU matte cleanup using morphological operations.
-
-        Approximates connected-component removal by eroding small regions
-        away, then dilating back.  Avoids the GPU→CPU→GPU roundtrip that
-        ``cv2.connectedComponentsWithStats`` would require.
-
-        The erosion radius is derived from ``area_threshold``: a circular
-        spot of area A has radius sqrt(A/pi), so erosion by that radius
-        eliminates it.
+        """
+        Fully GPU matte cleanup
         """
         _device = alpha.device
-        mask = (alpha > 0.5).float()  # [B, 1, H, W]
+        mask = alpha > 0.5  # [B, 1, H, W]
 
-        # Erode: kill spots smaller than area_threshold
-        # A circle of area A has radius r = sqrt(A / pi)
-        import math
+        # Find the largest connected components in the mask
+        # only a limited amount of iterations is needed to find components above the area threshold
+        components = cu.connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
+        sizes = torch.bincount(components.flatten())
+        big_sizes = torch.nonzero(sizes >= area_threshold)
 
-        erode_r = max(1, int(math.sqrt(area_threshold / math.pi)))
-        erode_k = erode_r * 2 + 1
-        # Erosion = negative of max_pool on negated mask
-        mask = -F.max_pool2d(-mask, erode_k, stride=1, padding=erode_r)
+        mask = torch.zeros_like(mask).float()
+        mask[torch.isin(components, big_sizes)] = 1.0
 
         # Dilate back to restore edges of large regions
-        dilate_r = erode_r + (dilation if dilation > 0 else 0)
-        # How many applications with kernel size 5 are needed to achieve the desired dilation radius
-        repeats = dilate_r // 2
-        for _ in range(repeats):
-            mask = F.max_pool2d(mask, 5, stride=1, padding=2)
+        if dilation > 0:
+            # How many applications with kernel size 5 are needed to achieve the desired dilation radius
+            repeats = dilation // 2
+            for _ in range(repeats):
+                mask = F.max_pool2d(mask, 5, stride=1, padding=2)
 
         # Blur for soft edges
         if blur_size > 0:
