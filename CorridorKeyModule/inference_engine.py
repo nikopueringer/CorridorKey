@@ -139,7 +139,8 @@ class CorridorKeyEngine:
 
                 self._preprocess_input = torch.compile(self._preprocess_input, mode="max-autotune")
                 self._despill_gpu = torch.compile(self._despill_gpu, mode="max-autotune")
-                self._clean_matte_gpu = torch.compile(self._clean_matte_gpu, mode="max-autotune")
+                # Raises runtime errors due to complicated logic being hard to compile
+                # self._clean_matte_gpu = torch.compile(self._clean_matte_gpu, mode="max-autotune")
 
             except Exception as e:
                 print(f"Model compilation failed with error: {e}")
@@ -264,7 +265,7 @@ class CorridorKeyEngine:
         non-blocking and returns a :class:`PendingTransfer` — call
         ``.resolve()`` to get the numpy dict later.
         """
-        # Resize on GPU using F.interpolate (much faster than cv2 at 4K)
+        # Resize on GPU using torchvision (much faster than cv2 at 4K)
         alpha = TF.resize(
             pred_alpha.float(),
             [h, w],
@@ -406,6 +407,7 @@ class CorridorKeyEngine:
         Returns:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """
+        torch.compiler.cudagraph_mark_step_begin()
         image_was_uint8 = image.dtype == np.uint8
         mask_was_uint8 = mask_linear.dtype == np.uint8
 
@@ -509,6 +511,7 @@ class CorridorKeyEngine:
         Returns:
              list[dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}]
         """
+        torch.compiler.cudagraph_mark_step_begin()
         bs, h, w = images.shape[:3]
 
         # 1. Inputs Check & Normalization
