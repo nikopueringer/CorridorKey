@@ -289,10 +289,10 @@ class CorridorKeyEngine:
         processed_fg = self._despill_gpu(fg, despill_strength)
 
         # C. sRGB → linear on GPU
-        processed_fg = cu.srgb_to_linear(processed_fg)
+        processed_fg_lin = cu.srgb_to_linear(processed_fg)
 
         # D. Premultiply on GPU
-        processed_fg = cu.premultiply(processed_fg, processed_alpha)
+        processed_fg = cu.premultiply(processed_fg_lin, processed_alpha)
 
         # E. Pack RGBA on GPU
         packed_processed = torch.cat([processed_fg, processed_alpha], dim=1)
@@ -301,9 +301,9 @@ class CorridorKeyEngine:
         if generate_comp:
             bg_lin = _get_checkerboard_linear_torch(w, h, processed_fg.device)
             if fg_is_straight:
-                comp = cu.composite_straight(processed_fg, bg_lin, processed_alpha)
+                comp = cu.composite_straight(processed_fg_lin, bg_lin, processed_alpha)
             else:
-                comp = cu.composite_premul(processed_fg, bg_lin, processed_alpha)
+                comp = cu.composite_premul(processed_fg_lin, bg_lin, processed_alpha)
             comp = cu.linear_to_srgb(comp)  # [H, W, 3] opaque
         else:
             del processed_fg, processed_alpha
