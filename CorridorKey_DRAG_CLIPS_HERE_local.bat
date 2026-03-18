@@ -28,6 +28,6 @@ echo Target: "%WIN_PATH%"
 
 REM Run via uv entry point (handles the virtual environment automatically)
 cd /d "%SCRIPT_DIR%"
-uv run corridorkey wizard "%WIN_PATH%"
+uv run --extra cuda corridorkey wizard "%WIN_PATH%"
 
 pause
