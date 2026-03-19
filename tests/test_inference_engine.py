@@ -54,10 +54,18 @@ class TestProcessFrameOutputs:
     """Verify shape, dtype, and key presence of process_frame outputs."""
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_output_keys(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_output_keys(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """process_frame must return alpha, fg, comp, and processed."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
         assert "alpha" in result
         assert "fg" in result
@@ -65,11 +73,19 @@ class TestProcessFrameOutputs:
         assert "processed" in result
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_output_shapes_match_input(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_output_shapes_match_input(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """All outputs should match the spatial dimensions of the input."""
         h, w = sample_frame_rgb.shape[:2]
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
         assert result["alpha"].shape[:2] == (h, w)
         assert result["fg"].shape[:2] == (h, w)
@@ -77,28 +93,52 @@ class TestProcessFrameOutputs:
         assert result["processed"].shape == (h, w, 4)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_output_dtype_float32(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_output_dtype_float32(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """All outputs should be float32 numpy arrays."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
         for key in ("alpha", "fg", "comp", "processed"):
             assert result[key].dtype == np.float32, f"{key} should be float32"
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_alpha_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_alpha_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """Alpha output must be in [0, 1] — values outside this range corrupt compositing."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         alpha = result["alpha"]
         assert alpha.min() >= -0.01, f"alpha min {alpha.min():.4f} is below 0"
         assert alpha.max() <= 1.01, f"alpha max {alpha.max():.4f} is above 1"
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_fg_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_fg_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """FG output must be in [0, 1] — required for downstream sRGB conversion and EXR export."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         fg = result["fg"]
         assert fg.min() >= -0.01, f"fg min {fg.min():.4f} is below 0"
         assert fg.max() <= 1.01, f"fg max {fg.max():.4f} is above 1"
@@ -118,35 +158,57 @@ class TestProcessFrameColorSpace:
     """
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_srgb_input_default(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_srgb_input_default(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """Default sRGB path should not crash and should return valid outputs."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(
-            sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
-        )
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
+            )[0]
+        else:
+            result = engine.process_frame(
+                sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
+            )
 
         np.testing.assert_allclose(result["comp"], 0.545655, atol=1e-4)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_linear_input_path(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_linear_input_path(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """Linear input path should convert to sRGB before model input."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(
-            sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
-        )
-        assert result["comp"].shape == sample_frame_rgb.shape
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
+            )[0]
+        else:
+            result = engine.process_frame(
+                sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
+            )
+        assert result["comp"].shape == sample_frame_rgb.shape[1:] if batched else sample_frame_rgb.shape
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_uint8_input_normalized(self, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_uint8_input_normalized(self, sample_mask, mock_greenformer, backend, batched):
         """uint8 input should be auto-converted to float32 [0, 1]."""
         img_uint8 = np.random.default_rng(42).integers(0, 256, (64, 64, 3), dtype=np.uint8)
         engine = _make_engine_with_mock(mock_greenformer)
-        # Should not crash — uint8 is auto-normalized to float32
-        result = engine.process_frame(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            img_uint8 = np.stack([img_uint8] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")[0]
+        else:
+            result = engine.process_frame(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")
         assert result["alpha"].dtype == np.float32
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_model_called_exactly_once(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_model_called_exactly_once(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """The neural network model must be called exactly once per process_frame() call.
 
         Double-inference would double latency and produce incorrect outputs.
@@ -165,7 +227,8 @@ class TestProcessFramePostProcessing:
     """Verify post-processing: despill, despeckle, premultiply, composite."""
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_despill_strength_reduces_green_in_spill_pixels(self, sample_frame_rgb, sample_mask, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_despill_strength_reduces_green_in_spill_pixels(self, sample_frame_rgb, sample_mask, backend, batched):
         """despill_strength=1.0 must reduce green in spill pixels; strength=0.0 must leave it unchanged.
 
         The default mock_greenformer returns uniform gray (R=G=B=0.6) which has no
@@ -193,12 +256,22 @@ class TestProcessFramePostProcessing:
 
         engine = _make_engine_with_mock(green_mock)
 
-        result_no_despill = engine.process_frame(
-            sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
-        )
-        result_full_despill = engine.process_frame(
-            sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
-        )
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result_no_despill = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
+            )[0]
+            result_full_despill = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
+            )[0]
+        else:
+            result_no_despill = engine.process_frame(
+                sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
+            )
+            result_full_despill = engine.process_frame(
+                sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
+            )
 
         rgb_none = result_no_despill["processed"][:, :, :3]
         rgb_full = result_full_despill["processed"][:, :, :3]
@@ -214,16 +287,26 @@ class TestProcessFramePostProcessing:
         )
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_auto_despeckle_toggle(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_auto_despeckle_toggle(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """auto_despeckle=False should skip clean_matte without crashing."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(
-            sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
-        )
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
+            )[0]
+            sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
+        else:
+            result = engine.process_frame(
+                sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
+            )
         assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_processed_is_linear_premul_rgba(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_processed_is_linear_premul_rgba(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """The 'processed' output should be 4-channel RGBA (linear, premultiplied).
 
         This is the EXR-ready output that compositors load into Nuke for
@@ -231,7 +314,14 @@ class TestProcessFramePostProcessing:
         means color is already multiplied by alpha).
         """
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         processed = result["processed"]
         assert processed.shape[2] == 4
 
@@ -247,25 +337,46 @@ class TestProcessFramePostProcessing:
         np.testing.assert_allclose(rgb, expected_premul, atol=1e-4)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_mask_2d_vs_3d_input(self, sample_frame_rgb, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_mask_2d_vs_3d_input(self, sample_frame_rgb, mock_greenformer, backend, batched):
         """process_frame should accept both [H, W] and [H, W, 1] masks."""
         engine = _make_engine_with_mock(mock_greenformer)
         mask_2d = np.ones((64, 64), dtype=np.float32) * 0.5
         mask_3d = mask_2d[:, :, np.newaxis]
 
-        result_2d = engine.process_frame(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")
-        result_3d = engine.process_frame(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            mask_2d = np.stack([mask_2d] * 2, axis=0)
+            mask_3d = np.stack([mask_3d] * 2, axis=0)
+            result_2d = engine.batch_process_frames(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+            result_3d = engine.batch_process_frames(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")[
+                0
+            ]
+        else:
+            result_2d = engine.process_frame(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")
+            result_3d = engine.process_frame(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")
 
         # Both should produce the same output
         np.testing.assert_allclose(result_2d["alpha"], result_3d["alpha"], atol=1e-5)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_refiner_scale_parameter_accepted(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_refiner_scale_parameter_accepted(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """Non-default refiner_scale must not raise — the parameter must be threaded through."""
         engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(
-            sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
-        )
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(
+                sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
+            )[0]
+            sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
+        else:
+            result = engine.process_frame(
+                sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
+            )
         assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
 
 
@@ -277,7 +388,8 @@ class TestProcessFramePostProcessing:
 class TestNvidiaGPUProcess:
     @pytest.mark.gpu
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_process_frame_on_gpu(self, sample_frame_rgb, sample_mask, mock_greenformer, backend):
+    @pytest.mark.parametrize("batched", [True, False])
+    def test_process_frame_on_gpu(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """
         Scenario: Process a frame using a CUDA-configured engine to verify cross-device compatibility.
         Expected: The mock model detects the GPU input and returns matching tensors without a device mismatch error.
@@ -285,7 +397,13 @@ class TestNvidiaGPUProcess:
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
 
-        engine = _make_engine_with_mock(mock_greenformer, device=torch.device("cuda"))
+        engine = _make_engine_with_mock(mock_greenformer, device="cuda")
 
-        result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+            result = result[0]
+        else:
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         assert result["alpha"].dtype == np.float32
