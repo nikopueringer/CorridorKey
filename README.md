@@ -301,6 +301,9 @@ You MAY NOT offer inference with this model as a paid API service. If you run a 
 
 Please keep the Corridor Key name in any future forks or releases!
 
+## Community Extensions
+* [CorridorKeyOpenVINO](https://github.com/daniil-lyakhov/CorridorKeyOpenVINO) - Run the CorridorKey model quickly on Intel hardware with the OpenVINO inference framework.
+
 ## Acknowledgements and Licensing
 
 CorridorKey integrates several open-source modules for Alpha Hint generation. We would like to explicitly credit and thank the following research teams:
