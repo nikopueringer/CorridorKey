@@ -404,34 +404,33 @@ class CorridorKeyEngine:
             despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
             auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
             despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
+            generate_comp: bool. If True, also generates a composite on checkerboard for quick checking.
+            post_process_on_gpu: bool. If True, performs post-processing on GPU using PyTorch instead of OpenCV.
         Returns:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """
         torch.compiler.cudagraph_mark_step_begin()
-        image_was_uint8 = image.dtype == np.uint8
-        mask_was_uint8 = mask_linear.dtype == np.uint8
-
-        # immediately casting to float is fine since fp16 can represent all uint8 values exactly
-        image = torch.from_numpy(image).to(self.model_precision).to(self.device)
-        mask_linear = torch.from_numpy(mask_linear).to(self.model_precision).to(self.device)
-        # 1. Inputs Check & Normalization
-        if image_was_uint8:
-            image = image / 255.0
-
-        if mask_was_uint8:
-            mask_linear = mask_linear / 255.0
-
         h, w = image.shape[:2]
 
-        # Ensure Mask Shape
-        if mask_linear.ndim == 2:
-            mask_linear = mask_linear.unsqueeze(-1)
-
-        image = image.permute(2, 0, 1)  # [C, H, W]
-        mask_linear = mask_linear.permute(2, 0, 1)  # [C, H, W]
-
-        image = image.unsqueeze(0)
-        mask_linear = mask_linear.unsqueeze(0)
+        # 1. Inputs Check & Normalization
+        image = (
+            TF.to_dtype(
+                torch.from_numpy(image).permute((2, 0, 1)),
+                self.model_precision,
+                scale=True,
+            )
+            .to(self.device, non_blocking=True)
+            .unsqueeze(0)
+        )
+        mask_linear = (
+            TF.to_dtype(
+                torch.from_numpy(mask_linear.reshape((h, w, 1))).permute((2, 0, 1)),
+                self.model_precision,
+                scale=True,
+            )
+            .to(self.device, non_blocking=True)
+            .unsqueeze(0)
+        )
 
         inp_t = self._preprocess_input(image, mask_linear, input_is_linear)
 
