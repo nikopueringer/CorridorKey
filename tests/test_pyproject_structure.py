@@ -39,11 +39,11 @@ class TestCudaExtra:
 
     def test_cuda_extra_contains_torch(self, pyproject: dict) -> None:
         cuda_deps = pyproject["project"]["optional-dependencies"]["cuda"]
-        assert "torch==2.7.1" in cuda_deps
+        assert "torch==2.8.0" in cuda_deps
 
     def test_cuda_extra_contains_torchvision(self, pyproject: dict) -> None:
         cuda_deps = pyproject["project"]["optional-dependencies"]["cuda"]
-        assert "torchvision==0.22.1" in cuda_deps
+        assert "torchvision==0.23.0" in cuda_deps
 
 
 # ---------------------------------------------------------------------------
