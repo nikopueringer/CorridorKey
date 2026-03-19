@@ -54,7 +54,13 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     > **Note:** If this is the first time installing uv, any terminal windows you already had open won't see it. The installer script handles the current window automatically, but if you open a new terminal and get "'uv' is not recognized", just close and reopen that terminal.
 3.  (Optional) Double-click `Install_GVM_Windows.bat` and `Install_VideoMaMa_Windows.bat` to download the heavy optional Alpha Hint generator weights.
 
-**For Linux / Mac Users:**
+**For Linux / Mac Users (Automated):**
+1.  Clone or download this repository to your local machine.
+2.  Open terminal and write `bash`. Put a space after writing `bash`.
+3.  Drag and drop `Install_CorridorKey_Linux_Mac.sh` into the terminal. Then press enter.
+4.  (Optional) Do the 2. step again. But now drag and drop `Install_GVM_Linux_Mac.sh` and `Install_VideoMaMa_Linux_Mac.sh` to download the heavy optional Alpha Hint generator weights.
+
+**For Linux / Mac Users (Manual):**
 1.  Clone or download this repository to your local machine.
 2.  Install uv if you don't have it:
     ```bash
@@ -156,7 +162,8 @@ Notes:
 For the easiest experience, use the provided launcher scripts. These scripts launch a prompt-based configuration wizard in your terminal.
 
 *   **Windows:** Drag-and-drop a video file or folder onto `CorridorKey_DRAG_CLIPS_HERE_local.bat` (Note: Only launch via Drag-and-Drop or CMD. Double-clicking the `.bat` directly will throw an error).
-*   **Linux / Mac:** Run or drag-and-drop a video file or folder onto `./CorridorKey_DRAG_CLIPS_HERE_local.sh`
+*   **Linux / Mac:** Run or drag-and-drop a video file or folder onto `./CorridorKey_DRAG_CLIPS_HERE_local.sh`.
+* - Or write `bash` again in terminal. Put a space after and then drag-and-drop `CorridorKey_DRAG_CLIPS_HERE_local.sh` and your clip folder together into terminal, respectively. Then press enter.
 
 **Workflow Steps:**
 1.  **Launch:** You can drag-and-drop a single loose video file (like an `.mp4`), a shot folder containing image sequences, or even a master "batch" folder containing multiple different shots all at once onto the launcher script.

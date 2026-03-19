@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Corridor Key Launcher - Local Linux/macOS
 
+cd "$(dirname "$0")"
+
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 LOCAL_SCRIPT="$SCRIPT_DIR/corridorkey_cli.py"
