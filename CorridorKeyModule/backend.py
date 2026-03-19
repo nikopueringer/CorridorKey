@@ -9,6 +9,7 @@ import os
 import platform
 import shutil
 import sys
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +54,11 @@ def resolve_backend(requested: str | None = None) -> str:
     return backend
 
 
+CHECKPOINT_DIR = os.path.join("CorridorKeyModule", "checkpoints")
+MLX_MODEL_URL = "https://github.com/nikopueringer/corridorkey-mlx/releases/download/v1.0.0/corridorkey_mlx.safetensors"
+MLX_MODEL_FILENAME = "corridorkey_mlx.safetensors"
+
+
 def _auto_detect_backend() -> str:
     """Try MLX on Apple Silicon, fall back to Torch."""
     if sys.platform != "darwin" or platform.machine() != "arm64":
@@ -65,10 +71,33 @@ def _auto_detect_backend() -> str:
         logger.info("corridorkey_mlx not installed — using torch backend")
         return "torch"
 
-    safetensor_files = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{MLX_EXT}"))
-    if not safetensor_files:
-        logger.info("No %s checkpoint found — using torch backend", MLX_EXT)
-        return "torch"
+        # Auto-download logic for the .safetensors file
+    model_path = os.path.join(CHECKPOINT_DIR, MLX_MODEL_FILENAME)
+    cache_path = model_path + ".tmp"
+
+    if not os.path.exists(model_path):
+        logger.info(f"MLX checkpoint not found. Downloading to {model_path}...")
+        try:
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+
+            # Create CorridorKeyModule/checkpoints/ if it doesn't exist
+            os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+            # Download the file
+            urllib.request.urlretrieve(MLX_MODEL_URL, cache_path)
+            os.rename(cache_path, model_path)
+            logger.info("Download complete.")
+
+        except Exception as e:
+            logger.error(f"Failed to download MLX checkpoint: {e}")
+            logger.info("Falling back to torch backend due to download failure.")
+
+            # Clean up corrupted/partial file if the download failed midway
+            if os.path.exists(model_path):
+                os.remove(model_path)
+
+            return "torch"
 
     logger.info("Apple Silicon + MLX available — using mlx backend")
     return "mlx"
