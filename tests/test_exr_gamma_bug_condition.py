@@ -195,17 +195,19 @@ class TestDefect1And2RunInferenceEXRPath:
             # We'll capture what process_frame actually receives by patching it
             captured_args = {}
 
-            def mock_process_frame(image, mask_linear, *, input_is_linear=False, **kwargs):
+            def mock_batch_process_frames(image, mask_linear, *, input_is_linear=False, **kwargs):
                 captured_args["image"] = image.copy()
                 captured_args["input_is_linear"] = input_is_linear
                 # Return minimal valid result
                 h_img, w_img = image.shape[:2]
-                return {
-                    "alpha": np.zeros((h_img, w_img, 1), dtype=np.float32),
-                    "fg": np.zeros((h_img, w_img, 3), dtype=np.float32),
-                    "comp": np.zeros((h_img, w_img, 3), dtype=np.float32),
-                    "processed": np.zeros((h_img, w_img, 4), dtype=np.float32),
-                }
+                return [
+                    {
+                        "alpha": np.zeros((h_img, w_img, 1), dtype=np.float32),
+                        "fg": np.zeros((h_img, w_img, 3), dtype=np.float32),
+                        "comp": np.zeros((h_img, w_img, 3), dtype=np.float32),
+                        "processed": np.zeros((h_img, w_img, 4), dtype=np.float32),
+                    }
+                ]
 
             # Build a mock clip that looks like an EXR image sequence
             mock_clip = MagicMock()
@@ -228,7 +230,7 @@ class TestDefect1And2RunInferenceEXRPath:
 
             # Mock the engine
             mock_engine = MagicMock()
-            mock_engine.process_frame = mock_process_frame
+            mock_engine.batch_process_frames = mock_batch_process_frames
 
             # Patch create_engine where it's imported from inside run_inference
             with patch("CorridorKeyModule.backend.create_engine", return_value=mock_engine):
@@ -243,7 +245,7 @@ class TestDefect1And2RunInferenceEXRPath:
 
             assert "image" in captured_args, "process_frame was never called — clip setup may be wrong"
 
-            actual_image = captured_args["image"]
+            actual_image = captured_args["image"][0]
             actual_is_linear = captured_args["input_is_linear"]
 
             # Defect 1: The frame should be gamma-corrected (sRGB), not raw linear

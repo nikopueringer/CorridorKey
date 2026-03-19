@@ -251,16 +251,18 @@ class TestPreservationLinearEXRInference:
             # Capture what process_frame actually receives
             captured_args = {}
 
-            def mock_process_frame(image, mask_linear, *, input_is_linear=False, **kwargs):
+            def mock_batch_process_frames(image, mask_linear, *, input_is_linear=False, **kwargs):
                 captured_args["image"] = image.copy()
                 captured_args["input_is_linear"] = input_is_linear
                 h_img, w_img = image.shape[:2]
-                return {
-                    "alpha": np.zeros((h_img, w_img, 1), dtype=np.float32),
-                    "fg": np.zeros((h_img, w_img, 3), dtype=np.float32),
-                    "comp": np.zeros((h_img, w_img, 3), dtype=np.float32),
-                    "processed": np.zeros((h_img, w_img, 4), dtype=np.float32),
-                }
+                return [
+                    {
+                        "alpha": np.zeros((h_img, w_img, 1), dtype=np.float32),
+                        "fg": np.zeros((h_img, w_img, 3), dtype=np.float32),
+                        "comp": np.zeros((h_img, w_img, 3), dtype=np.float32),
+                        "processed": np.zeros((h_img, w_img, 4), dtype=np.float32),
+                    }
+                ]
 
             mock_clip = MagicMock()
             mock_clip.name = "test_clip"
@@ -281,7 +283,7 @@ class TestPreservationLinearEXRInference:
             mock_settings.refiner_scale = 1.0
 
             mock_engine = MagicMock()
-            mock_engine.process_frame = mock_process_frame
+            mock_engine.batch_process_frames = mock_batch_process_frames
 
             with patch("CorridorKeyModule.backend.create_engine", return_value=mock_engine):
                 from clip_manager import run_inference
@@ -297,7 +299,7 @@ class TestPreservationLinearEXRInference:
 
             # The frame should be raw linear data — no gamma correction
             np.testing.assert_allclose(
-                captured_args["image"],
+                captured_args["image"][0],
                 expected_linear,
                 atol=1e-6,
                 err_msg=(
