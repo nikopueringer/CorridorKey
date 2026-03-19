@@ -18,7 +18,7 @@ dependencies = [
     "setuptools",
     # Triton fix for Windows
     # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
-    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
+    "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     # GVM alpha hint generator
     "diffusers",
     "transformers",
@@ -83,7 +83,7 @@ markers = [
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-env = ["OPENCV_IO_ENABLE_OPENEXR=1",]
+env = ["OPENCV_IO_ENABLE_OPENEXR=1", ]
 addopts = "--tb=short"
 
 [tool.coverage.run]

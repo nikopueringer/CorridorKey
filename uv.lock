@@ -434,7 +434,7 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'cuda'", specifier = "==0.23.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "corridorkey", extra = "cuda" } },
     { name = "tqdm" },
     { name = "transformers" },
-    { name = "triton-windows", marker = "sys_platform == 'win32'", specifier = "==3.3.1.post21" },
+    { name = "triton-windows", marker = "sys_platform == 'win32'", specifier = "==3.4.0.post21" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["cuda", "mlx"]
@@ -2354,16 +2354,16 @@ wheels = [
 
 [[package]]
 name = "triton-windows"
-version = "3.3.1.post21"
+version = "3.4.0.post21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "setuptools", marker = "platform_machine != 'aarch64' or sys_platform != 'linux' or extra != 'extra-11-corridorkey-cuda' or (extra == 'extra-11-corridorkey-cuda' and extra == 'extra-11-corridorkey-mlx')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/43/6c0977586fab28a9aef44d1ccd4b2a31f198be77cdd64650b3e65b06c865/triton_windows-3.3.1.post21-cp310-cp310-win_amd64.whl", hash = "sha256:ef25f3ec1893a16af3dafca6d148fce3ea78f36eeb8ea08108ece56726d64c0b", size = 41506387, upload-time = "2025-10-17T05:07:38.409Z" },
-    { url = "https://files.pythonhosted.org/packages/c1/2d/9df3b3bdcaee016a6d0fb345eeb9a0b8ade9892c1805fb6306b87474435c/triton_windows-3.3.1.post21-cp311-cp311-win_amd64.whl", hash = "sha256:abb76630c29e16d15c0e247e9859228f937bf45e96e08285466e1c8f2a76b53d", size = 41506973, upload-time = "2025-10-17T05:07:44.786Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/5e/2730d1a18ac336eaa3bea1e9f2fbe718d3868b71e794f46d572ce3fcd845/triton_windows-3.3.1.post21-cp312-cp312-win_amd64.whl", hash = "sha256:c75e473e2d7edb41037b50477bda5e9fd01939ce9ac25a143c9c149bc9d8adf5", size = 41508919, upload-time = "2025-10-17T05:07:51.569Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/b9/c698157da17088c97fda3702e0f333128aca9453062240a254554a6e0623/triton_windows-3.3.1.post21-cp313-cp313-win_amd64.whl", hash = "sha256:6304328e899692993dabd1cfb2ea10b6c0ae5e1c9be3786c670718a94eadb6ed", size = 41509076, upload-time = "2025-10-17T05:07:58.111Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/77/58e419d467770ccabe83650f22e35cd5cba7e8fe23294fb49621d3c2aa57/triton_windows-3.4.0.post21-cp310-cp310-win_amd64.whl", hash = "sha256:b5d12acb71d8fb4af8baff7588b5d26614bbe383888c22ab27b50948dc3baa82", size = 42672843, upload-time = "2025-10-17T05:09:05.38Z" },
+    { url = "https://files.pythonhosted.org/packages/12/a4/b1ea37c934929f0782d8fd8acb26e3d7c8520dbe07a89af4d17f47ece9c1/triton_windows-3.4.0.post21-cp311-cp311-win_amd64.whl", hash = "sha256:2740d13717bb1d38b77fb8e29e78c3be2ec3e89e8bba624d90abb554e0158cc6", size = 42674137, upload-time = "2025-10-17T05:09:11.961Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/e4/5e4886409737e9ac0f818604e5c50e5374b6abed10fbabec8599a2b20287/triton_windows-3.4.0.post21-cp312-cp312-win_amd64.whl", hash = "sha256:de50245877bb8693e23a02f8065309347828529ce9a934b363f856aa455e70ac", size = 42676032, upload-time = "2025-10-17T05:09:18.072Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/9b/9c893e9594eb5fd58589562546d6687bbb0fde24f8baf31a40ed5d5bbc86/triton_windows-3.4.0.post21-cp313-cp313-win_amd64.whl", hash = "sha256:c211c3025fee1cf4e9ab146cda6629933de3b8b60e4c7bb148cf431c55cb570e", size = 42674867, upload-time = "2025-10-17T05:09:24.37Z" },
 ]
 
 [[package]]
