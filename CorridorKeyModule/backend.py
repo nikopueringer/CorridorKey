@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import glob
 import logging
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,6 +22,10 @@ DEFAULT_IMG_SIZE = 2048
 
 BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
 VALID_BACKENDS = ("auto", "torch", "mlx")
+
+# Update HF_REPO_ID and HF_CHECKPOINT_FILENAME if a new model version is released.
+HF_REPO_ID = "nikopueringer/CorridorKey_v1.0"
+HF_CHECKPOINT_FILENAME = "CorridorKey.pth"
 
 
 def resolve_backend(requested: str | None = None) -> str:
@@ -82,6 +88,49 @@ def _validate_mlx_available() -> None:
         ) from err
 
 
+def _ensure_torch_checkpoint() -> Path:
+    """Download the Torch checkpoint from HuggingFace if not present.
+
+    Returns the path to the downloaded checkpoint file.
+
+    Raises:
+        RuntimeError: Network or download failure.
+        OSError: Disk space or filesystem error.
+    """
+    dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME
+    hf_url = f"https://huggingface.co/{HF_REPO_ID}"
+
+    from huggingface_hub import hf_hub_download
+
+    logger.info("Downloading CorridorKey checkpoint from %s ...", hf_url)
+
+    try:
+        cached_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_CHECKPOINT_FILENAME,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download CorridorKey checkpoint from {hf_url}. "
+            "Check your network connection and try again. "
+            f"Original error: {exc}"
+        ) from exc
+
+    try:
+        shutil.copy2(cached_path, dest)
+    except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise OSError(
+                errno.ENOSPC,
+                "Not enough disk space to save checkpoint (~300 MB required). "
+                f"Free up space in {CHECKPOINT_DIR} and try again.",
+            ) from exc
+        raise
+
+    logger.info("Checkpoint saved to %s", dest)
+    return dest
+
+
 def _discover_checkpoint(ext: str) -> Path:
     """Find exactly one checkpoint with the given extension.
 
@@ -91,6 +140,8 @@ def _discover_checkpoint(ext: str) -> Path:
     matches = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
 
     if len(matches) == 0:
+        if ext == TORCH_EXT:
+            return _ensure_torch_checkpoint()
         other_ext = MLX_EXT if ext == TORCH_EXT else TORCH_EXT
         other_files = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{other_ext}"))
         hint = ""

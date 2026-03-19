@@ -66,9 +66,8 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     uv sync --extra cuda     # CUDA GPU acceleration (Linux/Windows)
     uv sync --extra mlx      # Apple Silicon MLX acceleration
     ```
-4.  **Download the Models:** You must manually download these open-source foundational models and place them in their exact respective folders:
-    *   **CorridorKey v1.0 Model (~300MB):** [Download CorridorKey_v1.0.pth](https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth) 
-        *   Place inside: `CorridorKeyModule/checkpoints/` and ensure it is named exactly `CorridorKey.pth`.
+4.  **Download the Models:**
+    *   **CorridorKey v1.0 Model (~300MB):** Downloads automatically on first run. If no `.pth` file is found in `CorridorKeyModule/checkpoints/`, the engine fetches it from [CorridorKey's HuggingFace](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and saves it as `CorridorKey.pth`. No manual download needed.
     *   **GVM Weights (Optional):** [HuggingFace: geyongtao/gvm](https://huggingface.co/geyongtao/gvm)
         *   Download using the CLI: `uv run hf download geyongtao/gvm --local-dir gvm_core/weights`
     *   **VideoMaMa Weights (Optional):** [HuggingFace: SammyLim/VideoMaMa](https://huggingface.co/SammyLim/VideoMaMa)
@@ -121,19 +120,19 @@ Prerequisites:
      -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
      -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
      -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
-     corridorkey:latest --action run_inference --device cuda
+     corridorkey:latest run_inference --device cuda
    ```
 3. Docker Compose (recommended for repeat runs):
    ```bash
    docker compose build
-   docker compose --profile gpu run --rm corridorkey --action run_inference --device cuda
-   docker compose --profile gpu run --rm corridorkey --action list
-   docker compose --profile cpu run --rm corridorkey-cpu --action run_inference --device cpu
+   docker compose --profile gpu run --rm corridorkey run_inference --device cuda
+   docker compose --profile gpu run --rm corridorkey list
+   docker compose --profile cpu run --rm corridorkey-cpu run_inference --device cpu
    ```
 4. Optional: pin to specific GPU(s) for multi-GPU workstations:
    ```bash
-   NVIDIA_VISIBLE_DEVICES=0 docker compose --profile gpu run --rm corridorkey --action list
-   NVIDIA_VISIBLE_DEVICES=1,2 docker compose --profile gpu run --rm corridorkey --action run_inference --device cuda
+   NVIDIA_VISIBLE_DEVICES=0 docker compose --profile gpu run --rm corridorkey list
+   NVIDIA_VISIBLE_DEVICES=1,2 docker compose --profile gpu run --rm corridorkey run_inference --device cuda
    ```
 
 Notes:
@@ -148,8 +147,8 @@ Notes:
     -v "$(pwd)/CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints" \
     -v "$(pwd)/gvm_core/weights:/app/gvm_core/weights" \
     -v "$(pwd)/VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints" \
-    corridorkey:latest --action wizard --win_path /app/ClipsForInference
-  docker compose --profile gpu run --rm corridorkey --action wizard --win_path /app/ClipsForInference
+    corridorkey:latest wizard --win_path /app/ClipsForInference
+  docker compose --profile gpu run --rm corridorkey wizard --win_path /app/ClipsForInference
   ```
 
 ### 3. Usage: The Command Line Wizard
@@ -207,7 +206,7 @@ uv run python clip_manager.py --action list 2>&1 | grep -i "device\|backend\|mps
 **MPS operator errors** (`NotImplementedError: ... not implemented for 'MPS'`): Some PyTorch operations are not yet supported on MPS. Enable CPU fallback for those ops:
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-uv run python corridorkey_cli.py --action wizard --win_path "/path/to/clips"
+uv run python corridorkey_cli.py wizard --win_path "/path/to/clips"
 ```
 
 **Silent CPU fallback**: If MPS silently falls back to CPU without this variable, the run will be much slower. Setting `PYTORCH_ENABLE_MPS_FALLBACK=1` in your shell profile (`~/.zshrc`) ensures it is always active.
@@ -225,8 +224,8 @@ Auto mode prefers MLX on Apple Silicon when available.
 
 **Override via CLI flag (corridorkey_cli.py):**
 ```bash
-uv run python corridorkey_cli.py --action wizard --win_path "/path/to/clips" --backend mlx
-uv run python corridorkey_cli.py --action run_inference --backend torch
+uv run python corridorkey_cli.py wizard --win_path "/path/to/clips" --backend mlx
+uv run python corridorkey_cli.py run_inference --backend torch
 ```
 
 ### MLX Setup (Apple Silicon)

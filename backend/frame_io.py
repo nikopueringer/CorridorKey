@@ -80,6 +80,9 @@ def read_video_frame_at(
     Returns:
         float32 array [H, W, 3] in RGB order, or None if seek/read fails.
     """
+    if frame_index < 0:
+        logger.warning("Invalid frame_index %d (must be >= 0)", frame_index)
+        return None
     cap = cv2.VideoCapture(video_path)
     try:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
@@ -165,6 +168,9 @@ def read_video_mask_at(
     Returns:
         float32 array [H, W] in [0, 1], or None if seek/read fails.
     """
+    if frame_index < 0:
+        logger.warning("Invalid frame_index %d (must be >= 0)", frame_index)
+        return None
     cap = cv2.VideoCapture(video_path)
     try:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)

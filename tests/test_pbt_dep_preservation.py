@@ -33,7 +33,6 @@ KNOWN_ORIGINAL_NON_TORCH_DEPS: list[str] = [
     "opencv-python",
     "tqdm",
     "setuptools",
-    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
     "diffusers",
     "transformers",
     "accelerate",
