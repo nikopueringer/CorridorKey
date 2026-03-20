@@ -48,7 +48,7 @@ def generate_test_images(img_path, mask_path):
             print(f"Precision: {precision}, Image Size: {img_size}, Peak VRAM: {peak_vram:.2f} GB")
 
 
-def compare_implementations(src, comparison):
+def compare_implementations(src, comparison, output_dir="./Output"):
     for _, _, files in os.walk(src):
         for file in files:
             src_img = read_image(str(os.path.join(src, file))).float()
@@ -68,7 +68,9 @@ def compare_implementations(src, comparison):
             else:
                 difference = difference.abs()
 
-            save_image(difference, f"./Output/diff_{file}")
+            os.makedirs(output_dir, exist_ok=True)
+
+            save_image(difference, f"{output_dir}/diff_{file}")
 
 
 def compare_floating_point_precision(folder, ref="float64"):
@@ -138,5 +140,4 @@ def compare_img_sizes(folder, ref=1024):
 
 
 if __name__ == "__main__":
-    compare_img_sizes("./Output/original", 1024)
-    compare_img_sizes("./Output/original", 512)
+    compare_implementations("./Output/Comp", "./Output/Comp")

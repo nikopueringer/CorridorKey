@@ -246,32 +246,32 @@ class TestDespill:
     def test_pure_green_reduced_average_mode_numpy(self):
         """A pure green pixel should have green clamped to (R+B)/2 = 0."""
         img = _to_np([[0.0, 1.0, 0.0]])
-        result = cu.despill(img, green_limit_mode="average", strength=1.0)
+        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
         # Green should be 0 (clamped to avg of R=0, B=0)
         assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
 
     def test_pure_green_reduced_max_mode_numpy(self):
         """With 'max' mode, green clamped to max(R, B) = 0 for pure green."""
         img = _to_np([[0.0, 1.0, 0.0]])
-        result = cu.despill(img, green_limit_mode="max", strength=1.0)
+        result = cu.despill_opencv(img, green_limit_mode="max", strength=1.0)
         assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
 
     def test_pure_red_unchanged_numpy(self):
         """A pixel with no green excess should not be modified."""
         img = _to_np([[1.0, 0.0, 0.0]])
-        result = cu.despill(img, green_limit_mode="average", strength=1.0)
+        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result, img, atol=1e-6)
 
     def test_strength_zero_is_noop_numpy(self):
         """strength=0 should return the input unchanged."""
         img = _to_np([[0.2, 0.9, 0.1]])
-        result = cu.despill(img, strength=0.0)
+        result = cu.despill_opencv(img, strength=0.0)
         np.testing.assert_allclose(result, img, atol=1e-7)
 
     def test_partial_green_average_mode_numpy(self):
         """Green slightly above (R+B)/2 should be reduced, not zeroed."""
         img = _to_np([[0.4, 0.8, 0.2]])
-        result = cu.despill(img, green_limit_mode="average", strength=1.0)
+        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
         limit = (0.4 + 0.2) / 2.0  # 0.3
         expected_green = limit  # green clamped to limit
         assert result[0, 1] == pytest.approx(expected_green, abs=1e-5)
@@ -279,16 +279,16 @@ class TestDespill:
     def test_max_mode_higher_limit_than_average(self):
         """'max' mode uses max(R,B) which is >= (R+B)/2, so less despill."""
         img = _to_np([[0.6, 0.8, 0.1]])
-        result_avg = cu.despill(img, green_limit_mode="average", strength=1.0)
-        result_max = cu.despill(img, green_limit_mode="max", strength=1.0)
+        result_avg = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        result_max = cu.despill_opencv(img, green_limit_mode="max", strength=1.0)
         # max(R,B)=0.6 vs avg(R,B)=0.35, so max mode removes less green
         assert result_max[0, 1] >= result_avg[0, 1]
 
     def test_fractional_strength_interpolates(self):
         """strength=0.5 should produce a result between original and fully despilled."""
         img = _to_np([[0.2, 0.9, 0.1]])
-        full = cu.despill(img, green_limit_mode="average", strength=1.0)
-        half = cu.despill(img, green_limit_mode="average", strength=0.5)
+        full = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        half = cu.despill_opencv(img, green_limit_mode="average", strength=0.5)
         # Half-strength green should be between original green and fully despilled green
         assert half[0, 1] < img[0, 1]  # less green than original
         assert half[0, 1] > full[0, 1]  # more green than full despill
@@ -300,8 +300,8 @@ class TestDespill:
         """Verify torch path matches numpy path."""
         img_np = _to_np([[0.3, 0.9, 0.2]])
         img_t = _to_torch([[0.3, 0.9, 0.2]])
-        result_np = cu.despill(img_np, green_limit_mode="average", strength=1.0)
-        result_t = cu.despill(img_t, green_limit_mode="average", strength=1.0)
+        result_np = cu.despill_opencv(img_np, green_limit_mode="average", strength=1.0)
+        result_t = cu.despill_opencv(img_t, green_limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result_np, result_t.numpy(), atol=1e-5)
 
     def test_green_below_limit_unchanged_numpy(self):
@@ -315,7 +315,7 @@ class TestDespill:
         # G=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
         # spill_amount = max(0.3 - 0.7, 0) = 0  →  output equals input
         img = _to_np([[0.8, 0.3, 0.6]])
-        result = cu.despill(img, green_limit_mode="average", strength=1.0)
+        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result, img, atol=1e-6)
 
 
@@ -335,7 +335,7 @@ class TestCleanMatte:
         """A single large opaque region should survive cleanup."""
         matte = np.zeros((100, 100), dtype=np.float32)
         matte[20:80, 20:80] = 1.0  # 60x60 = 3600 pixels
-        result = cu.clean_matte(matte, area_threshold=300)
+        result = cu.clean_matte_opencv(matte, area_threshold=300)
         # Center of the blob should still be opaque
         assert result[50, 50] > 0.9
 
@@ -343,7 +343,7 @@ class TestCleanMatte:
         """A tiny blob below the threshold should be removed."""
         matte = np.zeros((100, 100), dtype=np.float32)
         matte[5:8, 5:8] = 1.0  # 3x3 = 9 pixels
-        result = cu.clean_matte(matte, area_threshold=300)
+        result = cu.clean_matte_opencv(matte, area_threshold=300)
         assert result[6, 6] == pytest.approx(0.0, abs=1e-5)
 
     def test_mixed_blobs(self):
@@ -354,7 +354,7 @@ class TestCleanMatte:
         # Small blob: 5x5 = 25 px
         matte[150:155, 150:155] = 1.0
 
-        result = cu.clean_matte(matte, area_threshold=100)
+        result = cu.clean_matte_opencv(matte, area_threshold=100)
         assert result[35, 35] > 0.9  # large blob center preserved
         assert result[152, 152] < 0.01  # small blob removed
 
@@ -362,7 +362,7 @@ class TestCleanMatte:
         """[H, W, 1] input should return [H, W, 1] output."""
         matte = np.zeros((50, 50, 1), dtype=np.float32)
         matte[10:40, 10:40, 0] = 1.0
-        result = cu.clean_matte(matte, area_threshold=100)
+        result = cu.clean_matte_opencv(matte, area_threshold=100)
         assert result.ndim == 3
         assert result.shape[2] == 1
 

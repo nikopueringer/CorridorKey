@@ -4,7 +4,6 @@ import logging
 import math
 import os
 import sys
-from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -18,20 +17,6 @@ from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
 
 logger = logging.getLogger(__name__)
-
-
-@lru_cache(maxsize=4)
-def _get_checkerboard_linear_torch(w: int, h: int, device: torch.device) -> torch.Tensor:
-    """Return a cached checkerboard tensor [3, H, W] on device in linear space."""
-    checker_size = 128
-    y_coords = torch.arange(h, device=device) // checker_size
-    x_coords = torch.arange(w, device=device) // checker_size
-    y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
-    checker = ((x_grid + y_grid) % 2).float()
-    # Map 0 -> 0.15, 1 -> 0.55 (sRGB), then convert to linear before caching
-    bg_srgb = checker * 0.4 + 0.15  # [H, W]
-    bg_srgb_3 = bg_srgb.unsqueeze(0).expand(3, -1, -1)
-    return cu.srgb_to_linear(bg_srgb_3)
 
 
 class CorridorKeyEngine:
@@ -65,7 +50,11 @@ class CorridorKeyEngine:
 
         self.model_precision = model_precision
 
-        self.model = self._load_model().to(model_precision)
+        self.model = self._load_model()
+
+        # We only tested compilation on Windows and Linux. For other platforms compilation is disabled as a precaution.
+        if sys.platform == "linux" or sys.platform == "win32":
+            self._compile()
 
     def _load_model(self) -> GreenFormer:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
@@ -124,30 +113,23 @@ class CorridorKeyEngine:
 
         model = model.to(self.model_precision)
 
-        # We only tested compilation on Windows and Linux. For other platforms compilation is disabled as a precaution.
-        if sys.platform == "linux" or sys.platform == "win32":
-            # Try compiling the model. Fallback to eager mode if it fails.
-            try:
-                compiled_model = torch.compile(model, mode="max-autotune")
-                # Trigger compilation with a dummy input
-                dummy_input = torch.zeros(
-                    1, 4, self.img_size, self.img_size, dtype=self.model_precision, device=self.device
-                ).to(memory_format=torch.channels_last)
-                with torch.inference_mode():
-                    compiled_model(dummy_input)
-                model = compiled_model
-
-                self._preprocess_input = torch.compile(self._preprocess_input, mode="max-autotune")
-                self._despill_gpu = torch.compile(self._despill_gpu, mode="max-autotune")
-                # Raises runtime errors due to complicated logic being hard to compile
-                # self._clean_matte_gpu = torch.compile(self._clean_matte_gpu, mode="max-autotune")
-
-            except Exception as e:
-                print(f"Model compilation failed with error: {e}")
-                logger.warning("Model compilation failed. Falling back to eager mode.")
-                torch.cuda.empty_cache()
-
         return model
+
+    def _compile(self):
+        try:
+            compiled_model = torch.compile(self.model, mode="max-autotune")
+            # Trigger compilation with a dummy input
+            dummy_input = torch.zeros(
+                1, 4, self.img_size, self.img_size, dtype=self.model_precision, device=self.device
+            ).to(memory_format=torch.channels_last)
+            with torch.inference_mode():
+                compiled_model(dummy_input)
+            self.model = compiled_model
+
+        except Exception as e:
+            logger.info(f"Compilation error: {e}")
+            logger.warning("Model compilation failed. Falling back to eager mode.")
+            torch.cuda.empty_cache()
 
     def _preprocess_input(
         self, image_batch: torch.Tensor, mask_batch_linear: torch.Tensor, input_is_linear: bool
@@ -204,13 +186,13 @@ class CorridorKeyEngine:
 
         # A. Clean Matte (Auto-Despeckle)
         if auto_despeckle:
-            processed_alpha = cu.clean_matte(res_alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
+            processed_alpha = cu.clean_matte_opencv(res_alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
         else:
             processed_alpha = res_alpha
 
         # B. Despill FG
         # res_fg is sRGB.
-        fg_despilled = cu.despill(res_fg, green_limit_mode="average", strength=despill_strength)
+        fg_despilled = cu.despill_opencv(res_fg, green_limit_mode="average", strength=despill_strength)
 
         # C. Premultiply (for EXR Output)
         # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
@@ -282,12 +264,12 @@ class CorridorKeyEngine:
 
         # A. Clean matte
         if auto_despeckle:
-            processed_alpha = self._clean_matte_gpu(alpha, despeckle_size, dilation=25, blur_size=5)
+            processed_alpha = cu.clean_matte_torch(alpha, despeckle_size, dilation=25, blur_size=5)
         else:
             processed_alpha = alpha
 
         # B. Despill on GPU
-        processed_fg = self._despill_gpu(fg, despill_strength)
+        processed_fg = cu.despill_torch(fg, despill_strength)
 
         # C. sRGB → linear on GPU
         processed_fg_lin = cu.srgb_to_linear(processed_fg)
@@ -300,7 +282,7 @@ class CorridorKeyEngine:
 
         # F. Composite
         if generate_comp:
-            bg_lin = _get_checkerboard_linear_torch(w, h, processed_fg.device)
+            bg_lin = cu.get_checkerboard_linear_torch(w, h, processed_fg.device)
             if fg_is_straight:
                 comp = cu.composite_straight(processed_fg_lin, bg_lin, processed_alpha)
             else:
@@ -327,53 +309,6 @@ class CorridorKeyEngine:
             }
             out.append(result)
         return out
-
-    @staticmethod
-    def _clean_matte_gpu(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
-        """
-        Fully GPU matte cleanup
-        """
-        _device = alpha.device
-        mask = alpha > 0.5  # [B, 1, H, W]
-
-        # Find the largest connected components in the mask
-        # only a limited amount of iterations is needed to find components above the area threshold
-        components = cu.connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
-        sizes = torch.bincount(components.flatten())
-        big_sizes = torch.nonzero(sizes >= area_threshold)
-
-        mask = torch.zeros_like(mask).float()
-        mask[torch.isin(components, big_sizes)] = 1.0
-
-        # Dilate back to restore edges of large regions
-        if dilation > 0:
-            # How many applications with kernel size 5 are needed to achieve the desired dilation radius
-            repeats = dilation // 2
-            for _ in range(repeats):
-                mask = F.max_pool2d(mask, 5, stride=1, padding=2)
-
-        # Blur for soft edges
-        if blur_size > 0:
-            k = int(blur_size * 2 + 1)
-            mask = TF.gaussian_blur(mask, [k, k])
-
-        return alpha * mask
-
-    @staticmethod
-    def _despill_gpu(image: torch.Tensor, strength: float) -> torch.Tensor:
-        """GPU despill — keeps data on device."""
-        if strength <= 0.0:
-            return image
-        r, g, b = image[:, 0], image[:, 1], image[:, 2]
-        limit = (r + b) / 2.0
-        spill = torch.clamp(g - limit, min=0.0)
-        g_new = g - spill
-        r_new = r + spill * 0.5
-        b_new = b + spill * 0.5
-        despilled = torch.stack([r_new, g_new, b_new], dim=1)
-        if strength < 1.0:
-            return image * (1.0 - strength) + despilled * strength
-        return despilled
 
     @torch.inference_mode()
     def process_frame(

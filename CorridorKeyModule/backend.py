@@ -179,12 +179,12 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
 
     # Apply despeckle (MLX stubs this)
     if auto_despeckle:
-        processed_alpha = cu.clean_matte(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
+        processed_alpha = cu.clean_matte_opencv(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
     else:
         processed_alpha = alpha
 
     # Apply despill (MLX stubs this)
-    fg_despilled = cu.despill(fg, green_limit_mode="average", strength=despill_strength)
+    fg_despilled = cu.despill_opencv(fg, green_limit_mode="average", strength=despill_strength)
 
     # Composite over checkerboard for comp output
     h, w = fg.shape[:2]
