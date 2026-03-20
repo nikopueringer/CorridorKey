@@ -4,6 +4,7 @@
 .ruff_cache
 .uv-cache
 .venv
+.python-version
 __pycache__/
 *.pyc
 *.pyo
@@ -33,3 +34,7 @@ Output/
 CorridorKeyModule/checkpoints/
 gvm_core/weights/
 VideoMaMaInferenceModule/checkpoints/
+
+# Frontend build artifacts (node_modules, not the build output)
+web/frontend/node_modules/
+web/frontend/.svelte-kit/

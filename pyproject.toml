@@ -50,6 +50,11 @@ cuda = [
 mlx = [
     "corridorkey-mlx ; python_version >= '3.11'",
 ]
+web = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.9",
+]
 
 [dependency-groups]
 dev = ["pytest", "pytest-cov", "ruff", "hypothesis"]

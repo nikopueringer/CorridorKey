@@ -1,0 +1,146 @@
+/* CorridorKey WebUI — Corridor Digital Brand */
+
+:root {
+	/* Surface layers — warm blacks */
+	--surface-0: #000000;
+	--surface-1: #0c0b08;
+	--surface-2: #151411;
+	--surface-3: #1c1b17;
+	--surface-4: #2a2923;
+	--surface-5: #353430;
+
+	/* Corridor Digital signature yellow */
+	--accent: #fff203;
+	--accent-dim: #e6da00;
+	--accent-muted: rgba(255, 242, 3, 0.10);
+	--accent-glow: rgba(255, 242, 3, 0.05);
+	--accent-strong: rgba(255, 242, 3, 0.18);
+
+	/* Secondary: Corridor cyan blue */
+	--secondary: #009ADA;
+	--secondary-hover: #00B5FF;
+	--secondary-muted: rgba(0, 154, 218, 0.12);
+
+	/* State colors — all readable on dark bg */
+	--state-raw: #f0a030;
+	--state-ready: #3db8ff;
+	--state-complete: #5dd879;
+	--state-error: #ff5252;
+	--state-extracting: #ffab40;
+	--state-masked: #ce93d8;
+	--state-running: #fff203;
+	--state-queued: #90a4ae;
+	--state-cancelled: #757575;
+	--state-failed: #ff5252;
+
+	/* Text hierarchy */
+	--text-primary: #f0efe8;
+	--text-secondary: #9d9c93;
+	--text-tertiary: #605f56;
+	--text-accent: var(--accent);
+
+	/* Borders */
+	--border: rgba(255, 255, 255, 0.07);
+	--border-subtle: rgba(255, 255, 255, 0.04);
+	--border-active: rgba(255, 242, 3, 0.35);
+
+	/* Typography */
+	--font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+	--font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+
+	/* Spacing scale */
+	--sp-1: 4px;
+	--sp-2: 8px;
+	--sp-3: 14px;
+	--sp-4: 20px;
+	--sp-5: 26px;
+	--sp-6: 32px;
+	--sp-8: 44px;
+	--sp-10: 56px;
+
+	/* Radius */
+	--radius-sm: 5px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+
+	/* Sidebar width */
+	--sidebar-w: 280px;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html, body {
+	height: 100%;
+	background: var(--surface-0);
+	color: var(--text-primary);
+	font-family: var(--font-sans);
+	font-size: 16px;
+	line-height: 1.5;
+	font-weight: 400;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	overflow: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+	width: 5px;
+	height: 5px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--surface-5);
+	border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--text-tertiary);
+}
+
+/* Global link reset */
+a {
+	color: inherit;
+	text-decoration: none;
+}
+
+/* Utility: monospace readout text */
+.mono {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	letter-spacing: 0.01em;
+}
+
+/* Focus ring */
+:focus-visible {
+	outline: 1.5px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+	background: rgba(255, 242, 3, 0.2);
+	color: #fff;
+}
+
+/* Film grain overlay — subtle cinematic texture */
+body::after {
+	content: '';
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 9999;
+	opacity: 0.02;
+	background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+	background-size: 256px 256px;
+}
