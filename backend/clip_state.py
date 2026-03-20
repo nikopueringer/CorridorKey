@@ -443,7 +443,22 @@ def scan_clips_dir(
     if is_v2_project(clips_dir):
         return scan_project_clips(clips_dir)
 
-    seen_names: set[str] = set()
+    seen_entries: set[tuple[str, str]] = set()
+    valid_folder_names: set[str] = set()
+
+    def add_entry(clip: ClipEntry) -> None:
+        """Track entries by on-disk identity so display-name collisions don't hide clips."""
+        if clip.input_asset and clip.root_path == clips_dir and clip.input_asset.asset_type == "video":
+            identity_path = clip.input_asset.path
+        else:
+            identity_path = clip.root_path
+
+        key = ("clip", os.path.normcase(os.path.abspath(identity_path)))
+        if key in seen_entries:
+            return
+
+        entries.append(clip)
+        seen_entries.add(key)
 
     for item in sorted(os.listdir(clips_dir)):
         item_path = os.path.join(clips_dir, item)
@@ -459,16 +474,14 @@ def scan_clips_dir(
             if is_v2_project(item_path):
                 # v2 project: scan its clips/ subdirectory
                 for clip in scan_project_clips(item_path):
-                    if clip.name not in seen_names:
-                        entries.append(clip)
-                        seen_names.add(clip.name)
+                    add_entry(clip)
             else:
                 # Flat clip dir or v1 project
                 clip = ClipEntry(name=item, root_path=item_path)
                 try:
                     clip.find_assets()
-                    entries.append(clip)
-                    seen_names.add(clip.name)
+                    add_entry(clip)
+                    valid_folder_names.add(item)
                 except ClipScanError as e:
                     # Skip folders without valid input assets
                     logger.debug(str(e))
@@ -476,13 +489,12 @@ def scan_clips_dir(
         elif allow_standalone_videos and os.path.isfile(item_path) and _is_video_file(item_path):
             # Standalone video file → treat as a clip needing extraction
             stem = os.path.splitext(item)[0]
-            if stem in seen_names:
+            if stem in valid_folder_names:
                 continue  # folder clip already exists with this name
             clip = ClipEntry(name=stem, root_path=clips_dir)
             clip.input_asset = ClipAsset(item_path, "video")
             clip.state = ClipState.EXTRACTING
-            entries.append(clip)
-            seen_names.add(stem)
+            add_entry(clip)
 
     logger.info(f"Scanned {clips_dir}: {len(entries)} clip(s) found")
     return entries
