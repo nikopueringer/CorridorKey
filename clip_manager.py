@@ -766,7 +766,7 @@ def run_inference(
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
                 generate_comp=settings.generate_comp,
-                gpu_post_processing=settings.gpu_post_processing,
+                post_process_on_gpu=settings.gpu_post_processing,
             )
 
             pred_fg = res["fg"]  # sRGB
