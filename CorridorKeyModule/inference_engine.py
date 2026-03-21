@@ -121,7 +121,7 @@ class CorridorKeyEngine:
             # Trigger compilation with a dummy input
             dummy_input = torch.zeros(
                 1, 4, self.img_size, self.img_size, dtype=self.model_precision, device=self.device
-            ).to(memory_format=torch.channels_last)
+            )
             with torch.inference_mode():
                 compiled_model(dummy_input)
             self.model = compiled_model
