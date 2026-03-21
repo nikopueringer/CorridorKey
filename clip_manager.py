@@ -38,6 +38,8 @@ class InferenceSettings:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    generate_comp: bool = True
+    gpu_post_processing: bool = False
 
 
 # Core Paths
@@ -763,6 +765,8 @@ def run_inference(
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
+                generate_comp=settings.generate_comp,
+                gpu_post_processing=settings.gpu_post_processing,
             )[0]
 
             pred_fg = res["fg"]  # sRGB
