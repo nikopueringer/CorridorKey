@@ -61,9 +61,7 @@ class TestProcessFrameOutputs:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
@@ -81,9 +79,7 @@ class TestProcessFrameOutputs:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
@@ -100,9 +96,7 @@ class TestProcessFrameOutputs:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
 
@@ -117,9 +111,7 @@ class TestProcessFrameOutputs:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         alpha = result["alpha"]
@@ -134,9 +126,7 @@ class TestProcessFrameOutputs:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         fg = result["fg"]
@@ -165,7 +155,7 @@ class TestProcessFrameColorSpace:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(
+            result = engine.process_frame(
                 sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
             )[0]
         else:
@@ -183,7 +173,7 @@ class TestProcessFrameColorSpace:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(
+            result = engine.process_frame(
                 sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
             )[0]
         else:
@@ -201,7 +191,7 @@ class TestProcessFrameColorSpace:
         if batched:
             img_uint8 = np.stack([img_uint8] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")[0]
+            result = engine.process_frame(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(img_uint8, sample_mask, post_process_on_gpu=backend == "torch")
         assert result["alpha"].dtype == np.float32
@@ -259,10 +249,10 @@ class TestProcessFramePostProcessing:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result_no_despill = engine.batch_process_frames(
+            result_no_despill = engine.process_frame(
                 sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
             )[0]
-            result_full_despill = engine.batch_process_frames(
+            result_full_despill = engine.process_frame(
                 sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
             )[0]
         else:
@@ -294,7 +284,7 @@ class TestProcessFramePostProcessing:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(
+            result = engine.process_frame(
                 sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
             )[0]
             sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
@@ -317,9 +307,7 @@ class TestProcessFramePostProcessing:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
         processed = result["processed"]
@@ -348,12 +336,8 @@ class TestProcessFramePostProcessing:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             mask_2d = np.stack([mask_2d] * 2, axis=0)
             mask_3d = np.stack([mask_3d] * 2, axis=0)
-            result_2d = engine.batch_process_frames(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")[
-                0
-            ]
-            result_3d = engine.batch_process_frames(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")[
-                0
-            ]
+            result_2d = engine.process_frame(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")[0]
+            result_3d = engine.process_frame(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")[0]
         else:
             result_2d = engine.process_frame(sample_frame_rgb, mask_2d, post_process_on_gpu=backend == "torch")
             result_3d = engine.process_frame(sample_frame_rgb, mask_3d, post_process_on_gpu=backend == "torch")
@@ -369,7 +353,7 @@ class TestProcessFramePostProcessing:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(
+            result = engine.process_frame(
                 sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
             )[0]
             sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
@@ -412,7 +396,7 @@ class TestNvidiaGPUProcess:
         if batched:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
-            result = engine.batch_process_frames(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
+            result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")
             result = result[0]
         else:
             result = engine.process_frame(sample_frame_rgb, sample_mask, post_process_on_gpu=backend == "torch")

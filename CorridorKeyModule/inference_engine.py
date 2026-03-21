@@ -323,14 +323,14 @@ class CorridorKeyEngine:
         despeckle_size: int = 400,
         generate_comp: bool = True,
         post_process_on_gpu: bool = True,
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray] | list[dict[str, np.ndarray]]:
         """
         Process a single frame.
         Args:
-            image: Numpy array [H, W, 3] (0.0-1.0 or 0-255).
+            image: Numpy array [H, W, 3] or [B, H, W, 3] (0.0-1.0 or 0-255).
                    - If input_is_linear=False (Default): Assumed sRGB.
                    - If input_is_linear=True: Assumed Linear.
-            mask_linear: Numpy array [H, W] or [H, W, 1] (0.0-1.0). Assumed Linear.
+            mask_linear: Numpy array [H, W] or [B, H, W] or [H, W, 1] or [B, H, W, 1] (0.0-1.0). Assumed Linear.
             refiner_scale: Multiplier for Refiner Deltas (default 1.0).
             input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
                              If False, resizes in sRGB (standard).
@@ -345,125 +345,30 @@ class CorridorKeyEngine:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """
         torch.compiler.cudagraph_mark_step_begin()
-        h, w = image.shape[:2]
+
+        # If input is a single image, add batch dimension
+        if image.ndim == 3:
+            image = image[np.newaxis, :]
+            mask_linear = mask_linear[np.newaxis, :]
+
+        bs, h, w = image.shape[:3]
 
         # 1. Inputs Check & Normalization
-        image = (
-            TF.to_dtype(
-                torch.from_numpy(image).permute((2, 0, 1)),
-                self.model_precision,
-                scale=True,
-            )
-            .to(self.device, non_blocking=True)
-            .unsqueeze(0)
-        )
-        mask_linear = (
-            TF.to_dtype(
-                torch.from_numpy(mask_linear.reshape((h, w, 1))).permute((2, 0, 1)),
-                self.model_precision,
-                scale=True,
-            )
-            .to(self.device, non_blocking=True)
-            .unsqueeze(0)
-        )
+        image = TF.to_dtype(
+            torch.from_numpy(image).permute((0, 3, 1, 2)),
+            self.model_precision,
+            scale=True,
+        ).to(self.device, non_blocking=True)
+        mask_linear = TF.to_dtype(
+            torch.from_numpy(mask_linear.reshape((bs, h, w, 1))).permute((0, 3, 1, 2)),
+            self.model_precision,
+            scale=True,
+        ).to(self.device, non_blocking=True)
 
         inp_t = self._preprocess_input(image, mask_linear, input_is_linear)
 
-        # 5. Inference
-        # Hook for Refiner Scaling
-        handle = None
-        if refiner_scale != 1.0 and self.model.refiner is not None:
-
-            def scale_hook(module, input, output):
-                return output * refiner_scale
-
-            handle = self.model.refiner.register_forward_hook(scale_hook)
-
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
-            prediction = self.model(inp_t)
-
-        if handle:
-            handle.remove()
-
-        if post_process_on_gpu:
-            out = self._postprocess_torch(
-                prediction["alpha"].float(),
-                prediction["fg"].float(),
-                w,
-                h,
-                fg_is_straight,
-                despill_strength,
-                auto_despeckle,
-                despeckle_size,
-                generate_comp,
-            )[0]  # batch of 1, take first element
-        else:
-            out = self._postprocess_opencv(
-                prediction["alpha"][0].float(),
-                prediction["fg"][0].float(),
-                w,
-                h,
-                fg_is_straight,
-                despill_strength,
-                auto_despeckle,
-                despeckle_size,
-                generate_comp,
-            )
-        return out
-
-    @torch.inference_mode()
-    def batch_process_frames(
-        self,
-        images: np.ndarray,
-        masks_linear: np.ndarray,
-        refiner_scale: float = 1.0,
-        input_is_linear: bool = False,
-        fg_is_straight: bool = True,
-        despill_strength: float = 1.0,
-        auto_despeckle: bool = True,
-        despeckle_size: int = 400,
-        generate_comp: bool = True,
-        post_process_on_gpu: bool = True,
-    ) -> list[dict[str, np.ndarray]]:
-        """
-        Process a single frame.
-        Args:
-            images: Numpy array [B, H, W, 3] (0.0-1.0 or 0-255).
-                   - If input_is_linear=False (Default): Assumed sRGB.
-                   - If input_is_linear=True: Assumed Linear.
-            masks_linear: Numpy array [B, H, W] or [B, H, W, 1] (0.0-1.0). Assumed Linear.
-            refiner_scale: Multiplier for Refiner Deltas (default 1.0).
-            input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
-                             If False, resizes in sRGB (standard).
-            fg_is_straight: bool. If True, assumes FG output is Straight (unpremultiplied).
-                            If False, assumes FG output is Premultiplied.
-            despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
-            auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
-            despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
-            generate_comp: bool. If True, also generates a composite on checkerboard for quick checking.
-            post_process_on_gpu: bool. If True, performs post-processing on GPU using PyTorch instead of OpenCV.
-        Returns:
-             list[dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}]
-        """
-        torch.compiler.cudagraph_mark_step_begin()
-        bs, h, w = images.shape[:3]
-
-        # 1. Inputs Check & Normalization
-        images = TF.to_dtype(
-            torch.from_numpy(images).permute((0, 3, 1, 2)),
-            self.model_precision,
-            scale=True,
-        ).to(self.device, non_blocking=True)
-        masks_linear = TF.to_dtype(
-            torch.from_numpy(masks_linear.reshape((bs, h, w, 1))).permute((0, 3, 1, 2)),
-            self.model_precision,
-            scale=True,
-        ).to(self.device, non_blocking=True)
-
-        inp_t = self._preprocess_input(images, masks_linear, input_is_linear)
-
         # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
-        torch.cuda.empty_cache()
+        del image, mask_linear
 
         # 5. Inference
         # Hook for Refiner Scaling
@@ -515,5 +420,8 @@ class CorridorKeyEngine:
                     generate_comp,
                 )
                 out.append(result)
+
+        if bs == 1:
+            return out[0]
 
         return out

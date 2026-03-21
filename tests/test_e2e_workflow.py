@@ -22,16 +22,14 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
-def _fake_result(h: int = 4, w: int = 4) -> list[dict]:
+def _fake_result(h: int = 4, w: int = 4) -> dict:
     """Return a minimal but valid process_frame result dict sized to (h, w)."""
-    return [
-        {
-            "alpha": np.full((h, w, 1), 0.8, dtype=np.float32),
-            "fg": np.full((h, w, 3), 0.6, dtype=np.float32),
-            "comp": np.full((h, w, 3), 0.5, dtype=np.float32),
-            "processed": np.full((h, w, 4), 0.4, dtype=np.float32),
-        }
-    ]
+    return {
+        "alpha": np.full((h, w, 1), 0.8, dtype=np.float32),
+        "fg": np.full((h, w, 3), 0.6, dtype=np.float32),
+        "comp": np.full((h, w, 3), 0.5, dtype=np.float32),
+        "processed": np.full((h, w, 4), 0.4, dtype=np.float32),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +56,7 @@ class TestE2EInferenceWorkflow:
         monkeypatch.setattr("builtins.input", lambda prompt="": "")
 
         mock_engine = MagicMock()
-        mock_engine.batch_process_frames.return_value = _fake_result()
+        mock_engine.process_frame.return_value = _fake_result()
 
         with patch("CorridorKeyModule.backend.create_engine", return_value=mock_engine):
             run_inference([entry], device="cpu")
@@ -83,7 +81,7 @@ class TestE2EInferenceWorkflow:
         monkeypatch.setattr("builtins.input", lambda prompt="": "")
 
         mock_engine = MagicMock()
-        mock_engine.batch_process_frames.return_value = _fake_result()
+        mock_engine.process_frame.return_value = _fake_result()
 
         with patch("CorridorKeyModule.backend.create_engine", return_value=mock_engine):
             run_inference([entry], device="cpu")

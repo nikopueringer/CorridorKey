@@ -756,9 +756,9 @@ def run_inference(
 
             # 3. Process
             USE_STRAIGHT_MODEL = True
-            res = engine.batch_process_frames(
-                img_srgb[np.newaxis, :],
-                mask_linear[np.newaxis, :],
+            res = engine.process_frame(
+                img_srgb,
+                mask_linear,
                 input_is_linear=input_is_linear,
                 fg_is_straight=USE_STRAIGHT_MODEL,
                 despill_strength=settings.despill_strength,
@@ -767,7 +767,7 @@ def run_inference(
                 refiner_scale=settings.refiner_scale,
                 generate_comp=settings.generate_comp,
                 gpu_post_processing=settings.gpu_post_processing,
-            )[0]
+            )
 
             pred_fg = res["fg"]  # sRGB
             pred_alpha = res["alpha"]  # Linear
