@@ -43,6 +43,7 @@ from clip_manager import (
     run_videomama,
     scan_clips,
 )
+from CorridorKeyModule.backend import resolve_backend
 from device_utils import resolve_device
 
 logger = logging.getLogger(__name__)
@@ -191,21 +192,22 @@ def _prompt_inference_settings(
         except ValueError:
             refiner_scale = 1.0
 
-    if default_comp is not None:
-        generate_comp = default_comp
-    else:
-        generate_comp = Confirm.ask(
-            "Generate composition previews",
-            default=True,
-        )
+    if resolve_backend() == "torch":
+        if default_comp is not None:
+            generate_comp = default_comp
+        else:
+            generate_comp = Confirm.ask(
+                "Generate composition previews",
+                default=True,
+            )
 
-    if default_gpu_post is not None:
-        gpu_post_processing = default_gpu_post
-    else:
-        gpu_post_processing = Confirm.ask(
-            "Use GPU accelerated post-processing [dim](experimental)[/dim]",
-            default=False,
-        )
+        if default_gpu_post is not None:
+            gpu_post_processing = default_gpu_post
+        else:
+            gpu_post_processing = Confirm.ask(
+                "Use GPU accelerated post-processing [dim](experimental)[/dim]",
+                default=False,
+            )
 
     return InferenceSettings(
         input_is_linear=input_is_linear,

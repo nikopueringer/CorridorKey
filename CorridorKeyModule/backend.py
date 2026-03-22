@@ -224,6 +224,7 @@ class _MLXEngineAdapter:
         despill_strength=1.0,
         auto_despeckle=True,
         despeckle_size=400,
+        **_kwargs,
     ):
         """Delegate to MLX engine, then normalize output to Torch contract."""
         # MLX engine expects uint8 input — convert if float
