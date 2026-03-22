@@ -3,10 +3,6 @@
 
 cd "$(dirname "$0")"
 
-# Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-LOCAL_SCRIPT="$SCRIPT_DIR/corridorkey_cli.py"
-
 # SAFETY CHECK: Ensure a folder was provided as an argument
 if [ -z "$1" ]; then
     echo "[ERROR] No target folder provided."
@@ -28,16 +24,9 @@ TARGET_PATH="$1"
 # Strip trailing slash if present
 TARGET_PATH="${TARGET_PATH%/}"
 
-# Ensure uv is available before attempting to run
+# Install uv before running
 if ! command -v uv &> /dev/null; then
-    echo "[ERROR] 'uv' is not installed or not on PATH."
-    echo ""
-    echo "Install uv by running:"
-    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
-    echo ""
-    echo "Then reopen your terminal and try again."
-    read -p "Press enter to exit..."
-    exit 1
+    curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 
 echo "Starting Corridor Key locally..."
