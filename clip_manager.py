@@ -38,6 +38,8 @@ class InferenceSettings:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    generate_comp: bool = True
+    gpu_post_processing: bool = False
 
 
 # Core Paths
@@ -763,6 +765,8 @@ def run_inference(
                 auto_despeckle=settings.auto_despeckle,
                 despeckle_size=settings.despeckle_size,
                 refiner_scale=settings.refiner_scale,
+                generate_comp=settings.generate_comp,
+                post_process_on_gpu=settings.gpu_post_processing,
             )
 
             pred_fg = res["fg"]  # sRGB
@@ -782,10 +786,11 @@ def run_inference(
             cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
 
             # 5. Generate Reference Comp
-            comp_srgb = res["comp"]
-            # Save Comp (PNG 8-bit)
-            comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
+            if res["comp"] is not None:
+                comp_srgb = res["comp"]
+                # Save Comp (PNG 8-bit)
+                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
             # 6. Save Processed (RGBA EXR)
             if "processed" in res:

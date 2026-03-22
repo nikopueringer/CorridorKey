@@ -43,6 +43,7 @@ from clip_manager import (
     run_videomama,
     scan_clips,
 )
+from CorridorKeyModule.backend import resolve_backend
 from device_utils import resolve_device
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,8 @@ def _prompt_inference_settings(
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
     default_refiner: float | None = None,
+    default_comp: bool | None = None,
+    default_gpu_post: bool | None = None,
 ) -> InferenceSettings:
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
@@ -189,12 +192,31 @@ def _prompt_inference_settings(
         except ValueError:
             refiner_scale = 1.0
 
+    if resolve_backend() == "torch":
+        if default_comp is not None:
+            generate_comp = default_comp
+        else:
+            generate_comp = Confirm.ask(
+                "Generate composition previews",
+                default=True,
+            )
+
+        if default_gpu_post is not None:
+            gpu_post_processing = default_gpu_post
+        else:
+            gpu_post_processing = Confirm.ask(
+                "Use GPU accelerated post-processing [dim](experimental)[/dim]",
+                default=False,
+            )
+
     return InferenceSettings(
         input_is_linear=input_is_linear,
         despill_strength=despill_strength,
         auto_despeckle=auto_despeckle,
         despeckle_size=despeckle_size,
         refiner_scale=refiner_scale,
+        generate_comp=generate_comp,
+        gpu_post_processing=gpu_post_processing,
     )
 
 
@@ -273,6 +295,14 @@ def run_inference_cmd(
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
     ] = None,
+    generate_comp: Annotated[
+        Optional[bool],
+        typer.Option("--comp/--no-comp", help="Generate comp previews (default: prompt)"),
+    ] = None,
+    gpu_post: Annotated[
+        Optional[bool],
+        typer.Option("--gpu-post/--cpu-post", help="Use GPU post-processing (default: prompt)"),
+    ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
@@ -300,6 +330,8 @@ def run_inference_cmd(
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,
             default_refiner=refiner,
+            default_comp=generate_comp,
+            default_gpu_post=gpu_post,
         )
 
     with ProgressContext() as ctx_progress:

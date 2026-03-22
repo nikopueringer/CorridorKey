@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -208,12 +209,12 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
 
     # Apply despeckle (MLX stubs this)
     if auto_despeckle:
-        processed_alpha = cu.clean_matte(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
+        processed_alpha = cu.clean_matte_opencv(alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
     else:
         processed_alpha = alpha
 
     # Apply despill (MLX stubs this)
-    fg_despilled = cu.despill(fg, green_limit_mode="average", strength=despill_strength)
+    fg_despilled = cu.despill_opencv(fg, green_limit_mode="average", strength=despill_strength)
 
     # Composite over checkerboard for comp output
     h, w = fg.shape[:2]
@@ -252,6 +253,7 @@ class _MLXEngineAdapter:
         despill_strength=1.0,
         auto_despeckle=True,
         despeckle_size=400,
+        **_kwargs,
     ):
         """Delegate to MLX engine, then normalize output to Torch contract."""
         # MLX engine expects uint8 input — convert if float
@@ -316,4 +318,6 @@ def create_engine(
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
         logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        return CorridorKeyEngine(
+            checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size, model_precision=torch.float16
+        )
