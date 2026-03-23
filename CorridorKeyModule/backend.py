@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
 TORCH_EXT = ".pth"
 MLX_EXT = ".safetensors"
+TORCH_SAFETENSORS_EXT = ".safetensors"
 DEFAULT_IMG_SIZE = 2048
 
 BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
@@ -163,9 +164,30 @@ def _ensure_torch_checkpoint() -> Path:
 def _discover_checkpoint(ext: str) -> Path:
     """Find exactly one checkpoint with the given extension.
 
+    For the Torch backend (TORCH_EXT), safetensors files are checked first
+    (excluding the MLX model by name) so that converted checkpoints are
+    preferred over legacy .pth files without any manual rename step.
+
     Raises FileNotFoundError (0 found) or ValueError (>1 found).
     Includes cross-reference hints when wrong extension files exist.
     """
+    if ext == TORCH_EXT:
+        # Prefer .safetensors over .pth — same dir is shared with MLX, so
+        # exclude the known MLX filename to avoid ambiguity.
+        st_matches = [
+            m
+            for m in glob.glob(os.path.join(CHECKPOINT_DIR, f"*{TORCH_SAFETENSORS_EXT}"))
+            if os.path.basename(m) != MLX_MODEL_FILENAME
+        ]
+        if len(st_matches) == 1:
+            return Path(st_matches[0])
+        if len(st_matches) > 1:
+            names = [os.path.basename(f) for f in st_matches]
+            raise ValueError(
+                f"Multiple .safetensors Torch checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one."
+            )
+        # Fall through to .pth discovery below.
+
     matches = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
 
     if len(matches) == 0:
@@ -184,6 +206,26 @@ def _discover_checkpoint(ext: str) -> Path:
         raise ValueError(f"Multiple {ext} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
 
     return Path(matches[0])
+
+
+def _migrate_pth_to_safetensors(src: Path) -> Path:
+    """Convert a .pth checkpoint to .safetensors in-place.
+
+    Saves the converted file alongside the original, then deletes the .pth.
+    Returns the path to the new .safetensors file.
+    """
+    import torch
+    from safetensors.torch import save_file
+
+    dst = src.with_suffix(".safetensors")
+    logger.info("Migrating %s → %s ...", src.name, dst.name)
+    checkpoint = torch.load(src, map_location="cpu", weights_only=True)
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    state_dict = {k: v.contiguous() for k, v in state_dict.items()}
+    save_file(state_dict, dst)
+    src.unlink()
+    logger.info("Migration complete. Legacy file removed: %s", src.name)
+    return dst
 
 
 def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, despeckle_size: int) -> dict:
@@ -313,6 +355,8 @@ def create_engine(
         return _MLXEngineAdapter(raw_engine)
     else:
         ckpt = _discover_checkpoint(TORCH_EXT)
+        if ckpt.suffix == ".pth":
+            ckpt = _migrate_pth_to_safetensors(ckpt)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
         logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)

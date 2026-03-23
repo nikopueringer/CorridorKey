@@ -13,9 +13,11 @@ from CorridorKeyModule.backend import (
     HF_CHECKPOINT_FILENAME,
     HF_REPO_ID,
     MLX_EXT,
+    MLX_MODEL_FILENAME,
     TORCH_EXT,
     _discover_checkpoint,
     _ensure_torch_checkpoint,
+    _migrate_pth_to_safetensors,
     _wrap_mlx_output,
     resolve_backend,
 )
@@ -154,6 +156,44 @@ class TestDiscoverCheckpoint:
                 assert result == ckpt
                 mock_dl.assert_not_called()
 
+    def test_safetensors_preferred_over_pth(self, tmp_path):
+        """When both .safetensors and .pth are present, .safetensors is returned."""
+        (tmp_path / "model.pth").write_bytes(b"legacy")
+        st = tmp_path / "model.safetensors"
+        st.write_bytes(b"converted")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT)
+                assert result == st
+                mock_dl.assert_not_called()
+
+    def test_safetensors_torch_found_directly(self, tmp_path):
+        """A lone .safetensors (non-MLX) is returned for TORCH_EXT discovery."""
+        st = tmp_path / "CorridorKey.safetensors"
+        st.write_bytes(b"converted")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            result = _discover_checkpoint(TORCH_EXT)
+            assert result == st
+
+    def test_mlx_safetensors_excluded_from_torch_discovery(self, tmp_path):
+        """The MLX checkpoint is not returned when discovering Torch checkpoints."""
+        mlx_ckpt = tmp_path / MLX_MODEL_FILENAME
+        mlx_ckpt.write_bytes(b"mlx-weights")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            # No Torch .safetensors → should fall through to .pth, find none, auto-download
+            with mock.patch("CorridorKeyModule.backend._ensure_torch_checkpoint") as mock_dl:
+                mock_dl.return_value = tmp_path / "CorridorKey.pth"
+                _discover_checkpoint(TORCH_EXT)
+                mock_dl.assert_called_once()
+
+    def test_multiple_safetensors_torch_raises(self, tmp_path):
+        """More than one non-MLX .safetensors raises ValueError."""
+        (tmp_path / "a.safetensors").write_bytes(b"x")
+        (tmp_path / "b.safetensors").write_bytes(b"y")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with pytest.raises(ValueError, match="Multiple"):
+                _discover_checkpoint(TORCH_EXT)
+
     def test_mlx_not_triggered(self, tmp_path):
         """MLX ext with empty dir raises FileNotFoundError, no download attempted."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
@@ -201,6 +241,45 @@ class TestDiscoverCheckpoint:
 
         assert any("Downloading" in msg for msg in caplog.messages)
         assert any("saved" in msg.lower() for msg in caplog.messages)
+
+
+# --- _migrate_pth_to_safetensors ---
+
+
+class TestMigratePthToSafetensors:
+    def test_converts_and_deletes_pth(self, tmp_path):
+        """Successful migration saves .safetensors and removes the .pth."""
+        import torch
+        from safetensors.torch import load_file
+
+        src = tmp_path / "model.pth"
+        state_dict = {"weight": torch.zeros(4, 4)}
+        torch.save({"state_dict": state_dict}, src)
+
+        dst = _migrate_pth_to_safetensors(src)
+
+        assert dst == src.with_suffix(".safetensors")
+        assert dst.exists()
+        assert not src.exists()
+        loaded = load_file(dst)
+        assert "weight" in loaded
+
+    def test_flat_state_dict(self, tmp_path):
+        """Handles a .pth that is a plain flat dict (no 'state_dict' wrapper)."""
+        import torch
+
+        src = tmp_path / "flat.pth"
+        torch.save({"bias": torch.ones(3)}, src)
+        dst = _migrate_pth_to_safetensors(src)
+        assert dst.exists()
+
+    def test_returns_safetensors_path(self, tmp_path):
+        import torch
+
+        src = tmp_path / "ck.pth"
+        torch.save({"w": torch.eye(2)}, src)
+        result = _migrate_pth_to_safetensors(src)
+        assert result.suffix == ".safetensors"
 
 
 # --- _wrap_mlx_output ---
