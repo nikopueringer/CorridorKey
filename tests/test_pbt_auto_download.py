@@ -29,12 +29,14 @@ from CorridorKeyModule.backend import (
 # Strategies
 # ---------------------------------------------------------------------------
 
-# File extensions that are NOT .pth — used to populate "non-empty but no .pth" dirs
+# File extensions that are NOT .pth and NOT .safetensors — used to populate
+# "non-empty but no recognised checkpoint" dirs.
+# .safetensors is excluded because it is now a valid Torch checkpoint format
+# (any non-MLX .safetensors in the checkpoint dir is returned directly).
 _non_pth_extensions = st.sampled_from(
     [
         ".txt",
         ".json",
-        ".safetensors",
         ".bin",
         ".onnx",
         ".csv",

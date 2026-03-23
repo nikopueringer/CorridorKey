@@ -183,9 +183,7 @@ def _discover_checkpoint(ext: str) -> Path:
             return Path(st_matches[0])
         if len(st_matches) > 1:
             names = [os.path.basename(f) for f in st_matches]
-            raise ValueError(
-                f"Multiple .safetensors Torch checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one."
-            )
+            raise ValueError(f"Multiple .safetensors Torch checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
         # Fall through to .pth discovery below.
 
     matches = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
