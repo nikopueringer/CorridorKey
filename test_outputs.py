@@ -140,4 +140,4 @@ def compare_img_sizes(folder, ref=1024):
 
 
 if __name__ == "__main__":
-    compare_implementations("./Output/gpu_full_res/Comp", "./Output/gpu_fp16/Comp", "./Output/diff/fp16_vs_fp32")
+    compare_implementations("./Output/base/Comp", "./Output/compare/Comp", output_dir="./Output/diff")
