@@ -1,16 +1,53 @@
 """Centralized cross-platform device selection for CorridorKey."""
 
+import json
 import logging
 import os
 import subprocess
 from dataclasses import dataclass
 
-import torch
-
 logger = logging.getLogger(__name__)
 
 DEVICE_ENV_VAR = "CORRIDORKEY_DEVICE"
 VALID_DEVICES = ("auto", "cuda", "mps", "cpu")
+
+
+def is_rocm_system() -> bool:
+    """Detect if the system has AMD ROCm available (before or after torch import).
+
+    Checks: /opt/rocm (Linux), HIP_PATH (Windows, default C:\\hip),
+    HIP_VISIBLE_DEVICES (any platform), CORRIDORKEY_ROCM=1 (explicit opt-in).
+    """
+    return (
+        os.path.exists("/opt/rocm")
+        or os.environ.get("HIP_PATH") is not None
+        or os.environ.get("HIP_VISIBLE_DEVICES") is not None
+        or os.environ.get("CORRIDORKEY_ROCM") == "1"
+    )
+
+
+def setup_rocm_env() -> None:
+    """Set ROCm environment variables and apply optional patches.
+
+    Must be called before importing torch. Safe to call on non-ROCm systems (no-op).
+    """
+    if not is_rocm_system():
+        return
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    os.environ.setdefault("MIOPEN_FIND_MODE", "2")
+    # Level 4 = suppress info/debug but keep warnings and errors visible
+    os.environ.setdefault("MIOPEN_LOG_LEVEL", "4")
+    # Enable GTT (system RAM as GPU overflow) on Linux for 16GB cards.
+    # pytorch-rocm-gtt must be installed separately: pip install pytorch-rocm-gtt
+    try:
+        import pytorch_rocm_gtt
+
+        pytorch_rocm_gtt.patch()
+    except Exception:
+        pass  # not installed, or patch failed — non-fatal
+
+
+import torch  # noqa: E402 — deferred so setup_rocm_env() can run first
 
 
 def detect_best_device() -> str:
@@ -118,8 +155,6 @@ def _enumerate_amd() -> list[GPUInfo] | None:
     """
     # Try amd-smi (ROCm 6.0+)
     try:
-        import json as _json
-
         result = subprocess.run(
             ["amd-smi", "static", "--json"],
             capture_output=True,
@@ -127,14 +162,17 @@ def _enumerate_amd() -> list[GPUInfo] | None:
             timeout=10,
         )
         if result.returncode == 0:
-            data = _json.loads(result.stdout)
+            data = json.loads(result.stdout)
             gpus: list[GPUInfo] = []
             for i, gpu in enumerate(data):
-                name = gpu.get("asic", {}).get("market_name", f"AMD GPU {i}")
-                vram_info = gpu.get("vram", {})
-                total_mb = vram_info.get("size", {}).get("value", 0)
-                total_gb = float(total_mb) / 1024 if total_mb else 0
-                gpus.append(GPUInfo(index=i, name=name, vram_total_gb=total_gb, vram_free_gb=total_gb))
+                try:
+                    name = gpu.get("asic", {}).get("market_name", f"AMD GPU {i}")
+                    vram_info = gpu.get("vram", {})
+                    total_mb = vram_info.get("size", {}).get("value", 0)
+                    total_gb = float(total_mb) / 1024 if total_mb else 0
+                    gpus.append(GPUInfo(index=i, name=name, vram_total_gb=total_gb, vram_free_gb=total_gb))
+                except (KeyError, TypeError, ValueError):
+                    logger.debug("Failed to parse amd-smi entry %d, skipping", i)
             if gpus:
                 # Try to get live VRAM usage from monitor
                 try:
@@ -145,7 +183,7 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                         timeout=5,
                     )
                     if mon.returncode == 0:
-                        mon_data = _json.loads(mon.stdout)
+                        mon_data = json.loads(mon.stdout)
                         for entry in mon_data:
                             idx = entry.get("gpu", 0)
                             used_pct = entry.get("vram_use", 0)
@@ -155,7 +193,7 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                 except Exception:
                     pass
                 return gpus
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
         pass
 
     # Fallback: rocm-smi (legacy, deprecated but still ships)

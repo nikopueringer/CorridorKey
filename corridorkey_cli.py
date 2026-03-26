@@ -20,23 +20,10 @@ import shutil
 import sys
 import warnings
 
-# ROCm: must be set before any torch import (including transitive via diffusers/GVM)
-_is_rocm = (
-    os.path.exists("/opt/rocm")
-    or os.environ.get("HIP_PATH") is not None
-    or os.environ.get("HIP_VISIBLE_DEVICES") is not None
-    or os.environ.get("CORRIDORKEY_ROCM") == "1"
-)
-if _is_rocm:
-    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
-    os.environ.setdefault("MIOPEN_FIND_MODE", "2")
-    os.environ.setdefault("MIOPEN_LOG_LEVEL", "0")
-    try:
-        import pytorch_rocm_gtt
+# ROCm env vars must be set before any torch import (including transitive via diffusers/GVM)
+from device_utils import setup_rocm_env  # noqa: E402 — no torch import in this path
 
-        pytorch_rocm_gtt.patch()
-    except ImportError:
-        pass
+setup_rocm_env()
 
 from typing import Annotated, Optional  # noqa: E402
 

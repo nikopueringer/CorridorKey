@@ -231,7 +231,7 @@ CorridorKey supports AMD GPUs via PyTorch's ROCm/HIP backend. The `torch.cuda.*`
 - RX 7800 XT (16GB) / 7700 XT (12GB) — RDNA3, gfx1101
 - RX 9070 XT / 9070 (16GB) — RDNA4, gfx1201
 
-**VRAM requirements:** CorridorKey inference at 2048x2048 needs ~18GB VRAM. The RX 7900 XTX (24GB) and RX 7900 XT (20GB) run at full resolution. Cards with 16GB (RX 7800 XT, 9070 XT) work on Windows (which uses system RAM as overflow) but may OOM on Linux — see notes below.
+**VRAM requirements:** CorridorKey inference at 2048x2048 uses ~10GB on NVIDIA but ~18GB on AMD due to HIP allocator overhead. The RX 7900 XTX (24GB) and RX 7900 XT (20GB) run at full resolution. Cards with 16GB (RX 7800 XT, 9070 XT) work on Windows (which uses system RAM as overflow) but may OOM on Linux — see notes below.
 
 **Linux native (recommended):**
 ```bash

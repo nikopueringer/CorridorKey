@@ -5,26 +5,10 @@ import math
 import os
 import sys
 
-# ROCm: must be set before importing torch so the CUDA allocator picks them up.
-# Detection: /opt/rocm (Linux), HIP_PATH (Windows default C:\hip), or explicit opt-in.
-_is_rocm_system = (
-    os.path.exists("/opt/rocm")
-    or os.environ.get("HIP_PATH") is not None
-    or os.environ.get("HIP_VISIBLE_DEVICES") is not None
-    or os.environ.get("CORRIDORKEY_ROCM") == "1"
-)
-if _is_rocm_system:
-    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
-    os.environ.setdefault("MIOPEN_FIND_MODE", "2")
-    os.environ.setdefault("MIOPEN_LOG_LEVEL", "0")
-    # Enable GTT (system RAM as GPU overflow) on Linux for 16GB cards.
-    # pytorch-rocm-gtt must be installed separately: pip install pytorch-rocm-gtt
-    try:
-        import pytorch_rocm_gtt
+# ROCm env vars + autotune cache must be set before importing torch.
+from device_utils import setup_rocm_env as _setup_rocm_env  # noqa: E402 — no torch import
 
-        pytorch_rocm_gtt.patch()
-    except ImportError:
-        pass
+_setup_rocm_env()
 
 # Persist torch.compile autotune cache across runs (default is /tmp which
 # gets wiped on reboot — saves 10-20 min re-autotuning on ROCm, ~30s on CUDA)
@@ -160,11 +144,14 @@ class CorridorKeyEngine:
             compile_mode = "max-autotune"
 
         try:
-            logger.info(
-                "Compiling model (mode=%s) — this may take 10-20 minutes on first run. "
-                "Compiled kernels are cached for future runs.",
-                compile_mode,
-            )
+            if is_rocm:
+                logger.info(
+                    "Compiling model (mode=%s) — this may take 10-20 minutes on first run (ROCm). "
+                    "Compiled kernels are cached for future runs.",
+                    compile_mode,
+                )
+            else:
+                logger.info("Compiling model (mode=%s)...", compile_mode)
             compiled_model = torch.compile(self.model, mode=compile_mode)
             # Trigger compilation with a dummy input (the actual compile
             # happens here, not in the torch.compile() call above)
