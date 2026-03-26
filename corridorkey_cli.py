@@ -144,9 +144,7 @@ def _prompt_inference_settings(
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
     generate_comp = default_comp if default_comp is not None else InferenceSettings.generate_comp
-    gpu_post_processing = (
-        default_gpu_post if default_gpu_post is not None else InferenceSettings.gpu_post_processing
-    )
+    gpu_post_processing = default_gpu_post if default_gpu_post is not None else InferenceSettings.gpu_post_processing
 
     if default_linear is not None:
         input_is_linear = default_linear
