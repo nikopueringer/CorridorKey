@@ -77,6 +77,7 @@ class TestEngineInitialization:
         assert engine.model is dummy_model
         assert dummy_model.to_calls == [torch.float32]
 
+
 # ---------------------------------------------------------------------------
 # process_frame output structure
 # ---------------------------------------------------------------------------

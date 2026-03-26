@@ -268,9 +268,7 @@ def _copy_atomic(source: Path, destination: Path) -> None:
     if destination.exists():
         return
 
-    tmp_path = destination.with_name(
-        f".{destination.name}.tmp-{os.getpid()}-{threading.get_ident()}"
-    )
+    tmp_path = destination.with_name(f".{destination.name}.tmp-{os.getpid()}-{threading.get_ident()}")
 
     try:
         shutil.copy2(source, tmp_path)
@@ -294,8 +292,7 @@ def _has_weight_file(directory: Path) -> bool:
     if not directory.exists():
         return False
     return any(
-        path.is_file() and path.suffix in {".bin", ".pt", ".pth", ".safetensors"}
-        for path in directory.rglob("*")
+        path.is_file() and path.suffix in {".bin", ".pt", ".pth", ".safetensors"} for path in directory.rglob("*")
     )
 
 
