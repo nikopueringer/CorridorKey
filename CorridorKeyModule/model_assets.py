@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,6 +31,8 @@ MLX_EXT = ".safetensors"
 CORRIDORKEY_REPO_ID = "nikopueringer/CorridorKey_v1.0"
 CORRIDORKEY_TORCH_FILENAME = "CorridorKey_v1.0.pth"
 CORRIDORKEY_MLX_FILENAME = "corridorkey_mlx.safetensors"
+CORRIDORKEY_MLX_REPO = "nikopueringer/corridorkey-mlx"
+CORRIDORKEY_MLX_TAG = "v1.0.0"
 
 GVM_REPO_ID = "geyongtao/gvm"
 VIDEOMAMA_REPO_ID = "SammyLim/VideoMaMa"
@@ -177,14 +180,46 @@ def _download_corridorkey_mlx(checkpoint_dir: Path) -> Path:
         raise RuntimeError("MLX weights were requested, but MLX is not available on this machine.")
 
     logger.info("Downloading CorridorKey MLX checkpoint to %s", checkpoint_dir)
+    release_tag = os.environ.get("CORRIDORKEY_MLX_WEIGHTS_TAG", CORRIDORKEY_MLX_TAG)
+    repo_override = os.environ.get("CORRIDORKEY_MLX_WEIGHTS_REPO", CORRIDORKEY_MLX_REPO)
 
     def action() -> Path:
-        command = [sys.executable, "-m", "corridorkey_mlx", "weights", "download", "--print-path"]
-        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+        command = [
+            sys.executable,
+            "-m",
+            "corridorkey_mlx",
+            "weights",
+            "download",
+            "--tag",
+            release_tag,
+            "--asset",
+            CORRIDORKEY_MLX_FILENAME,
+            "--print-path",
+        ]
+        env = os.environ.copy()
+        env["CORRIDORKEY_MLX_WEIGHTS_REPO"] = repo_override
+
+        try:
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, env=env)
+        except subprocess.CalledProcessError as exc:
+            logger.info(
+                "corridorkey_mlx CLI download failed for %s@%s; falling back to direct download.",
+                repo_override,
+                release_tag,
+            )
+            return _download_corridorkey_mlx_direct(
+                checkpoint_dir, repo_override=repo_override, release_tag=release_tag
+            )
+
         cached_path = _extract_path_from_output(completed)
         if cached_path is None or not cached_path.exists():
-            raise RuntimeError(
-                "corridorkey_mlx reported success, but no downloaded safetensors path could be resolved."
+            logger.info(
+                "corridorkey_mlx CLI did not return a usable path for %s@%s; falling back to direct download.",
+                repo_override,
+                release_tag,
+            )
+            return _download_corridorkey_mlx_direct(
+                checkpoint_dir, repo_override=repo_override, release_tag=release_tag
             )
         return cached_path
 
@@ -193,6 +228,24 @@ def _download_corridorkey_mlx(checkpoint_dir: Path) -> Path:
     destination = checkpoint_dir / CORRIDORKEY_MLX_FILENAME
     if cached_path.resolve() != destination.resolve():
         _copy_atomic(cached_path, destination)
+    return destination
+
+
+def _download_corridorkey_mlx_direct(checkpoint_dir: Path, *, repo_override: str, release_tag: str) -> Path:
+    destination = checkpoint_dir / CORRIDORKEY_MLX_FILENAME
+    if destination.exists():
+        return destination
+
+    download_url = f"https://github.com/{repo_override}/releases/download/{release_tag}/{CORRIDORKEY_MLX_FILENAME}"
+    tmp_path = destination.with_name(f".{destination.name}.download-{os.getpid()}-{threading.get_ident()}")
+
+    try:
+        urllib.request.urlretrieve(download_url, tmp_path)
+        os.replace(tmp_path, destination)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
     return destination
 
 

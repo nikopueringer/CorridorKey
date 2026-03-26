@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -79,6 +80,56 @@ class TestEnsureCorridorKeyAssets:
 
         mock_mlx.assert_called_once_with(tmp_path)
         assert (tmp_path / assets.CORRIDORKEY_MLX_FILENAME).is_file()
+
+
+class TestDownloadCorridorKeyMlx:
+    def test_cli_download_uses_expected_repo_override_and_release_tag(self, tmp_path):
+        cached = _write_text(tmp_path / "cache" / assets.CORRIDORKEY_MLX_FILENAME)
+
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=str(cached),
+            stderr="",
+        )
+
+        with (
+            mock.patch.object(assets, "mlx_runtime_available", return_value=True),
+            mock.patch.object(assets, "subprocess") as mock_subprocess,
+        ):
+            mock_subprocess.run.return_value = completed
+            result = assets._download_corridorkey_mlx(tmp_path)
+
+        assert result == tmp_path / assets.CORRIDORKEY_MLX_FILENAME
+        assert result.is_file()
+
+        _, kwargs = mock_subprocess.run.call_args
+        command = kwargs["args"] if "args" in kwargs else mock_subprocess.run.call_args.args[0]
+        env = kwargs["env"]
+
+        assert "--tag" in command
+        assert assets.CORRIDORKEY_MLX_TAG in command
+        assert env["CORRIDORKEY_MLX_WEIGHTS_REPO"] == assets.CORRIDORKEY_MLX_REPO
+
+    def test_cli_failure_falls_back_to_direct_release_download(self, tmp_path):
+        with (
+            mock.patch.object(assets, "mlx_runtime_available", return_value=True),
+            mock.patch.object(
+                assets.subprocess,
+                "run",
+                side_effect=subprocess.CalledProcessError(1, ["corridorkey_mlx"]),
+            ),
+            mock.patch.object(assets.urllib.request, "urlretrieve") as mock_urlretrieve,
+        ):
+            mock_urlretrieve.side_effect = lambda url, dest: Path(dest).write_bytes(b"mlx-weights")
+            result = assets._download_corridorkey_mlx(tmp_path)
+
+        assert result == tmp_path / assets.CORRIDORKEY_MLX_FILENAME
+        assert result.read_bytes() == b"mlx-weights"
+        download_url = mock_urlretrieve.call_args.args[0]
+        assert assets.CORRIDORKEY_MLX_REPO in download_url
+        assert assets.CORRIDORKEY_MLX_TAG in download_url
+        assert download_url.endswith(f"/{assets.CORRIDORKEY_MLX_FILENAME}")
 
 
 class TestEnsureOptionalStepWeights:

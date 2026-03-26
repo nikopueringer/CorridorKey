@@ -217,10 +217,17 @@ class TestCreateEngineBootstrap:
         inference_mod = ModuleType("CorridorKeyModule.inference_engine")
 
         class DummyEngine:
-            def __init__(self, checkpoint_path: str, device: str, img_size: int):
+            def __init__(
+                self,
+                checkpoint_path: str,
+                device: str,
+                img_size: int,
+                model_precision=None,
+            ):
                 self.checkpoint_path = checkpoint_path
                 self.device = device
                 self.img_size = img_size
+                self.model_precision = model_precision
 
         inference_mod.CorridorKeyEngine = DummyEngine
 
