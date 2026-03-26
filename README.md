@@ -235,9 +235,7 @@ CorridorKey supports AMD GPUs via PyTorch's ROCm/HIP backend. The `torch.cuda.*`
 
 **Linux native (recommended):**
 ```bash
-# Install AMD's ROCm torch wheels, then sync everything else
-pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.3
-uv sync
+uv sync --extra rocm
 
 # Verify
 uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
