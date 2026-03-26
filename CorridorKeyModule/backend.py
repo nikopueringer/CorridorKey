@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from .model_assets import ensure_corridorkey_assets
+
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
@@ -303,7 +305,24 @@ def create_engine(
             Set to None to disable tiling and use full-frame inference.
         overlap: MLX only — overlap pixels between tiles (default 64).
     """
-    backend = resolve_backend(backend)
+    requested_backend = None if backend is None else backend.lower()
+
+    if requested_backend in (None, "auto"):
+        ensure_corridorkey_assets(
+            ensure_torch=True,
+            ensure_mlx=False,
+            download_mlx_if_available=True,
+            checkpoint_dir=CHECKPOINT_DIR,
+        )
+        backend = resolve_backend(backend)
+    else:
+        backend = resolve_backend(backend)
+        ensure_corridorkey_assets(
+            ensure_torch=True,
+            ensure_mlx=backend == "mlx",
+            download_mlx_if_available=True,
+            checkpoint_dir=CHECKPOINT_DIR,
+        )
 
     if backend == "mlx":
         ckpt = _discover_checkpoint(MLX_EXT)

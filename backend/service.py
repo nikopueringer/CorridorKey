@@ -289,19 +289,11 @@ class CorridorKeyService:
             return self._engine
 
         try:
-            from CorridorKeyModule.backend import TORCH_EXT, _discover_checkpoint
-            from CorridorKeyModule.inference_engine import CorridorKeyEngine
+            from CorridorKeyModule.backend import create_engine
         except ImportError as exc:
             raise RuntimeError("CorridorKeyModule is not installed. Run: uv sync") from exc
-
-        ckpt_path = _discover_checkpoint(TORCH_EXT)
-        logger.info(f"Loading checkpoint: {os.path.basename(ckpt_path)}")
         t0 = time.monotonic()
-        self._engine = CorridorKeyEngine(
-            checkpoint_path=ckpt_path,
-            device=self._device,
-            img_size=2048,
-        )
+        self._engine = create_engine(backend="torch", device=self._device, img_size=2048)
         logger.info(f"Engine loaded in {time.monotonic() - t0:.1f}s")
         return self._engine
 
