@@ -201,7 +201,7 @@ def _download_corridorkey_mlx(checkpoint_dir: Path) -> Path:
 
         try:
             completed = subprocess.run(command, check=True, capture_output=True, text=True, env=env)
-        except subprocess.CalledProcessError as exc:
+        except subprocess.CalledProcessError:
             logger.info(
                 "corridorkey_mlx CLI download failed for %s@%s; falling back to direct download.",
                 repo_override,
