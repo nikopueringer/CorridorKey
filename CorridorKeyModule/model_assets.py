@@ -331,14 +331,25 @@ def _copy_atomic(source: Path, destination: Path) -> None:
             tmp_path.unlink(missing_ok=True)
 
 
-def _extract_path_from_output(completed: subprocess.CompletedProcess[str]) -> Path | None:
+def _extract_path_from_output(
+    completed: subprocess.CompletedProcess[str], *, expected_name: str = CORRIDORKEY_MLX_FILENAME
+) -> Path | None:
     for stream in (completed.stdout, completed.stderr):
         lines = [line.strip() for line in stream.splitlines() if line.strip()]
         for line in reversed(lines):
+            if not _looks_like_path(line):
+                continue
             candidate = Path(line).expanduser()
-            if candidate.suffix == MLX_EXT:
+            if candidate.name == expected_name:
                 return candidate
     return None
+
+
+def _looks_like_path(line: str) -> bool:
+    return (
+        line.startswith(("/", "~", "./", "../"))
+        or (len(line) >= 3 and line[1] == ":" and line[2] in ("\\", "/"))
+    )
 
 
 def _has_weight_file(directory: Path) -> bool:

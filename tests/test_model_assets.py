@@ -132,6 +132,31 @@ class TestDownloadCorridorKeyMlx:
         assert download_url.endswith(f"/{assets.CORRIDORKEY_MLX_FILENAME}")
 
 
+class TestExtractPathFromOutput:
+    def test_returns_bare_expected_path(self, tmp_path):
+        expected = _write_text(tmp_path / assets.CORRIDORKEY_MLX_FILENAME)
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"Downloading...\n{expected}\n",
+            stderr="",
+        )
+
+        assert assets._extract_path_from_output(completed) == expected
+
+    def test_ignores_non_path_logs_and_other_safetensors_files(self, tmp_path):
+        other = _write_text(tmp_path / "cache" / "other_model.safetensors")
+        expected = _write_text(tmp_path / "cache" / assets.CORRIDORKEY_MLX_FILENAME)
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"{other}\ncache hit for {expected}\n",
+            stderr=f"{expected}\n",
+        )
+
+        assert assets._extract_path_from_output(completed) == expected
+
+
 class TestEnsureOptionalStepWeights:
     def test_gvm_weights_download_once_and_reuse(self, tmp_path):
         def fake_snapshot_download(*, local_dir: str, **kwargs):

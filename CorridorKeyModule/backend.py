@@ -308,6 +308,9 @@ def create_engine(
     requested_backend = None if backend is None else backend.lower()
 
     if requested_backend in (None, "auto"):
+        # Auto-detect needs assets on disk before resolve_backend() runs:
+        # _auto_detect_backend() checks for local MLX weights and can prefer MLX
+        # only after they have been downloaded or discovered.
         ensure_corridorkey_assets(
             ensure_torch=True,
             ensure_mlx=False,
@@ -316,6 +319,8 @@ def create_engine(
         )
         backend = resolve_backend(backend)
     else:
+        # Explicit backends can resolve first because the caller has already
+        # chosen the runtime; we only need to fetch assets for that backend.
         backend = resolve_backend(backend)
         ensure_corridorkey_assets(
             ensure_torch=True,
