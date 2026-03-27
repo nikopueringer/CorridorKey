@@ -346,10 +346,7 @@ def _extract_path_from_output(
 
 
 def _looks_like_path(line: str) -> bool:
-    return (
-        line.startswith(("/", "~", "./", "../"))
-        or (len(line) >= 3 and line[1] == ":" and line[2] in ("\\", "/"))
-    )
+    return line.startswith(("/", "~", "./", "../")) or (len(line) >= 3 and line[1] == ":" and line[2] in ("\\", "/"))
 
 
 def _has_weight_file(directory: Path) -> bool:
