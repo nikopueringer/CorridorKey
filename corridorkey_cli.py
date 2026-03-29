@@ -208,6 +208,9 @@ def _prompt_inference_settings(
                 "Use GPU accelerated post-processing [dim](experimental)[/dim]",
                 default=False,
             )
+    else:
+        generate_comp = True
+        gpu_post_processing = False
 
     return InferenceSettings(
         input_is_linear=input_is_linear,
