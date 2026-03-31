@@ -36,8 +36,14 @@ class GVMLoraLoader(StableDiffusionLoraLoaderMixin):
     ):
 
         unet_lora_config = LoraConfig.from_pretrained(pretrained_model_name_or_path_or_dict)
-        checkpoint = os.path.join(pretrained_model_name_or_path_or_dict, f"pytorch_lora_weights.pt")
-        unet_lora_ckpt = torch.load(checkpoint)
+        checkpoint_st = os.path.join(pretrained_model_name_or_path_or_dict, "pytorch_lora_weights.safetensors")
+        checkpoint_pt = os.path.join(pretrained_model_name_or_path_or_dict, "pytorch_lora_weights.pt")
+        if os.path.exists(checkpoint_st):
+            from safetensors.torch import load_file as _st_load
+
+            unet_lora_ckpt = _st_load(checkpoint_st)
+        else:
+            unet_lora_ckpt = torch.load(checkpoint_pt)
         self.unet = LoraModel(self.unet, unet_lora_config, "default")
         set_peft_model_state_dict(self.unet, unet_lora_ckpt)
 
