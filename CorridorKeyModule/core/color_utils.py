@@ -309,6 +309,11 @@ def clean_matte_opencv(
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
     alpha_np: Numpy array [H, W] or [H, W, 1] float (0.0 - 1.0)
+
+    Note: this function is not idempotent at default settings. The dilation and Gaussian blur
+    post-processing expand the feathered edge of surviving regions on each call, so running
+    clean_matte twice on the same matte produces slightly different output. The connected-
+    components filter alone (dilation=0, blur_size=0) is idempotent.
     """
     # Needs to be 2D
     is_3d = False
