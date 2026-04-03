@@ -243,10 +243,15 @@ class TestDespill:
     redistributes the removed energy to preserve luminance.
     """
 
-    def test_pure_green_reduced_average_mode_numpy(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_pure_green_reduced_average_mode_numpy(self, backend):
         """A pure green pixel should have green clamped to (R+B)/2 = 0."""
         img = _to_np([[0.0, 1.0, 0.0]])
-        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        if backend == "openCV":
+            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        else:
+            img_t = torch.from_numpy(img)
+            result = cu.despill_torch(img_t, strength=1.0).numpy()
         # Green should be 0 (clamped to avg of R=0, B=0)
         assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
 
@@ -256,22 +261,37 @@ class TestDespill:
         result = cu.despill_opencv(img, green_limit_mode="max", strength=1.0)
         assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
 
-    def test_pure_red_unchanged_numpy(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_pure_red_unchanged_numpy(self, backend):
         """A pixel with no green excess should not be modified."""
         img = _to_np([[1.0, 0.0, 0.0]])
-        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        if backend == "openCV":
+            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        else:
+            img_t = torch.from_numpy(img)
+            result = cu.despill_torch(img_t, strength=1.0).numpy()
         np.testing.assert_allclose(result, img, atol=1e-6)
 
-    def test_strength_zero_is_noop_numpy(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_strength_zero_is_noop_numpy(self, backend):
         """strength=0 should return the input unchanged."""
         img = _to_np([[0.2, 0.9, 0.1]])
-        result = cu.despill_opencv(img, strength=0.0)
+        if backend == "openCV":
+            result = cu.despill_opencv(img, strength=0.0)
+        else:
+            img_t = torch.from_numpy(img)
+            result = cu.despill_torch(img_t, strength=0.0).numpy()
         np.testing.assert_allclose(result, img, atol=1e-7)
 
-    def test_partial_green_average_mode_numpy(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_partial_green_average_mode_numpy(self, backend):
         """Green slightly above (R+B)/2 should be reduced, not zeroed."""
         img = _to_np([[0.4, 0.8, 0.2]])
-        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        if backend == "openCV":
+            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        else:
+            img_t = torch.from_numpy(img)
+            result = cu.despill_torch(img_t, strength=1.0).numpy()
         limit = (0.4 + 0.2) / 2.0  # 0.3
         expected_green = limit  # green clamped to limit
         assert result[0, 1] == pytest.approx(expected_green, abs=1e-5)
@@ -284,11 +304,17 @@ class TestDespill:
         # max(R,B)=0.6 vs avg(R,B)=0.35, so max mode removes less green
         assert result_max[0, 1] >= result_avg[0, 1]
 
-    def test_fractional_strength_interpolates(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_fractional_strength_interpolates(self, backend):
         """strength=0.5 should produce a result between original and fully despilled."""
         img = _to_np([[0.2, 0.9, 0.1]])
-        full = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
-        half = cu.despill_opencv(img, green_limit_mode="average", strength=0.5)
+        if backend == "openCV":
+            full = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+            half = cu.despill_opencv(img, green_limit_mode="average", strength=0.5)
+        else:
+            img_t = torch.from_numpy(img)
+            full = cu.despill_torch(img_t, strength=1.0).numpy()
+            half = cu.despill_torch(img_t, strength=0.5).numpy()
         # Half-strength green should be between original green and fully despilled green
         assert half[0, 1] < img[0, 1]  # less green than original
         assert half[0, 1] > full[0, 1]  # more green than full despill
@@ -304,7 +330,8 @@ class TestDespill:
         result_t = cu.despill_opencv(img_t, green_limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result_np, result_t.numpy(), atol=1e-5)
 
-    def test_green_below_limit_unchanged_numpy(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_green_below_limit_unchanged_numpy(self, backend):
         """spill_amount is clamped to zero when G < (R+B)/2 — pixel is returned unchanged.
 
         When a pixel has less green than the luminance limit ((R+B)/2) it
@@ -315,7 +342,11 @@ class TestDespill:
         # G=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
         # spill_amount = max(0.3 - 0.7, 0) = 0  →  output equals input
         img = _to_np([[0.8, 0.3, 0.6]])
-        result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        if backend == "openCV":
+            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        else:
+            img_t = torch.from_numpy(img)
+            result = cu.despill_torch(img_t, strength=1.0).numpy()
         np.testing.assert_allclose(result, img, atol=1e-6)
 
 
@@ -331,22 +362,33 @@ class TestCleanMatte:
     while large foreground regions are preserved.
     """
 
-    def test_large_blob_preserved(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_large_blob_preserved(self, backend):
         """A single large opaque region should survive cleanup."""
         matte = np.zeros((100, 100), dtype=np.float32)
         matte[20:80, 20:80] = 1.0  # 60x60 = 3600 pixels
-        result = cu.clean_matte_opencv(matte, area_threshold=300)
+        if backend == "openCV":
+            result = cu.clean_matte_opencv(matte, area_threshold=300)
+        else:
+            matte = torch.from_numpy(matte).unsqueeze(0).unsqueeze(0)
+            result = cu.clean_matte_torch(matte, area_threshold=300).squeeze(0).squeeze(0).numpy()
         # Center of the blob should still be opaque
         assert result[50, 50] > 0.9
 
-    def test_small_blob_removed(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_small_blob_removed(self, backend):
         """A tiny blob below the threshold should be removed."""
         matte = np.zeros((100, 100), dtype=np.float32)
         matte[5:8, 5:8] = 1.0  # 3x3 = 9 pixels
-        result = cu.clean_matte_opencv(matte, area_threshold=300)
+        if backend == "openCV":
+            result = cu.clean_matte_opencv(matte, area_threshold=300)  #
+        else:
+            matte = torch.from_numpy(matte).unsqueeze(0).unsqueeze(0)
+            result = cu.clean_matte_torch(matte, area_threshold=300).squeeze(0).squeeze(0).numpy()
         assert result[6, 6] == pytest.approx(0.0, abs=1e-5)
 
-    def test_mixed_blobs(self):
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    def test_mixed_blobs(self, backend):
         """Large blob kept, small blob removed."""
         matte = np.zeros((200, 200), dtype=np.float32)
         # Large blob: 50x50 = 2500 px
@@ -354,7 +396,11 @@ class TestCleanMatte:
         # Small blob: 5x5 = 25 px
         matte[150:155, 150:155] = 1.0
 
-        result = cu.clean_matte_opencv(matte, area_threshold=100)
+        if backend == "openCV":
+            result = cu.clean_matte_opencv(matte, area_threshold=100)
+        else:
+            matte = torch.from_numpy(matte).unsqueeze(0).unsqueeze(0)
+            result = cu.clean_matte_torch(matte, area_threshold=100).squeeze(0).squeeze(0).numpy()
         assert result[35, 35] > 0.9  # large blob center preserved
         assert result[152, 152] < 0.01  # small blob removed
 
