@@ -265,12 +265,12 @@ def despill_torch(image: torch.Tensor, strength: float) -> torch.Tensor:
     return despilled
 
 
-def connected_components(mask: torch.Tensor, min_component_width=1, max_iterations=100) -> torch.Tensor:
+def connected_components(mask: torch.Tensor, min_component_distance=1, max_iterations=100) -> torch.Tensor:
     """
     Adapted from: https://gist.github.com/efirdc/5d8bd66859e574c683a504a4690ae8bc
     Args:
         mask: torch Tensor [B, 1, H, W] binary 1 or 0
-        min_component_width: int. Minimum width of connected components that are separated instead of merged.
+        min_component_distance: int. Minimum distance between connected components that are separated instead of merged.
         max_iterations: int. Maximum number of flood fill iterations. Adjust based on expected component sizes.
     Returns:
         comp: torch Tensor [B, 1, H, W] with connected component labels (0 = background, 1..N = components)
@@ -286,7 +286,7 @@ def connected_components(mask: torch.Tensor, min_component_width=1, max_iteratio
 
     for _ in range(max_iterations):
         comp[mask == 1] = F.max_pool2d(
-            comp, kernel_size=(2 * min_component_width) + 1, stride=1, padding=min_component_width
+            comp, kernel_size=(2 * min_component_distance) + 1, stride=1, padding=min_component_distance
         )[mask == 1]
 
     comp = comp.long()
@@ -352,17 +352,17 @@ def clean_matte_opencv(
     return result_alpha
 
 
-def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
+def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int = 15, blur_size: int = 5) -> torch.Tensor:
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
     Supports fully running on the GPU
     alpha_np: torch Tensor [B, 1, H, W] (0.0 - 1.0)
     """
-    mask = alpha > 0.5  # [B, 1, H, W]
+    mask = alpha > 0.25  # [B, 1, H, W]
 
     # Find the largest connected components in the mask
     # only a limited amount of iterations is needed to find components above the area threshold
-    components = connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
+    components = connected_components(mask, max_iterations=area_threshold // 20, min_component_distance=4)
 
     # We can use bincount even for batched inputs because the areas are uniquely labeled across the entire batch
     sizes = torch.bincount(components.flatten())
