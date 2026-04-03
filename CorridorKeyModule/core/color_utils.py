@@ -279,19 +279,15 @@ def connected_components(mask: torch.Tensor, min_component_width=1, max_iteratio
 
     # Reference implementation uses torch.arange instead of torch.randperm
     # torch.randperm converges considerably faster and more uniformly
-    comp = (torch.randperm(W * H) + 1).repeat(bs, 1).view(mask.shape).float().to(mask.device)
+    # If the batch size is >2 at 4k, float32 can't exactly represent all pixel indices (only up to 2^24)
+    # We add 0.1 to ensure all floats get floored to unique integers
+    comp = (torch.randperm(bs * W * H, device=mask.device, dtype=torch.float32) + 1.1).view(mask.shape)
     comp[mask != 1] = 0
 
-    prev_comp = torch.zeros_like(comp)
-
-    iteration = 0
-
-    while not torch.equal(comp, prev_comp) and iteration < max_iterations:
-        prev_comp = comp.clone()
+    for _ in range(max_iterations):
         comp[mask == 1] = F.max_pool2d(
             comp, kernel_size=(2 * min_component_width) + 1, stride=1, padding=min_component_width
         )[mask == 1]
-        iteration += 1
 
     comp = comp.long()
     # Relabel components to have contiguous labels starting from 1
@@ -362,12 +358,13 @@ def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int, b
     Supports fully running on the GPU
     alpha_np: torch Tensor [B, 1, H, W] (0.0 - 1.0)
     """
-    _device = alpha.device
     mask = alpha > 0.5  # [B, 1, H, W]
 
     # Find the largest connected components in the mask
     # only a limited amount of iterations is needed to find components above the area threshold
     components = connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
+
+    # We can use bincount even for batched inputs because the areas are uniquely labeled across the entire batch
     sizes = torch.bincount(components.flatten())
     big_sizes = torch.nonzero(sizes >= area_threshold)
 
