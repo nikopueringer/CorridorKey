@@ -296,6 +296,9 @@ def connected_components(mask: torch.Tensor, min_component_width=1, max_iteratio
     comp = comp.long()
     # Relabel components to have contiguous labels starting from 1
     unique_labels = torch.unique(comp)
+    # Add background label (0) if not present
+    if unique_labels[0] != 0:
+        unique_labels = torch.cat([torch.tensor([0], device=mask.device), unique_labels])
     label_map = torch.zeros(unique_labels.max().item() + 1, dtype=torch.long, device=mask.device)
     label_map[unique_labels] = torch.arange(len(unique_labels), device=mask.device)
     comp = label_map[comp]
@@ -369,6 +372,8 @@ def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int, b
     big_sizes = torch.nonzero(sizes >= area_threshold)
 
     mask = torch.zeros_like(mask, dtype=torch.float32)
+    # Remove background label (0) if present
+    big_sizes = big_sizes[big_sizes > 0]
     mask[torch.isin(components, big_sizes)] = 1.0
 
     # Dilate back to restore edges of large regions
