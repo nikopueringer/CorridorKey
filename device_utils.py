@@ -3,16 +3,57 @@
 import logging
 import os
 
-import torch
-
 logger = logging.getLogger(__name__)
 
 DEVICE_ENV_VAR = "CORRIDORKEY_DEVICE"
 VALID_DEVICES = ("auto", "cuda", "mps", "cpu")
 
 
+def is_rocm_system() -> bool:
+    """Detect if the system has AMD ROCm available (without importing torch).
+
+    Checks: /opt/rocm (Linux), HIP_PATH env var (Windows), HIP_VISIBLE_DEVICES
+    (any platform), CORRIDORKEY_ROCM=1 (explicit opt-in for cases where
+    auto-detection fails, e.g. pip-installed ROCm on Windows).
+    """
+    return (
+        os.path.exists("/opt/rocm")
+        or os.environ.get("HIP_PATH") is not None
+        or os.environ.get("HIP_VISIBLE_DEVICES") is not None
+        or os.environ.get("CORRIDORKEY_ROCM") == "1"
+    )
+
+
+def setup_rocm_env() -> None:
+    """Set ROCm environment variables and apply optional patches.
+
+    Must be called before importing torch so that env vars are visible to
+    PyTorch's initialization. This module intentionally avoids importing
+    torch at module level to make that possible. Safe to call on non-ROCm
+    systems (no-op).
+    """
+    if not is_rocm_system():
+        return
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    os.environ.setdefault("MIOPEN_FIND_MODE", "2")
+    # Level 4 = suppress info/debug but keep warnings and errors visible
+    os.environ.setdefault("MIOPEN_LOG_LEVEL", "4")
+    # Enable GTT (system RAM as GPU overflow) on Linux for 16GB cards.
+    # pytorch-rocm-gtt must be installed separately: pip install pytorch-rocm-gtt
+    try:
+        import pytorch_rocm_gtt
+
+        pytorch_rocm_gtt.patch()
+    except ImportError:
+        pass  # not installed — expected on most systems
+    except Exception:
+        logger.warning("pytorch-rocm-gtt is installed but patch() failed", exc_info=True)
+
+
 def detect_best_device() -> str:
     """Auto-detect best available device: CUDA > MPS > CPU."""
+    import torch
+
     if torch.cuda.is_available():
         device = "cuda"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -36,6 +77,8 @@ def resolve_device(requested: str | None = None) -> str:
     Raises:
         RuntimeError: If the requested backend is unavailable.
     """
+    import torch
+
     # CLI arg takes priority, then env var, then auto
     device = requested
     if device is None or device == "auto":
@@ -67,8 +110,10 @@ def resolve_device(requested: str | None = None) -> str:
     return device
 
 
-def clear_device_cache(device: torch.device | str) -> None:
+def clear_device_cache(device) -> None:
     """Clear GPU memory cache if applicable (no-op for CPU)."""
+    import torch
+
     device_type = device.type if isinstance(device, torch.device) else device
     if device_type == "cuda":
         torch.cuda.empty_cache()

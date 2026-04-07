@@ -25,11 +25,24 @@ import typer
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskID,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
-from clip_manager import (
+# Set ROCm env vars before any module imports torch.
+from device_utils import setup_rocm_env
+
+setup_rocm_env()
+
+from clip_manager import (  # noqa: E402
     LINUX_MOUNT_ROOT,
     ClipEntry,
     InferenceSettings,
@@ -43,7 +56,8 @@ from clip_manager import (
     run_videomama,
     scan_clips,
 )
-from device_utils import resolve_device
+from CorridorKeyModule.backend import resolve_backend  # noqa: E402
+from device_utils import resolve_device  # noqa: E402
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -137,9 +151,13 @@ def _prompt_inference_settings(
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
     default_refiner: float | None = None,
+    default_comp: bool | None = None,
+    default_gpu_post: bool | None = None,
 ) -> InferenceSettings:
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
+    generate_comp = default_comp if default_comp is not None else InferenceSettings.generate_comp
+    gpu_post_processing = default_gpu_post if default_gpu_post is not None else InferenceSettings.gpu_post_processing
 
     if default_linear is not None:
         input_is_linear = default_linear
@@ -189,12 +207,31 @@ def _prompt_inference_settings(
         except ValueError:
             refiner_scale = 1.0
 
+    if resolve_backend() == "torch":
+        if default_comp is not None:
+            generate_comp = default_comp
+        else:
+            generate_comp = Confirm.ask(
+                "Generate composition previews",
+                default=True,
+            )
+
+        if default_gpu_post is not None:
+            gpu_post_processing = default_gpu_post
+        else:
+            gpu_post_processing = Confirm.ask(
+                "Use GPU accelerated post-processing [dim](experimental)[/dim]",
+                default=False,
+            )
+
     return InferenceSettings(
         input_is_linear=input_is_linear,
         despill_strength=despill_strength,
         auto_despeckle=auto_despeckle,
         despeckle_size=despeckle_size,
         refiner_scale=refiner_scale,
+        generate_comp=generate_comp,
+        gpu_post_processing=gpu_post_processing,
     )
 
 
@@ -273,6 +310,14 @@ def run_inference_cmd(
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
     ] = None,
+    generate_comp: Annotated[
+        Optional[bool],
+        typer.Option("--comp/--no-comp", help="Generate comp previews (default: prompt)"),
+    ] = None,
+    gpu_post: Annotated[
+        Optional[bool],
+        typer.Option("--gpu-post/--cpu-post", help="Use GPU post-processing (default: prompt)"),
+    ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
@@ -300,6 +345,8 @@ def run_inference_cmd(
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,
             default_refiner=refiner,
+            default_comp=generate_comp,
+            default_gpu_post=gpu_post,
         )
 
     with ProgressContext() as ctx_progress:
@@ -336,6 +383,12 @@ def interactive_wizard(win_path: str, device: str | None = None) -> None:
 
     # 1. Resolve Path
     console.print(f"Windows Path: {win_path}")
+
+    # Perform a check, if we expect user to provide us directory,
+    # but accidentially gave us the path to the footage instead,
+    # we should presume the parent folder as substitution instead.
+    if os.path.isfile(win_path):
+        win_path = os.path.abspath(os.path.join(win_path, os.pardir))
 
     if os.path.exists(win_path):
         process_path = win_path

@@ -39,11 +39,11 @@ class TestCudaExtra:
 
     def test_cuda_extra_contains_torch(self, pyproject: dict) -> None:
         cuda_deps = pyproject["project"]["optional-dependencies"]["cuda"]
-        assert "torch==2.7.1" in cuda_deps
+        assert "torch==2.8.0" in cuda_deps
 
     def test_cuda_extra_contains_torchvision(self, pyproject: dict) -> None:
         cuda_deps = pyproject["project"]["optional-dependencies"]["cuda"]
-        assert "torchvision==0.22.1" in cuda_deps
+        assert "torchvision==0.23.0" in cuda_deps
 
 
 # ---------------------------------------------------------------------------
@@ -86,14 +86,26 @@ class TestUvSources:
     def test_torch_source_has_cuda_extra(self, pyproject: dict) -> None:
         sources = pyproject["tool"]["uv"]["sources"]
         torch_src = sources["torch"]
-        assert torch_src.get("extra") == "cuda"
-        assert "marker" not in torch_src, "torch source should not have platform markers"
+        cuda_entry = next(s for s in torch_src if s.get("extra") == "cuda")
+        assert cuda_entry["index"] == "pytorch"
 
     def test_torchvision_source_has_cuda_extra(self, pyproject: dict) -> None:
         sources = pyproject["tool"]["uv"]["sources"]
         tv_src = sources["torchvision"]
-        assert tv_src.get("extra") == "cuda"
-        assert "marker" not in tv_src, "torchvision source should not have platform markers"
+        cuda_entry = next(s for s in tv_src if s.get("extra") == "cuda")
+        assert cuda_entry["index"] == "pytorch"
+
+    def test_torch_source_has_rocm_extra(self, pyproject: dict) -> None:
+        sources = pyproject["tool"]["uv"]["sources"]
+        torch_src = sources["torch"]
+        rocm_entry = next(s for s in torch_src if s.get("extra") == "rocm")
+        assert rocm_entry["index"] == "pytorch-rocm"
+
+    def test_torchvision_source_has_rocm_extra(self, pyproject: dict) -> None:
+        sources = pyproject["tool"]["uv"]["sources"]
+        tv_src = sources["torchvision"]
+        rocm_entry = next(s for s in tv_src if s.get("extra") == "rocm")
+        assert rocm_entry["index"] == "pytorch-rocm"
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +122,9 @@ class TestConflicts:
         extras_in_groups = [
             {entry["extra"] for entry in group} for group in conflicts if all("extra" in entry for entry in group)
         ]
-        assert {"cuda", "mlx"} in extras_in_groups, "Expected a conflict group containing both 'cuda' and 'mlx' extras"
+        assert {"cuda", "mlx", "rocm"} in extras_in_groups, (
+            "Expected a conflict group containing 'cuda', 'mlx', and 'rocm' extras"
+        )
 
 
 # ---------------------------------------------------------------------------

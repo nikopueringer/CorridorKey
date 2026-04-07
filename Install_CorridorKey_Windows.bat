@@ -36,7 +36,7 @@ echo.
 :: 2. Install all dependencies (Python, venv, and packages are handled automatically by uv)
 echo [1/2] Installing Dependencies (This might take a while on first run)...
 echo       uv will automatically download Python if needed.
-uv sync
+uv sync --extra cuda
 if %errorlevel% neq 0 (
     echo [ERROR] uv sync failed. Please check the output above for details.
     pause

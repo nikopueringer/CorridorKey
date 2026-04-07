@@ -6,6 +6,8 @@ from collections.abc import Callable
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torchvision.transforms.v2.functional as TF
 
 
 def _is_tensor(x: np.ndarray | torch.Tensor) -> bool:
@@ -202,7 +204,7 @@ def apply_garbage_matte(
     return predicted_matte * garbage_mask
 
 
-def despill(
+def despill_opencv(
     image: np.ndarray | torch.Tensor, green_limit_mode: str = "average", strength: float = 1.0
 ) -> np.ndarray | torch.Tensor:
     """
@@ -247,7 +249,63 @@ def despill(
     return despilled
 
 
-def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5) -> np.ndarray:
+def despill_torch(image: torch.Tensor, strength: float) -> torch.Tensor:
+    """GPU despill — keeps data on device."""
+    if strength <= 0.0:
+        return image
+    r, g, b = image[:, 0], image[:, 1], image[:, 2]
+    limit = (r + b) / 2.0
+    spill = torch.clamp(g - limit, min=0.0)
+    g_new = g - spill
+    r_new = r + spill * 0.5
+    b_new = b + spill * 0.5
+    despilled = torch.stack([r_new, g_new, b_new], dim=1)
+    if strength < 1.0:
+        return image * (1.0 - strength) + despilled * strength
+    return despilled
+
+
+def connected_components(mask: torch.Tensor, min_component_width=1, max_iterations=100) -> torch.Tensor:
+    """
+    Adapted from: https://gist.github.com/efirdc/5d8bd66859e574c683a504a4690ae8bc
+    Args:
+        mask: torch Tensor [B, 1, H, W] binary 1 or 0
+        min_component_width: int. Minimum width of connected components that are separated instead of merged.
+        max_iterations: int. Maximum number of flood fill iterations. Adjust based on expected component sizes.
+    Returns:
+        comp: torch Tensor [B, 1, H, W] with connected component labels (0 = background, 1..N = components)
+    """
+    bs, _, H, W = mask.shape
+
+    # Reference implementation uses torch.arange instead of torch.randperm
+    # torch.randperm converges considerably faster and more uniformly
+    comp = (torch.randperm(W * H) + 1).repeat(bs, 1).view(mask.shape).float().to(mask.device)
+    comp[mask != 1] = 0
+
+    prev_comp = torch.zeros_like(comp)
+
+    iteration = 0
+
+    while not torch.equal(comp, prev_comp) and iteration < max_iterations:
+        prev_comp = comp.clone()
+        comp[mask == 1] = F.max_pool2d(
+            comp, kernel_size=(2 * min_component_width) + 1, stride=1, padding=min_component_width
+        )[mask == 1]
+        iteration += 1
+
+    comp = comp.long()
+    # Relabel components to have contiguous labels starting from 1
+    unique_labels = torch.unique(comp)
+    label_map = torch.zeros(unique_labels.max().item() + 1, dtype=torch.long, device=mask.device)
+    label_map[unique_labels] = torch.arange(len(unique_labels), device=mask.device)
+    comp = label_map[comp]
+
+    return comp
+
+
+def clean_matte_opencv(
+    alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5
+) -> np.ndarray:
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
     alpha_np: Numpy array [H, W] or [H, W, 1] float (0.0 - 1.0)
@@ -295,6 +353,39 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
     return result_alpha
 
 
+def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
+    """
+    Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
+    Supports fully running on the GPU
+    alpha_np: torch Tensor [B, 1, H, W] (0.0 - 1.0)
+    """
+    _device = alpha.device
+    mask = alpha > 0.5  # [B, 1, H, W]
+
+    # Find the largest connected components in the mask
+    # only a limited amount of iterations is needed to find components above the area threshold
+    components = connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
+    sizes = torch.bincount(components.flatten())
+    big_sizes = torch.nonzero(sizes >= area_threshold)
+
+    mask = torch.zeros_like(mask, dtype=torch.float32)
+    mask[torch.isin(components, big_sizes)] = 1.0
+
+    # Dilate back to restore edges of large regions
+    if dilation > 0:
+        # How many applications with kernel size 5 are needed to achieve the desired dilation radius
+        repeats = dilation // 2
+        for _ in range(repeats):
+            mask = F.max_pool2d(mask, 5, stride=1, padding=2)
+
+    # Blur for soft edges
+    if blur_size > 0:
+        k = int(blur_size * 2 + 1)
+        mask = TF.gaussian_blur(mask, [k, k])
+
+    return alpha * mask
+
+
 def create_checkerboard(
     width: int, height: int, checker_size: int = 64, color1: float = 0.2, color2: float = 0.4
 ) -> np.ndarray:
@@ -321,3 +412,17 @@ def create_checkerboard(
 
     # Make it 3-channel
     return np.stack([bg_img, bg_img, bg_img], axis=-1)
+
+
+@functools.lru_cache(maxsize=4)
+def get_checkerboard_linear_torch(w: int, h: int, device: torch.device) -> torch.Tensor:
+    """Return a cached checkerboard tensor [3, H, W] on device in linear space."""
+    checker_size = 128
+    y_coords = torch.arange(h, device=device) // checker_size
+    x_coords = torch.arange(w, device=device) // checker_size
+    y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+    checker = ((x_grid + y_grid) % 2).float()
+    # Map 0 -> 0.15, 1 -> 0.55 (sRGB), then convert to linear before caching
+    bg_srgb = checker * 0.4 + 0.15  # [H, W]
+    bg_srgb_3 = bg_srgb.unsqueeze(0).expand(3, -1, -1)
+    return srgb_to_linear(bg_srgb_3)

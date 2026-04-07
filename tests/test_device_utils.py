@@ -119,7 +119,7 @@ class TestResolveDevice:
         _patch_gpu(monkeypatch, cuda=False, mps=False)
         # Replace torch.backends with an object that lacks "mps" entirely
         fake_backends = type("Backends", (), {})()
-        monkeypatch.setattr("device_utils.torch.backends", fake_backends)
+        monkeypatch.setattr(torch, "backends", fake_backends)
         with pytest.raises(RuntimeError, match="no MPS support"):
             resolve_device("mps")
 

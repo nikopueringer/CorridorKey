@@ -9,8 +9,8 @@ authors = [{ name = "Corridor Digital" }]
 
 dependencies = [
     # Core inference
-    "torch==2.7.1",
-    "torchvision==0.22.1",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
     "timm==1.0.24",
     "numpy",
     "opencv-python",
@@ -18,7 +18,7 @@ dependencies = [
     "setuptools",
     # Triton fix for Windows
     # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
-    "triton-windows==3.3.1.post21 ; sys_platform == 'win32'",
+    "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     # GVM alpha hint generator
     "diffusers",
     "transformers",
@@ -44,11 +44,16 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = [
-    "torch==2.7.1",
-    "torchvision==0.22.1",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
 ]
 mlx = [
     "corridorkey-mlx ; python_version >= '3.11'",
+]
+rocm = [
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+    "pytorch-triton-rocm==3.4.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
 [dependency-groups]
@@ -83,7 +88,7 @@ markers = [
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-env = ["OPENCV_IO_ENABLE_OPENEXR=1",]
+env = ["OPENCV_IO_ENABLE_OPENEXR=1", ]
 addopts = "--tb=short"
 
 [tool.coverage.run]
@@ -111,6 +116,7 @@ conflicts = [
     [
         { extra = "cuda" },
         { extra = "mlx" },
+        { extra = "rocm" },
     ],
 ]
 
@@ -120,9 +126,22 @@ url = "https://download.pytorch.org/whl/cu128" # CUDA 12.6 doesn't support RTX 5
 explicit = true
 extra = "cuda"
 
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.3"
+explicit = true
+extra = "rocm"
+
 [tool.uv.sources]
 # Use Hiera fix in order to utilize the FlashAttention Kernel
 timm = { git = "https://github.com/Raiden129/pytorch-image-models-fix", branch = "fix/hiera-flash-attention-global-4d" }
-torch = { index = "pytorch", extra = "cuda" }
-torchvision = { index = "pytorch", extra = "cuda" }
+torch = [
+    { index = "pytorch", extra = "cuda" },
+    { index = "pytorch-rocm", extra = "rocm" },
+]
+torchvision = [
+    { index = "pytorch", extra = "cuda" },
+    { index = "pytorch-rocm", extra = "rocm" },
+]
+pytorch-triton-rocm = { index = "pytorch-rocm", extra = "rocm" }
 corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }
