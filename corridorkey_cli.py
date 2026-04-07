@@ -377,17 +377,19 @@ def wizard(
 # Wizard (rich-styled)
 # ---------------------------------------------------------------------------
 
-# Presume the win_path is a directory. If we are provided with an actual footage content, then we'll use the content's parent directory instead.
+
 def interactive_wizard(win_path: str, device: str | None = None) -> None:
     console.print(Panel("[bold]CORRIDOR KEY — SMART WIZARD[/bold]", style="cyan"))
 
     # 1. Resolve Path
     console.print(f"Windows Path: {win_path}")
 
-    # Perform a check, if we expect user to provide us directory, but accidentially gave us the path to the footage instead, we should presume the parent folder as substitution instead.
+    # Perform a check, if we expect user to provide us directory,
+    # but accidentially gave us the path to the footage instead,
+    # we should presume the parent folder as substitution instead.
     if os.path.isfile(win_path):
         win_path = os.path.abspath(os.path.join(win_path, os.pardir))
-    
+
     if os.path.exists(win_path):
         process_path = win_path
         console.print(f"Running locally: [bold]{process_path}[/bold]")
