@@ -265,12 +265,12 @@ def despill_torch(image: torch.Tensor, strength: float) -> torch.Tensor:
     return despilled
 
 
-def connected_components(mask: torch.Tensor, min_component_width=1, max_iterations=100) -> torch.Tensor:
+def connected_components(mask: torch.Tensor, min_component_distance=1, max_iterations=100) -> torch.Tensor:
     """
     Adapted from: https://gist.github.com/efirdc/5d8bd66859e574c683a504a4690ae8bc
     Args:
         mask: torch Tensor [B, 1, H, W] binary 1 or 0
-        min_component_width: int. Minimum width of connected components that are separated instead of merged.
+        min_component_distance: int. Minimum distance between connected components that are separated instead of merged.
         max_iterations: int. Maximum number of flood fill iterations. Adjust based on expected component sizes.
     Returns:
         comp: torch Tensor [B, 1, H, W] with connected component labels (0 = background, 1..N = components)
@@ -279,23 +279,22 @@ def connected_components(mask: torch.Tensor, min_component_width=1, max_iteratio
 
     # Reference implementation uses torch.arange instead of torch.randperm
     # torch.randperm converges considerably faster and more uniformly
-    comp = (torch.randperm(W * H) + 1).repeat(bs, 1).view(mask.shape).float().to(mask.device)
+    # If the batch size is >2 at 4k, float32 can't exactly represent all pixel indices (only up to 2^24)
+    # We add 0.1 to ensure all floats get floored to unique integers
+    comp = (torch.randperm(bs * W * H, device=mask.device, dtype=torch.float32) + 1.1).view(mask.shape)
     comp[mask != 1] = 0
 
-    prev_comp = torch.zeros_like(comp)
-
-    iteration = 0
-
-    while not torch.equal(comp, prev_comp) and iteration < max_iterations:
-        prev_comp = comp.clone()
+    for _ in range(max_iterations):
         comp[mask == 1] = F.max_pool2d(
-            comp, kernel_size=(2 * min_component_width) + 1, stride=1, padding=min_component_width
+            comp, kernel_size=(2 * min_component_distance) + 1, stride=1, padding=min_component_distance
         )[mask == 1]
-        iteration += 1
 
     comp = comp.long()
     # Relabel components to have contiguous labels starting from 1
     unique_labels = torch.unique(comp)
+    # Add background label (0) if not present
+    if unique_labels[0] != 0:
+        unique_labels = torch.cat([torch.tensor([0], device=mask.device), unique_labels])
     label_map = torch.zeros(unique_labels.max().item() + 1, dtype=torch.long, device=mask.device)
     label_map[unique_labels] = torch.arange(len(unique_labels), device=mask.device)
     comp = label_map[comp]
@@ -353,22 +352,25 @@ def clean_matte_opencv(
     return result_alpha
 
 
-def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int, blur_size: int) -> torch.Tensor:
+def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int = 15, blur_size: int = 5) -> torch.Tensor:
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
     Supports fully running on the GPU
     alpha_np: torch Tensor [B, 1, H, W] (0.0 - 1.0)
     """
-    _device = alpha.device
-    mask = alpha > 0.5  # [B, 1, H, W]
+    mask = alpha > 0.25  # [B, 1, H, W]
 
     # Find the largest connected components in the mask
     # only a limited amount of iterations is needed to find components above the area threshold
-    components = connected_components(mask, max_iterations=area_threshold // 8, min_component_width=2)
+    components = connected_components(mask, max_iterations=area_threshold // 20, min_component_distance=4)
+
+    # We can use bincount even for batched inputs because the areas are uniquely labeled across the entire batch
     sizes = torch.bincount(components.flatten())
     big_sizes = torch.nonzero(sizes >= area_threshold)
 
     mask = torch.zeros_like(mask, dtype=torch.float32)
+    # Remove background label (0) if present
+    big_sizes = big_sizes[big_sizes > 0]
     mask[torch.isin(components, big_sizes)] = 1.0
 
     # Dilate back to restore edges of large regions
