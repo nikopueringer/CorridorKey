@@ -34,6 +34,8 @@ dependencies = [
     "einops",
     # BiRefNet alpha hint generator
     "kornia",
+    # Safetensors — secure, fast tensor serialisation (replaces torch.load for .safetensors checkpoints)
+    "safetensors",
     # CLI tools (huggingface-hub is also a transitive dep, but must be direct
     # so that uv installs the "hf" console-script entry point)
     "huggingface-hub",
