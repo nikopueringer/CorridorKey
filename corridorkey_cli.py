@@ -153,11 +153,16 @@ def _prompt_inference_settings(
     default_refiner: float | None = None,
     default_comp: bool | None = None,
     default_gpu_post: bool | None = None,
+    default_image_size: int | None = None,
+    default_tiled_inference: bool | None = None,
 ) -> InferenceSettings:
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
     generate_comp = default_comp if default_comp is not None else InferenceSettings.generate_comp
     gpu_post_processing = default_gpu_post if default_gpu_post is not None else InferenceSettings.gpu_post_processing
+    tiled_inference = (
+        default_tiled_inference if default_tiled_inference is not None else InferenceSettings.tiled_inference
+    )
 
     if default_linear is not None:
         input_is_linear = default_linear
@@ -195,6 +200,15 @@ def _prompt_inference_settings(
         )
         despeckle_size = max(0, despeckle_size)
 
+    if default_image_size is not None:
+        image_size = default_image_size
+    else:
+        image_size = Prompt.ask("Inference image size", choices=["512", "1024", "2048"], default="2048")
+        try:
+            image_size = int(image_size)
+        except ValueError:
+            image_size = 2048
+
     if default_refiner is not None:
         refiner_scale = default_refiner
     else:
@@ -207,7 +221,18 @@ def _prompt_inference_settings(
         except ValueError:
             refiner_scale = 1.0
 
-    if resolve_backend() == "torch":
+    backend = resolve_backend()
+
+    if backend == "mlx":
+        if default_tiled_inference is not None:
+            tiled_inference = default_tiled_inference
+        else:
+            tiled_inference = Confirm.ask(
+                "Use mlx tiled inference",
+                default=False,
+            )
+
+    if backend == "torch":
         if default_comp is not None:
             generate_comp = default_comp
         else:
@@ -232,6 +257,8 @@ def _prompt_inference_settings(
         refiner_scale=refiner_scale,
         generate_comp=generate_comp,
         gpu_post_processing=gpu_post_processing,
+        image_size=image_size,
+        tiled_inference=tiled_inference,
     )
 
 
@@ -306,6 +333,10 @@ def run_inference_cmd(
         Optional[int],
         typer.Option("--despeckle-size", help="Min pixel size for despeckle (default: prompt)"),
     ] = None,
+    image_size: Annotated[
+        Optional[int],
+        typer.Option("--image-size", help="Inference image size"),
+    ] = None,
     refiner: Annotated[
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
@@ -317,6 +348,10 @@ def run_inference_cmd(
     gpu_post: Annotated[
         Optional[bool],
         typer.Option("--gpu-post/--cpu-post", help="Use GPU post-processing (default: prompt)"),
+    ] = None,
+    tiled_inference: Annotated[
+        Optional[bool],
+        typer.Option("--tile/--no-tile", help="Use mlx tiled inference (default: prompt)"),
     ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
@@ -337,6 +372,10 @@ def run_inference_cmd(
             auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
+            generate_comp=generate_comp,
+            gpu_post_processing=gpu_post,
+            image_size=image_size,
+            tiled_inference=tiled_inference,
         )
     else:
         settings = _prompt_inference_settings(
@@ -347,6 +386,8 @@ def run_inference_cmd(
             default_refiner=refiner,
             default_comp=generate_comp,
             default_gpu_post=gpu_post,
+            default_image_size=image_size,
+            default_tiled_inference=tiled_inference,
         )
 
     with ProgressContext() as ctx_progress:

@@ -40,6 +40,8 @@ class InferenceSettings:
     refiner_scale: float = 1.0
     generate_comp: bool = True
     gpu_post_processing: bool = False
+    image_size: int = 2048
+    tiled_inference: bool = False
 
 
 # Core Paths
@@ -626,9 +628,14 @@ def run_inference(
 
     if device is None:
         device = resolve_device()
-    from CorridorKeyModule.backend import create_engine
+    from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(
+        backend=backend,
+        device=device,
+        tile_size=DEFAULT_MLX_TILE_SIZE if settings.tiled_inference else None,
+        img_size=settings.image_size,
+    )
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
