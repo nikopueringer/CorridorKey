@@ -37,7 +37,10 @@ class GVMLoraLoader(StableDiffusionLoraLoaderMixin):
 
         unet_lora_config = LoraConfig.from_pretrained(pretrained_model_name_or_path_or_dict)
         checkpoint = os.path.join(pretrained_model_name_or_path_or_dict, f"pytorch_lora_weights.pt")
-        unet_lora_ckpt = torch.load(checkpoint)
+        load_kwargs = {"map_location": "cpu"}
+        if is_torch_version(">=", "2.0"):
+            load_kwargs["weights_only"] = True
+        unet_lora_ckpt = torch.load(checkpoint, **load_kwargs)
         self.unet = LoraModel(self.unet, unet_lora_config, "default")
         set_peft_model_state_dict(self.unet, unet_lora_ckpt)
 
