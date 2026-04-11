@@ -80,7 +80,7 @@ class BiRefNetHandler:
             local_dir_use_symlinks=False,  # Ensures actual files are downloaded, not just symlinks to the cache
         )
 
-        self.birefnet = AutoModelForImageSegmentation.from_pretrained(model_local_dir, trust_remote_code=True)
+        self.birefnet = AutoModelForImageSegmentation.from_pretrained(model_local_dir, trust_remote_code=False)
 
         self.birefnet.to(device)
         self.birefnet.eval()
