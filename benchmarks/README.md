@@ -23,6 +23,52 @@ uv run python benchmarks/bench_inference.py \
 uv run python benchmarks/bench_inference.py --synthetic --batch 1,2,4,8
 ```
 
+## Scope and next steps
+
+This harness starts narrow on purpose: it times the one part of the
+pipeline the audit identified as having the biggest unclaimed win — the
+`CorridorKeyEngine` forward pass. The headline question is whether
+batching helps (run `--batch 1,2,4` and compare the `total/f (med)`
+column), and the rest of the harness — reproducibility rules, JSON
+schema, synthetic mode — exists to make that answer trustworthy before
+anyone optimizes against it.
+
+**What it currently covers**
+
+- `CorridorKeyEngine` forward pass (GreenFormer / Hiera), single or batched
+- Synthetic frames or real clips from `benchmarks/corpus/`
+- Per-run `inference_ms`, `decode_ms`, `total_ms_per_frame`, `vram_peak_mb`,
+  each reported as `{median, mean, p95, min, max, n}`
+- Structured JSON output with git SHA, GPU name, torch version, full run config
+
+**Next steps**
+
+Things this harness doesn't yet do. Each is its own follow-up bench file
+or module that will share the same conventions (CUDA-synced timers,
+warmup discard, JSON schema, stat helpers):
+
+1. **Quality gate** — a `benchmarks/metrics/` module (SAD, MSE, gradient
+   error, connectivity error) so perf PRs that change model output can be
+   checked for regressions against a golden corpus. Needs to land before
+   any optimization that touches the forward pass (quantization, token
+   merging, fused attention) can ship safely.
+2. **End-to-end timing** — a `bench_e2e.py` that drives
+   `clip_manager.run_inference` instead of the engine directly, so the
+   numbers include video decode, EXR writes, and the serial per-frame
+   loop. That's what a user actually waits for; this harness is narrower
+   than that by design.
+3. **Isolated decode benchmark** — a `bench_decode.py` that compares
+   OpenCV vs decord vs PyAV throughput with no inference involved, so
+   decoder-swap experiments have their own ruler.
+4. **BiRefNet path** — its own bench file; the alpha-hint generator has a
+   completely different hot loop from GreenFormer.
+5. **VideoMaMa / GVM path** — its own bench file; the SVD-based temporal
+   matting stack (UNet + temporal VAE) is architecturally separate from
+   GreenFormer.
+6. **Profiler wrappers** — canonical `torch.profiler` / NSight / `rocprof`
+   invocations so traces from different runs use the same format and are
+   directly comparable.
+
 ## What it measures
 
 Per clip, per batch size:
