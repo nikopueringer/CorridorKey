@@ -25,14 +25,6 @@ uv run python benchmarks/bench_inference.py --synthetic --batch 1,2,4,8
 
 ## Scope and next steps
 
-This harness starts narrow on purpose: it times the one part of the
-pipeline the audit identified as having the biggest unclaimed win — the
-`CorridorKeyEngine` forward pass. The headline question is whether
-batching helps (run `--batch 1,2,4` and compare the `total/f (med)`
-column), and the rest of the harness — reproducibility rules, JSON
-schema, synthetic mode — exists to make that answer trustworthy before
-anyone optimizes against it.
-
 **What it currently covers**
 
 - `CorridorKeyEngine` forward pass (GreenFormer / Hiera), single or batched
