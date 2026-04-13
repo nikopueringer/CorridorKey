@@ -5,7 +5,9 @@ clear_device_cache(), and enumerate_gpus() using monkeypatch to mock
 hardware availability. No GPU required.
 """
 
+import json
 import subprocess
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +15,7 @@ import torch
 
 from device_utils import (
     DEVICE_ENV_VAR,
+    _enumerate_amd,
     _enumerate_nvidia,
     clear_device_cache,
     detect_best_device,
@@ -280,3 +283,106 @@ class TestEnumerateNvidia:
 
         assert gpus is not None
         assert len(gpus) == 1
+
+
+# ---------------------------------------------------------------------------
+# _enumerate_amd
+# ---------------------------------------------------------------------------
+
+
+class TestEnumerateAmd:
+    """amd-smi JSON → rocm-smi CSV → registry fallback chain."""
+
+    def test_amdsmi_success(self, monkeypatch):
+        payload = json.dumps(
+            [
+                {
+                    "asic": {"market_name": "Radeon RX 7800 XT"},
+                    "vram": {"size": {"value": 16384}},
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            _SubprocessRouter({"amd-smi": (0, payload)}),
+        )
+
+        gpus = _enumerate_amd()
+
+        assert gpus is not None
+        assert len(gpus) == 1
+        assert gpus[0].name == "Radeon RX 7800 XT"
+        assert gpus[0].vram_total_gb == pytest.approx(16.0)
+        # amd-smi static output has no free-memory field; helper mirrors total.
+        assert gpus[0].vram_free_gb == gpus[0].vram_total_gb
+
+    def test_amdsmi_malformed_entry_skipped(self, monkeypatch):
+        # Second entry's VRAM size is non-numeric; the inner try/except must
+        # skip it (float("garbage") raises ValueError) rather than crashing
+        # the whole enumeration. This is the hardening PR #211 added.
+        payload = json.dumps(
+            [
+                {
+                    "asic": {"market_name": "Radeon RX 7800 XT"},
+                    "vram": {"size": {"value": 16384}},
+                },
+                {
+                    "asic": {"market_name": "Radeon RX 9070"},
+                    "vram": {"size": {"value": "garbage"}},
+                },
+            ]
+        )
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            _SubprocessRouter({"amd-smi": (0, payload)}),
+        )
+
+        gpus = _enumerate_amd()
+
+        assert gpus is not None
+        assert len(gpus) == 1
+        assert gpus[0].name == "Radeon RX 7800 XT"
+
+    def test_amdsmi_invalid_json_falls_through_to_rocmsmi(self, monkeypatch):
+        # amd-smi returns garbage → JSONDecodeError caught → rocm-smi runs.
+        # rocm-smi reports bytes (16 GiB total, 1 GiB used).
+        rocm_csv = "device,Total,Used\n0,17179869184,1073741824"
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            _SubprocessRouter(
+                {
+                    "amd-smi": (0, "not-json"),
+                    "rocm-smi": (0, rocm_csv),
+                }
+            ),
+        )
+
+        gpus = _enumerate_amd()
+
+        assert gpus is not None
+        assert len(gpus) == 1
+        assert gpus[0].index == 0
+        assert gpus[0].vram_total_gb == pytest.approx(16.0)
+        assert gpus[0].vram_free_gb == pytest.approx(15.0)
+
+    def test_amdsmi_missing_falls_through_to_rocmsmi(self, monkeypatch):
+        rocm_csv = "device,Total,Used\n0,17179869184,0"
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            _SubprocessRouter({"rocm-smi": (0, rocm_csv)}),
+        )
+
+        gpus = _enumerate_amd()
+
+        assert gpus is not None
+        assert len(gpus) == 1
+        assert gpus[0].vram_total_gb == pytest.approx(16.0)
+
+    def test_no_tools_on_non_windows_returns_none(self, monkeypatch):
+        # Force the Windows registry branch off so the assertion is deterministic
+        # on any CI runner. On Windows with no AMD card the branch returns None
+        # anyway, but patching here makes the outcome platform-independent.
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr("device_utils.subprocess.run", _SubprocessRouter({}))
+
+        assert _enumerate_amd() is None
