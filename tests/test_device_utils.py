@@ -15,10 +15,12 @@ import torch
 
 from device_utils import (
     DEVICE_ENV_VAR,
+    GPUInfo,
     _enumerate_amd,
     _enumerate_nvidia,
     clear_device_cache,
     detect_best_device,
+    enumerate_gpus,
     resolve_device,
 )
 
@@ -386,3 +388,67 @@ class TestEnumerateAmd:
         monkeypatch.setattr("device_utils.subprocess.run", _SubprocessRouter({}))
 
         assert _enumerate_amd() is None
+
+
+# ---------------------------------------------------------------------------
+# enumerate_gpus
+# ---------------------------------------------------------------------------
+
+
+def _amd_must_not_run():
+    raise AssertionError("_enumerate_amd should not be called")
+
+
+class TestEnumerateGpus:
+    """Dispatch chain: NVIDIA → AMD → torch.cuda → []."""
+
+    def test_prefers_nvidia(self, monkeypatch):
+        nvidia = [GPUInfo(index=0, name="NVIDIA RTX 5090", vram_total_gb=32.0, vram_free_gb=30.0)]
+        monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: nvidia)
+        # AMD helper must not even be consulted when NVIDIA reports GPUs.
+        monkeypatch.setattr("device_utils._enumerate_amd", _amd_must_not_run)
+
+        assert enumerate_gpus() == nvidia
+
+    def test_falls_back_to_amd_when_nvidia_unavailable(self, monkeypatch):
+        amd = [GPUInfo(index=0, name="Radeon RX 7800 XT", vram_total_gb=16.0, vram_free_gb=16.0)]
+        monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: None)
+        monkeypatch.setattr("device_utils._enumerate_amd", lambda: amd)
+
+        assert enumerate_gpus() == amd
+
+    def test_empty_nvidia_result_is_returned_as_is(self, monkeypatch):
+        # nvidia-smi ran successfully but reported zero GPUs: we trust that
+        # and must NOT fall through to AMD (None is the unavailable sentinel).
+        monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: [])
+        monkeypatch.setattr("device_utils._enumerate_amd", _amd_must_not_run)
+
+        assert enumerate_gpus() == []
+
+    def test_torch_fallback_when_smi_tools_absent(self, monkeypatch):
+        monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: None)
+        monkeypatch.setattr("device_utils._enumerate_amd", lambda: None)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+        fake_a = MagicMock(total_memory=24 * (1024**3))
+        fake_a.name = "NVIDIA RTX 3090"
+        fake_b = MagicMock(total_memory=10 * (1024**3))
+        fake_b.name = "NVIDIA RTX 3080"
+        props = {0: fake_a, 1: fake_b}
+        monkeypatch.setattr(torch.cuda, "get_device_properties", lambda i: props[i])
+
+        gpus = enumerate_gpus()
+
+        assert [g.name for g in gpus] == ["NVIDIA RTX 3090", "NVIDIA RTX 3080"]
+        assert gpus[0].vram_total_gb == pytest.approx(24.0)
+        assert gpus[1].vram_total_gb == pytest.approx(10.0)
+        # torch.cuda exposes no free-memory field; helper mirrors total.
+        assert gpus[0].vram_free_gb == gpus[0].vram_total_gb
+
+    def test_returns_empty_when_nothing_available(self, monkeypatch):
+        monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: None)
+        monkeypatch.setattr("device_utils._enumerate_amd", lambda: None)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        assert enumerate_gpus() == []
