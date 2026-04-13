@@ -1,10 +1,11 @@
 """Unit tests for device_utils — cross-platform device selection.
 
 Tests cover all code paths in detect_best_device(), resolve_device(),
-and clear_device_cache() using monkeypatch to mock hardware availability.
-No GPU required.
+clear_device_cache(), and enumerate_gpus() using monkeypatch to mock
+hardware availability. No GPU required.
 """
 
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,7 @@ import torch
 
 from device_utils import (
     DEVICE_ENV_VAR,
+    _enumerate_nvidia,
     clear_device_cache,
     detect_best_device,
     resolve_device,
@@ -170,3 +172,111 @@ class TestClearDeviceCache:
         monkeypatch.setattr(torch.mps, "empty_cache", mock_empty)
         clear_device_cache(torch.device("mps"))
         mock_empty.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# enumerate_gpus helpers — subprocess mocks shared across NVIDIA/AMD tests
+# ---------------------------------------------------------------------------
+
+
+def _fake_completed(stdout: str = "", returncode: int = 0) -> MagicMock:
+    """Build a minimal stand-in for subprocess.CompletedProcess."""
+    result = MagicMock()
+    result.stdout = stdout
+    result.returncode = returncode
+    return result
+
+
+class _SubprocessRouter:
+    """subprocess.run stub that dispatches per-binary.
+
+    ``responses`` maps the binary name (cmd[0]) to either a
+    ``(returncode, stdout)`` tuple or an ``Exception`` to raise.
+    Missing binaries raise ``FileNotFoundError`` to mimic the OS.
+    """
+
+    def __init__(self, responses: dict):
+        self._responses = responses
+
+    def __call__(self, cmd, *args, **kwargs):
+        response = self._responses.get(cmd[0])
+        if response is None:
+            raise FileNotFoundError(cmd[0])
+        if isinstance(response, BaseException):
+            raise response
+        returncode, stdout = response
+        return _fake_completed(stdout=stdout, returncode=returncode)
+
+
+# ---------------------------------------------------------------------------
+# _enumerate_nvidia
+# ---------------------------------------------------------------------------
+
+
+class TestEnumerateNvidia:
+    """nvidia-smi CSV parser — returns a list on success, None when unavailable."""
+
+    def test_parses_single_gpu(self, monkeypatch):
+        csv = "0, NVIDIA RTX 5090, 32768, 30720"
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            lambda *a, **kw: _fake_completed(stdout=csv),
+        )
+
+        gpus = _enumerate_nvidia()
+
+        assert gpus is not None
+        assert len(gpus) == 1
+        assert gpus[0].index == 0
+        assert gpus[0].name == "NVIDIA RTX 5090"
+        # nvidia-smi reports MiB; helper divides by 1024 to reach GiB.
+        assert gpus[0].vram_total_gb == pytest.approx(32.0)
+        assert gpus[0].vram_free_gb == pytest.approx(30.0)
+
+    def test_parses_multi_gpu(self, monkeypatch):
+        csv = "0, NVIDIA RTX 5090, 32768, 30720\n1, NVIDIA RTX 4090, 24576, 20480"
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            lambda *a, **kw: _fake_completed(stdout=csv),
+        )
+
+        gpus = _enumerate_nvidia()
+
+        assert gpus is not None
+        assert [g.index for g in gpus] == [0, 1]
+        assert gpus[1].name == "NVIDIA RTX 4090"
+        assert gpus[1].vram_total_gb == pytest.approx(24.0)
+
+    def test_nonzero_returncode_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            lambda *a, **kw: _fake_completed(stdout="", returncode=9),
+        )
+        assert _enumerate_nvidia() is None
+
+    def test_binary_missing_returns_none(self, monkeypatch):
+        def raise_fnf(*a, **kw):
+            raise FileNotFoundError
+
+        monkeypatch.setattr("device_utils.subprocess.run", raise_fnf)
+        assert _enumerate_nvidia() is None
+
+    def test_timeout_returns_none(self, monkeypatch):
+        def raise_timeout(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd="nvidia-smi", timeout=5)
+
+        monkeypatch.setattr("device_utils.subprocess.run", raise_timeout)
+        assert _enumerate_nvidia() is None
+
+    def test_malformed_rows_are_skipped(self, monkeypatch):
+        # First row is valid, second has fewer than 4 fields and must be ignored.
+        csv = "0, NVIDIA RTX 5090, 32768, 30720\nbogus, row"
+        monkeypatch.setattr(
+            "device_utils.subprocess.run",
+            lambda *a, **kw: _fake_completed(stdout=csv),
+        )
+
+        gpus = _enumerate_nvidia()
+
+        assert gpus is not None
+        assert len(gpus) == 1
