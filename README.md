@@ -18,7 +18,7 @@ This is a brand new release, I'm sure you will discover many ways it can be impr
 
 If you want an easy-install, artist-friendly user interface version of CorridorKey, check out [EZ-CorridorKey](https://github.com/edenaion/EZ-CorridorKey)
 
-This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies — it handles Python installation, virtual environments, and packages all in one step, so you don't need to worry about any of that. just run the appropriate install script for your OS.
+This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies — it handles Python installation, virtual environments, and packages all in one step, so you don't need to worry about any of that. Just run the appropriate install script for your OS.
 
 Naturally, I have not tested everything. If you encounter errors, please consider patching the code as needed and submitting a pull request.
 
