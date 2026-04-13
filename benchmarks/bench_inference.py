@@ -16,7 +16,7 @@ Usage
         --warmup 3 --iters 10 \
         --output benchmarks/results/run.json
 
-    # batch sweep (exercises engine.batch_process_frames)
+    # batch sweep (exercises engine.process_frame with a batched ndarray)
     python benchmarks/bench_inference.py --synthetic --batch 1,2,4,8
 
 What it measures
@@ -25,7 +25,7 @@ Per clip (or per synthetic run):
     decode_ms          — time to read + decode one frame from disk
     h2d_ms             — host→device transfer + dtype conversion (measured
                          via a no-op dispatch; attributable but small)
-    inference_ms       — engine.process_frame / batch_process_frames wall time
+    inference_ms       — engine.process_frame wall time (single or batched)
     total_ms_per_frame — decode_ms + inference_ms (no write_ms yet; writes
                          are clip_manager's responsibility, not engine's)
     fps_median
@@ -327,7 +327,7 @@ def run_batch(engine: CorridorKeyEngine, clip: ClipFrames, batch: int) -> tuple[
         masks = np.stack([_decode_pair(clip, run_batch.counter + i)[1] for i in range(batch)])
     run_batch.counter += batch
     with Timer() as ti:
-        engine.batch_process_frames(imgs, masks)
+        engine.process_frame(imgs, masks)
     return td.ms, ti.ms
 
 
