@@ -27,7 +27,7 @@ VALID_BACKENDS = ("auto", "torch", "mlx")
 
 # Update HF_REPO_ID and HF_CHECKPOINT_FILENAME if a new model version is released.
 HF_REPO_ID = "nikopueringer/CorridorKey_v1.0"
-HF_CHECKPOINT_FILENAME = "CorridorKey.pth"
+HF_CHECKPOINT_FILENAME = "CorridorKey_v1.0.pth"
 
 
 def resolve_backend(requested: str | None = None) -> str:

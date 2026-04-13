@@ -17,7 +17,7 @@ def batch_process_frame(engine: CorridorKeyEngine, batch_size: int):
     imgs = np.random.randint(0, 255, (batch_size, 2160, 3840, 3), dtype=np.uint8)
     masks = np.random.randint(0, 255, (batch_size, 2160, 3840), dtype=np.uint8)
 
-    engine.batch_process_frames(imgs, masks)
+    engine.process_frame(imgs, masks)
 
 
 def test_vram():
