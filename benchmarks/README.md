@@ -7,21 +7,74 @@ authors, machines, and branches are actually comparable.
 This directory does **not** change pipeline behavior. It's a read-only
 observer of the existing `CorridorKeyEngine` path.
 
+## Setup
+
+The harness reuses the main project env. If you haven't installed deps yet:
+
+```bash
+# CUDA GPU (Linux, Windows, RTX 30xx/40xx/50xx)
+uv sync --extra cuda
+
+# ROCm GPU
+uv sync --extra rocm
+
+# Apple Silicon
+uv sync --extra mlx
+```
+
+Without an explicit `--extra`, `uv` resolves to the **CPU-only** torch wheel and
+`torch.cuda.is_available()` returns False. The harness will then still run but
+on CPU, which is not what you want.
+
+> **RTX 50-series note.** Blackwell (`sm_120`) needs `torch 2.8.0+cu128` or
+> newer. The `cuda` extra in `pyproject.toml` already points at the cu128
+> wheel index, so `uv sync --extra cuda` is sufficient — you do not need to
+> install torch by hand.
+
 ## Quickstart
 
 ```bash
 # Smoke test with synthetic frames — no corpus required
-uv run python benchmarks/bench_inference.py --synthetic --iters 5
+uv run --extra cuda python benchmarks/bench_inference.py --synthetic --iters 5
 
 # Real corpus (drop .mp4/.mov files into benchmarks/corpus/ first)
-uv run python benchmarks/bench_inference.py \
+uv run --extra cuda python benchmarks/bench_inference.py \
     --corpus benchmarks/corpus \
     --resolution 2048 --warmup 3 --iters 10 \
     --output benchmarks/results/$(date +%Y%m%d-%H%M%S).json
 
-# Batch-size sweep (exercises engine.batch_process_frames)
-uv run python benchmarks/bench_inference.py --synthetic --batch 1,2,4,8
+# Batch-size sweep (exercises engine.process_frame with a batched ndarray)
+uv run --extra cuda python benchmarks/bench_inference.py --synthetic --batch 1,2,4,8
 ```
+
+`uv run` re-resolves the env each call. You **must** pass `--extra cuda`
+(or `--extra rocm` / `--extra mlx`) every time, otherwise uv will silently
+swap the active torch back to the CPU wheel. Pick whichever extra matches
+the accelerator you installed above.
+
+## Platform notes
+
+**Windows + triton-windows (RTX 50xx).** At the time of writing,
+`torch.compile` autotune on Blackwell hits `OutOfMemoryError: out of resource:
+triton_mm Required: 131072 Hardware limit: 101376` during Inductor kernel
+selection. The harness catches the compile failure and falls back to eager
+mode — you will see `Model compilation failed. Falling back to eager mode.`
+in the output. Numbers collected this way are still self-consistent (eager
+vs eager is a fair comparison), but don't compare them against compiled runs
+on other boxes. Tracked for a future fix.
+
+**Checkpoint auto-download.** On first run the engine downloads
+`CorridorKey_v1.0.pth` (~382 MB) from HuggingFace into
+`CorridorKeyModule/checkpoints/`. If the auto-download 404s, grab it manually
+from `https://huggingface.co/nikopueringer/CorridorKey_v1.0` and drop it in
+that directory — `_discover_checkpoint` globs `*.pth` so any filename works.
+
+**Large-batch upstream bug.** `--batch 8` at `--resolution 2048` currently
+crashes inside `CorridorKeyModule/core/color_utils.py::connected_components`
+with `RuntimeError: n cannot be greater than 2^24+1 for Float type` —
+`torch.randperm` with `dtype=torch.float32` can't handle
+`batch*W*H > 16,777,217`. Stick to batches ≤ 4 at 2048², or drop resolution
+for larger sweeps, until that's patched upstream.
 
 ## Scope and next steps
 
@@ -68,7 +121,7 @@ Per clip, per batch size:
 | Field | Meaning |
 |---|---|
 | `decode_ms` | wall time for `_decode_pair` (mostly a copy right now — real decode benchmarking is a future `bench_decode.py`) |
-| `inference_ms` | `engine.process_frame` / `engine.batch_process_frames` wall time, CUDA-synced |
+| `inference_ms` | `engine.process_frame` wall time (single frame or batched ndarray), CUDA-synced |
 | `total_ms_per_frame` | `(decode_ms + inference_ms) / batch` |
 | `fps_median` | `1000 / total_ms_per_frame.median` |
 | `vram_peak_mb` | `torch.cuda.max_memory_allocated` after the run |
