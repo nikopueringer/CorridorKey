@@ -12,6 +12,7 @@ dependencies = [
     "torch==2.8.0",
     "torchvision==0.23.0",
     "timm==1.0.24",
+    "safetensors",
     "numpy",
     "opencv-python",
     "tqdm",
