@@ -65,11 +65,23 @@ echo "[2/2] Downloading CorridorKey Model Weights..."
 # Use -p to create the folder only if it doesn't exist
 mkdir -p "CorridorKeyModule/checkpoints"
 
-if [ ! -f "CorridorKeyModule/checkpoints/CorridorKey.pth" ]; then
-    echo "Downloading CorridorKey.pth..."
-    curl -L -o "CorridorKeyModule/checkpoints/CorridorKey.pth" "https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth"
+CKPT_DIR="CorridorKeyModule/checkpoints"
+SAFETENSORS_PATH="$CKPT_DIR/CorridorKey.safetensors"
+PTH_PATH="$CKPT_DIR/CorridorKey.pth"
+HF_BASE="https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main"
+
+if [ -f "$SAFETENSORS_PATH" ] || [ -f "$PTH_PATH" ]; then
+    echo "CorridorKey checkpoint already exists!"
 else
-    echo "CorridorKey.pth already exists!"
+    echo "Downloading CorridorKey.safetensors..."
+    # --fail returns non-zero on HTTP errors (e.g. 404 before the safetensors
+    # upload lands); fall back to the legacy .pth in that case.
+    if ! curl -L --fail -o "$SAFETENSORS_PATH" "$HF_BASE/CorridorKey.safetensors"; then
+        echo "safetensors not available yet — falling back to CorridorKey.pth..."
+        rm -f "$SAFETENSORS_PATH"
+        # DEPRECATED: remove after .pth sunset
+        curl -L -o "$PTH_PATH" "$HF_BASE/CorridorKey_v1.0.pth"
+    fi
 fi
 
 echo ""
