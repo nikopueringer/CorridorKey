@@ -18,7 +18,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from CorridorKeyModule.backend import (
-    HF_CHECKPOINT_FILENAME,
+    HF_CHECKPOINT_FILENAME_SAFETENSORS,
     HF_REPO_ID,
     TORCH_EXT,
     _discover_checkpoint,
@@ -29,12 +29,15 @@ from CorridorKeyModule.backend import (
 # Strategies
 # ---------------------------------------------------------------------------
 
-# File extensions that are NOT .pth — used to populate "non-empty but no .pth" dirs
+# File extensions that are NOT recognised as Torch checkpoints — used to
+# populate "non-empty but no usable checkpoint" dirs. ``.safetensors`` is
+# deliberately excluded because the Torch backend now treats it as a valid
+# checkpoint (preferred over ``.pth``), so its presence would legitimately
+# satisfy discovery and skip the auto-download path that Property 1 exercises.
 _non_pth_extensions = st.sampled_from(
     [
         ".txt",
         ".json",
-        ".safetensors",
         ".bin",
         ".onnx",
         ".csv",
@@ -95,7 +98,7 @@ class TestMissingCheckpointTriggersDownload:
             # Prepare a fake cached file that hf_hub_download would return
             cache_dir = Path(tmp) / "hf_cache"
             cache_dir.mkdir()
-            cached_file = cache_dir / HF_CHECKPOINT_FILENAME
+            cached_file = cache_dir / HF_CHECKPOINT_FILENAME_SAFETENSORS
             cached_file.write_bytes(b"fake-checkpoint-bytes")
 
             with (
@@ -107,17 +110,17 @@ class TestMissingCheckpointTriggersDownload:
             ):
                 result = _discover_checkpoint(TORCH_EXT)
 
-                # The returned path must point to CHECKPOINT_DIR/CorridorKey.pth
-                expected = ckpt_dir / HF_CHECKPOINT_FILENAME
+                # Primary path lands the .safetensors in the checkpoint dir
+                expected = ckpt_dir / HF_CHECKPOINT_FILENAME_SAFETENSORS
                 assert result == expected, f"Expected {expected}, got {result}"
 
                 # The file must actually exist on disk
                 assert result.exists(), f"Returned path does not exist: {result}"
 
-                # hf_hub_download must have been called with correct args
+                # hf_hub_download must have been called with the safetensors filename
                 mock_dl.assert_called_once_with(
                     repo_id=HF_REPO_ID,
-                    filename=HF_CHECKPOINT_FILENAME,
+                    filename=HF_CHECKPOINT_FILENAME_SAFETENSORS,
                 )
 
 

@@ -11,8 +11,10 @@ import pytest
 from CorridorKeyModule.backend import (
     BACKEND_ENV_VAR,
     HF_CHECKPOINT_FILENAME,
+    HF_CHECKPOINT_FILENAME_SAFETENSORS,
     HF_REPO_ID,
     MLX_EXT,
+    SAFETENSORS_EXT,
     TORCH_EXT,
     _discover_checkpoint,
     _ensure_torch_checkpoint,
@@ -81,19 +83,22 @@ class TestDiscoverCheckpoint:
             assert result == ckpt
 
     def test_zero_torch_triggers_auto_download(self, tmp_path):
-        """Empty dir + TORCH_EXT now calls _ensure_torch_checkpoint (auto-download)."""
+        """Empty dir + TORCH_EXT calls _ensure_torch_checkpoint — primary path is safetensors."""
         with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
             with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
-                # Simulate hf_hub_download returning a cached file
-                cached = tmp_path / "hf_cache" / "CorridorKey.pth"
+                # Simulate hf_hub_download returning a cached safetensors file
+                cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
                 cached.parent.mkdir()
                 cached.write_bytes(b"fake-checkpoint")
                 mock_dl.return_value = str(cached)
 
                 result = _discover_checkpoint(TORCH_EXT)
-                assert result.name == "CorridorKey.pth"
+                assert result.name == HF_CHECKPOINT_FILENAME_SAFETENSORS
                 assert result.exists()
                 mock_dl.assert_called_once()
+                # Must have requested the safetensors filename
+                _, kwargs = mock_dl.call_args
+                assert kwargs["filename"] == HF_CHECKPOINT_FILENAME_SAFETENSORS
 
     def test_zero_torch_download_failure_raises_runtime_error(self, tmp_path):
         """When auto-download fails, RuntimeError is raised with HF URL."""
@@ -126,9 +131,72 @@ class TestDiscoverCheckpoint:
             result = _discover_checkpoint(MLX_EXT)
             assert result == ckpt
 
+    def test_torch_prefers_safetensors_over_pth(self, tmp_path):
+        """When both .safetensors and .pth exist, Torch discovery picks safetensors."""
+        safetensors_ckpt = tmp_path / "model.safetensors"
+        pth_ckpt = tmp_path / "model.pth"
+        safetensors_ckpt.touch()
+        pth_ckpt.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            result = _discover_checkpoint(TORCH_EXT)
+            assert result == safetensors_ckpt
+
+    def test_torch_falls_back_to_pth_when_only_pth_present(self, tmp_path):
+        """Legacy installs with only .pth cached: Torch discovery returns it, no download."""
+        pth_ckpt = tmp_path / "legacy.pth"
+        pth_ckpt.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT)
+                assert result == pth_ckpt
+                mock_dl.assert_not_called()
+
+    def test_torch_finds_safetensors_when_only_safetensors_present(self, tmp_path):
+        """New installs with only .safetensors: Torch discovery returns it, no download."""
+        sft_ckpt = tmp_path / "model.safetensors"
+        sft_ckpt.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT)
+                assert result == sft_ckpt
+                mock_dl.assert_not_called()
+
+    def test_ensure_torch_checkpoint_falls_back_to_pth_on_entry_not_found(self, tmp_path):
+        """When HF does not yet host the .safetensors, _ensure_torch_checkpoint downloads the .pth."""
+        from huggingface_hub.utils import EntryNotFoundError
+
+        cached_pth = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME
+        cached_pth.parent.mkdir()
+        cached_pth.write_bytes(b"legacy-pth-bytes")
+
+        def hf_side_effect(*, repo_id, filename):
+            assert repo_id == HF_REPO_ID
+            if filename == HF_CHECKPOINT_FILENAME_SAFETENSORS:
+                raise EntryNotFoundError("not uploaded yet")
+            if filename == HF_CHECKPOINT_FILENAME:
+                return str(cached_pth)
+            raise AssertionError(f"unexpected filename: {filename}")
+
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=hf_side_effect) as mock_dl:
+                result = _ensure_torch_checkpoint()
+
+                # Fallback path: landed as .pth in the checkpoint dir
+                assert result == tmp_path / HF_CHECKPOINT_FILENAME
+                assert result.read_bytes() == b"legacy-pth-bytes"
+                # Both filenames must have been attempted (safetensors first, then pth)
+                assert mock_dl.call_count == 2
+                assert mock_dl.call_args_list[0].kwargs["filename"] == HF_CHECKPOINT_FILENAME_SAFETENSORS
+                assert mock_dl.call_args_list[1].kwargs["filename"] == HF_CHECKPOINT_FILENAME
+
+    def test_discover_uses_safetensors_constant(self):
+        """SAFETENSORS_EXT must equal MLX_EXT — both point at the .safetensors format."""
+        assert SAFETENSORS_EXT == ".safetensors"
+        assert SAFETENSORS_EXT == MLX_EXT
+
     def test_ensure_torch_checkpoint_happy_path(self, tmp_path):
-        """Mock hf_hub_download, verify copy to CHECKPOINT_DIR/CorridorKey.pth."""
-        cached = tmp_path / "hf_cache" / "CorridorKey.pth"
+        """Mock hf_hub_download, verify copy to CHECKPOINT_DIR/CorridorKey.safetensors."""
+        cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
         cached.parent.mkdir()
         cached.write_bytes(b"fake-checkpoint-data")
 
@@ -136,12 +204,12 @@ class TestDiscoverCheckpoint:
             with mock.patch("huggingface_hub.hf_hub_download", return_value=str(cached)) as mock_dl:
                 result = _ensure_torch_checkpoint()
 
-                assert result == tmp_path / HF_CHECKPOINT_FILENAME
+                assert result == tmp_path / HF_CHECKPOINT_FILENAME_SAFETENSORS
                 assert result.exists()
                 assert result.read_bytes() == b"fake-checkpoint-data"
                 mock_dl.assert_called_once_with(
                     repo_id=HF_REPO_ID,
-                    filename=HF_CHECKPOINT_FILENAME,
+                    filename=HF_CHECKPOINT_FILENAME_SAFETENSORS,
                 )
 
     def test_skip_when_present(self, tmp_path):
@@ -175,7 +243,7 @@ class TestDiscoverCheckpoint:
 
     def test_disk_space_error(self, tmp_path):
         """OSError ENOSPC from copy2 produces message mentioning ~300 MB."""
-        cached = tmp_path / "hf_cache" / "CorridorKey.pth"
+        cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
         cached.parent.mkdir()
         cached.write_bytes(b"data")
 
@@ -190,7 +258,7 @@ class TestDiscoverCheckpoint:
 
     def test_logging_on_download(self, tmp_path, caplog):
         """Info-level log messages emitted at download start and completion."""
-        cached = tmp_path / "hf_cache" / "CorridorKey.pth"
+        cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
         cached.parent.mkdir()
         cached.write_bytes(b"data")
 

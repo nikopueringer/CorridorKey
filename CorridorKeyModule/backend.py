@@ -18,16 +18,20 @@ import torch
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
-TORCH_EXT = ".pth"
+TORCH_EXT = ".pth"  # DEPRECATED: remove after .pth sunset
+SAFETENSORS_EXT = ".safetensors"
+# Torch backend accepts either extension; safetensors is preferred when both are present.
+TORCH_EXTS = (SAFETENSORS_EXT, TORCH_EXT)
 MLX_EXT = ".safetensors"
 DEFAULT_IMG_SIZE = 2048
 
 BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
 VALID_BACKENDS = ("auto", "torch", "mlx")
 
-# Update HF_REPO_ID and HF_CHECKPOINT_FILENAME if a new model version is released.
+# Update HF_REPO_ID and HF_CHECKPOINT_FILENAME_* if a new model version is released.
 HF_REPO_ID = "nikopueringer/CorridorKey_v1.0"
-HF_CHECKPOINT_FILENAME = "CorridorKey.pth"
+HF_CHECKPOINT_FILENAME_SAFETENSORS = "CorridorKey.safetensors"
+HF_CHECKPOINT_FILENAME = "CorridorKey.pth"  # DEPRECATED: remove after .pth sunset
 
 
 def resolve_backend(requested: str | None = None) -> str:
@@ -118,21 +122,34 @@ def _validate_mlx_available() -> None:
         ) from err
 
 
-def _ensure_torch_checkpoint() -> Path:
-    """Download the Torch checkpoint from HuggingFace if not present.
+def _copy_to_checkpoint_dir(cached_path: str, dest: Path) -> Path:
+    """Copy a HuggingFace-cached file into CHECKPOINT_DIR, mapping ENOSPC to a friendly error."""
+    try:
+        shutil.copy2(cached_path, dest)
+    except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise OSError(
+                errno.ENOSPC,
+                "Not enough disk space to save checkpoint (~300 MB required). "
+                f"Free up space in {CHECKPOINT_DIR} and try again.",
+            ) from exc
+        raise
+    logger.info("Checkpoint saved to %s", dest)
+    return dest
 
-    Returns the path to the downloaded checkpoint file.
 
-    Raises:
-        RuntimeError: Network or download failure.
-        OSError: Disk space or filesystem error.
+def _ensure_torch_checkpoint_pth_fallback() -> Path:
+    """DEPRECATED: remove after .pth sunset.
+
+    Download the legacy .pth checkpoint from HuggingFace. Used only when the
+    official .safetensors file is not yet published to the HF repo.
     """
     dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME
     hf_url = f"https://huggingface.co/{HF_REPO_ID}"
 
     from huggingface_hub import hf_hub_download
 
-    logger.info("Downloading CorridorKey checkpoint from %s ...", hf_url)
+    logger.info("Downloading legacy .pth CorridorKey checkpoint from %s ...", hf_url)
 
     try:
         cached_path = hf_hub_download(
@@ -146,38 +163,100 @@ def _ensure_torch_checkpoint() -> Path:
             f"Original error: {exc}"
         ) from exc
 
-    try:
-        shutil.copy2(cached_path, dest)
-    except OSError as exc:
-        if exc.errno == errno.ENOSPC:
-            raise OSError(
-                errno.ENOSPC,
-                "Not enough disk space to save checkpoint (~300 MB required). "
-                f"Free up space in {CHECKPOINT_DIR} and try again.",
-            ) from exc
-        raise
+    return _copy_to_checkpoint_dir(cached_path, dest)
 
-    logger.info("Checkpoint saved to %s", dest)
-    return dest
+
+def _ensure_torch_checkpoint() -> Path:
+    """Download the Torch checkpoint from HuggingFace if not present.
+
+    Prefers the safer .safetensors format. If the HF repo does not yet host a
+    .safetensors file (transitional), falls back to the legacy .pth download.
+
+    Returns the path to the downloaded checkpoint file.
+
+    Raises:
+        RuntimeError: Network or download failure.
+        OSError: Disk space or filesystem error.
+    """
+    dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME_SAFETENSORS
+    hf_url = f"https://huggingface.co/{HF_REPO_ID}"
+
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.utils import EntryNotFoundError
+
+    logger.info("Downloading CorridorKey checkpoint (.safetensors) from %s ...", hf_url)
+
+    try:
+        cached_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_CHECKPOINT_FILENAME_SAFETENSORS,
+        )
+    except EntryNotFoundError:
+        # DEPRECATED: remove after .pth sunset.
+        # The HF repo doesn't have the .safetensors yet — fall back to .pth so
+        # this code can ship before the safetensors upload lands.
+        logger.info(
+            "No %s found on the HF repo yet — falling back to legacy .pth.",
+            HF_CHECKPOINT_FILENAME_SAFETENSORS,
+        )
+        return _ensure_torch_checkpoint_pth_fallback()
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download CorridorKey checkpoint from {hf_url}. "
+            "Check your network connection and try again. "
+            f"Original error: {exc}"
+        ) from exc
+
+    return _copy_to_checkpoint_dir(cached_path, dest)
+
+
+def _find_single(ext: str) -> list[str]:
+    return glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
 
 
 def _discover_checkpoint(ext: str) -> Path:
-    """Find exactly one checkpoint with the given extension.
+    """Find exactly one checkpoint for the requested backend.
 
-    Raises FileNotFoundError (0 found) or ValueError (>1 found).
-    Includes cross-reference hints when wrong extension files exist.
+    For Torch (``ext == TORCH_EXT``): accepts both ``.safetensors`` and ``.pth``,
+    preferring ``.safetensors`` when both are present. Auto-downloads when
+    nothing is found locally.
+
+    For MLX (``ext == MLX_EXT``): strictly ``.safetensors`` as before.
+
+    Raises FileNotFoundError (0 found) or ValueError (>1 of the chosen format).
     """
-    matches = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
+    if ext == TORCH_EXT:
+        safetensors_matches = _find_single(SAFETENSORS_EXT)
+        pth_matches = _find_single(TORCH_EXT)
+
+        if safetensors_matches and pth_matches:
+            logger.info(
+                "Both .safetensors and .pth checkpoints present in %s — preferring .safetensors.",
+                CHECKPOINT_DIR,
+            )
+
+        # Prefer safetensors
+        matches = safetensors_matches or pth_matches
+        chosen_ext = SAFETENSORS_EXT if safetensors_matches else TORCH_EXT
+
+        if not matches:
+            return _ensure_torch_checkpoint()
+
+        if len(matches) > 1:
+            names = [os.path.basename(f) for f in matches]
+            raise ValueError(f"Multiple {chosen_ext} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
+
+        return Path(matches[0])
+
+    # MLX path — strict .safetensors match.
+    matches = _find_single(ext)
 
     if len(matches) == 0:
-        if ext == TORCH_EXT:
-            return _ensure_torch_checkpoint()
-        other_ext = MLX_EXT if ext == TORCH_EXT else TORCH_EXT
+        other_ext = TORCH_EXT
         other_files = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{other_ext}"))
         hint = ""
         if other_files:
-            other_backend = "mlx" if other_ext == MLX_EXT else "torch"
-            hint = f" (Found {other_ext} files — did you mean --backend={other_backend}?)"
+            hint = f" (Found {other_ext} files — did you mean --backend=torch?)"
         raise FileNotFoundError(f"No {ext} checkpoint found in {CHECKPOINT_DIR}.{hint}")
 
     if len(matches) > 1:
