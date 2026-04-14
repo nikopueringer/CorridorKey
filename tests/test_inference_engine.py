@@ -403,3 +403,91 @@ class TestNvidiaGPUProcess:
         assert result["alpha"].dtype == np.float32
         assert len(captured_device) == 1, "Model should be called exactly once"
         assert captured_device[0].type == "cuda", f"Expected model input on cuda, got {captured_device[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint format dispatch (.safetensors vs .pth)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadModelFormatDispatch:
+    """Verify _load_model routes to the right loader based on file extension.
+
+    The engine must support both .safetensors (preferred) and .pth (legacy).
+    These tests exercise the branch in _load_model without needing the real
+    GreenFormer or full model weights — we patch GreenFormer and feed it a
+    tiny random state dict in each format.
+    """
+
+    def _make_random_state_dict(self) -> dict[str, torch.Tensor]:
+        """A handful of leaf tensors that load_state_dict(strict=False) ignores cleanly."""
+        return {
+            "dummy.weight": torch.zeros(4, 4),
+            "dummy.bias": torch.zeros(4),
+        }
+
+    def _patch_greenformer(self, monkeypatch):
+        """Replace GreenFormer with a stub exposing the state-dict API _load_model needs."""
+        from unittest.mock import MagicMock
+
+        import CorridorKeyModule.inference_engine as engine_mod
+
+        stub = MagicMock()
+        stub.state_dict.return_value = self._make_random_state_dict()
+        stub.to.return_value = stub
+        stub.eval.return_value = stub
+        stub.load_state_dict.return_value = ([], [])
+
+        factory = MagicMock(return_value=stub)
+        monkeypatch.setattr(engine_mod, "GreenFormer", factory)
+        return stub
+
+    def test_safetensors_checkpoint_loads_via_safetensors_library(self, tmp_path, monkeypatch):
+        """A .safetensors path must be dispatched to safetensors.torch.load_file."""
+        from unittest import mock
+
+        from safetensors.torch import save_file
+
+        from CorridorKeyModule.inference_engine import CorridorKeyEngine
+
+        ckpt = tmp_path / "model.safetensors"
+        save_file(self._make_random_state_dict(), str(ckpt))
+
+        self._patch_greenformer(monkeypatch)
+        # torch.load must NOT be called when the checkpoint is safetensors.
+        with mock.patch("torch.load", side_effect=AssertionError("torch.load called for .safetensors")):
+            engine = object.__new__(CorridorKeyEngine)
+            engine.device = torch.device("cpu")
+            engine.img_size = 64
+            engine.checkpoint_path = str(ckpt)
+            engine.use_refiner = False
+            engine.model_precision = torch.float32
+            engine._is_rocm = False
+
+            model = engine._load_model()
+            assert model is not None
+
+    def test_pth_checkpoint_loads_via_torch_load(self, tmp_path, monkeypatch):
+        """A .pth path must be dispatched to torch.load (legacy path)."""
+        from unittest import mock
+
+        from CorridorKeyModule.inference_engine import CorridorKeyEngine
+
+        ckpt = tmp_path / "model.pth"
+        torch.save(self._make_random_state_dict(), str(ckpt))
+
+        self._patch_greenformer(monkeypatch)
+        with mock.patch(
+            "safetensors.torch.load_file",
+            side_effect=AssertionError("safetensors.load_file called for .pth"),
+        ):
+            engine = object.__new__(CorridorKeyEngine)
+            engine.device = torch.device("cpu")
+            engine.img_size = 64
+            engine.checkpoint_path = str(ckpt)
+            engine.use_refiner = False
+            engine.model_precision = torch.float32
+            engine._is_rocm = False
+
+            model = engine._load_model()
+            assert model is not None
