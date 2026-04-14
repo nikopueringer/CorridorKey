@@ -96,7 +96,7 @@ In your PR description, focus on **why** you made the change, not just what chan
 
 ### Model Weights
 
-The model checkpoint (`CorridorKey_v1.0.pth`) and optional GVM/VideoMaMa weights are **not** in the git repo. Most tests don't need them. If you're working on inference code and need the weights, follow the download instructions in the [README](README.md).
+The model checkpoint (`CorridorKey.safetensors`, or the legacy `CorridorKey.pth`) and optional GVM/VideoMaMa weights are **not** in the git repo. Most tests don't need them. If you're working on inference code and need the weights, follow the download instructions in the [README](README.md).
 
 ## Questions?
 

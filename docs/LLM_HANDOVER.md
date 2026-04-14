@@ -18,7 +18,7 @@ This document is your technical entry point. It outlines the architecture, dataf
 
 **Key Files:**
 *   `CorridorKeyModule/core/model_transformer.py`: The PyTorch architecture described above.
-*   `CorridorKeyModule/inference_engine.py`: The `CorridorKeyEngine` class. It loads the `CorridorKey.pth` weights and handles the resizing API.
+*   `CorridorKeyModule/inference_engine.py`: The `CorridorKeyEngine` class. It loads the `CorridorKey.safetensors` (preferred) or legacy `CorridorKey.pth` weights and handles the resizing API.
 *   `CorridorKeyModule/core/color_utils.py`: Pure math functions for digital compositing. **Crucial:** Pay attention to `srgb_to_linear()`, `premultiply()`, and luminance-preserving `despill()`.
 *   `clip_manager.py`: The user-facing Command Line Wizard. It handles scanning directories, prompting the user for inference settings, and piping data into the engine.
 

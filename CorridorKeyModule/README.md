@@ -16,20 +16,20 @@ Dependencies for the engine are managed in the main project root `requirements.t
 
 For most users, the easiest way to interact with the module is through the included wizard:
 `clip_manager.py` (or dragging and dropping folders onto the `.bat` / `.sh` scripts).
-The wizard handles finding the latest `.pth` checkpoint automatically, prompting for configuration (gamma, despill strength, despeckling), and batch processing entire sequences.
+The wizard handles finding the latest checkpoint automatically (either `.safetensors` or legacy `.pth`), prompting for configuration (gamma, despill strength, despeckling), and batch processing entire sequences.
 
 ## Usage (Python API)
 
 ### 1. Initialization
-Initialize the engine once. Point it to your `.pth` checkpoint. The engine is hardcoded to process at 2048x2048, representing the data it was trained on.
+Initialize the engine once. Point it at your checkpoint — either the preferred `.safetensors` file or a legacy `.pth`. The engine is hardcoded to process at 2048x2048, representing the data it was trained on.
 
 ```python
 from CorridorKeyModule import CorridorKeyEngine
 
 # Initialize standard engine (CUDA)
 engine = CorridorKeyEngine(
-    checkpoint_path="models/latest_model.pth", 
-    device='cuda', 
+    checkpoint_path="models/latest_model.safetensors",
+    device='cuda',
     img_size=2048
 )
 ```
