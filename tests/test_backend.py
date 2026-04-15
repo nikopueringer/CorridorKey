@@ -189,6 +189,27 @@ class TestDiscoverCheckpoint:
                 assert mock_dl.call_args_list[0].kwargs["filename"] == HF_CHECKPOINT_FILENAME_SAFETENSORS
                 assert mock_dl.call_args_list[1].kwargs["filename"] == HF_CHECKPOINT_FILENAME
 
+    def test_ensure_torch_checkpoint_network_error_does_not_fall_back_to_pth(self, tmp_path):
+        """Regression guard: a generic network error during .safetensors download must surface as a
+        RuntimeError with an actionable message — it must NOT silently fall back to downloading the
+        legacy .pth. Only an HF-specific EntryNotFoundError (file missing from the repo) triggers
+        the fallback; everything else (transient 5xx, DNS, timeout, disk, auth) propagates.
+
+        Without this test, a future refactor could widen the `except` and degrade users to the
+        less-safe .pth format whenever the network hiccups.
+        """
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch(
+                "huggingface_hub.hf_hub_download",
+                side_effect=ConnectionError("DNS resolution failed"),
+            ) as mock_dl:
+                with pytest.raises(RuntimeError, match=r"huggingface\.co"):
+                    _ensure_torch_checkpoint()
+
+                # The .pth fallback download must NOT have been attempted.
+                assert mock_dl.call_count == 1
+                assert mock_dl.call_args.kwargs["filename"] == HF_CHECKPOINT_FILENAME_SAFETENSORS
+
     def test_discover_uses_safetensors_constant(self):
         """SAFETENSORS_EXT must equal MLX_EXT — both point at the .safetensors format."""
         assert SAFETENSORS_EXT == ".safetensors"
