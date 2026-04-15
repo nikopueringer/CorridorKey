@@ -243,11 +243,11 @@ def enumerate_gpus() -> list[GPUInfo]:
     Returns an empty list on non-GPU systems.
     """
     gpus = _enumerate_nvidia()
-    if gpus is not None:
+    if gpus:
         return gpus
 
     gpus = _enumerate_amd()
-    if gpus is not None:
+    if gpus:
         return gpus
 
     # Fallback to torch (works for both NVIDIA and ROCm via HIP)
