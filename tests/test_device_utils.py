@@ -417,13 +417,14 @@ class TestEnumerateGpus:
 
         assert enumerate_gpus() == amd
 
-    def test_empty_nvidia_result_is_returned_as_is(self, monkeypatch):
-        # nvidia-smi ran successfully but reported zero GPUs: we trust that
-        # and must NOT fall through to AMD (None is the unavailable sentinel).
+    def test_empty_nvidia_result_falls_through_to_amd(self, monkeypatch):
+        # nvidia-smi ran but found zero GPUs (stale driver, CI runner, VM).
+        # [] is falsy and must NOT short-circuit: fall through to AMD.
+        amd = [GPUInfo(index=0, name="Radeon RX 7800 XT", vram_total_gb=16.0, vram_free_gb=16.0)]
         monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: [])
-        monkeypatch.setattr("device_utils._enumerate_amd", _amd_must_not_run)
+        monkeypatch.setattr("device_utils._enumerate_amd", lambda: amd)
 
-        assert enumerate_gpus() == []
+        assert enumerate_gpus() == amd
 
     def test_torch_fallback_when_smi_tools_absent(self, monkeypatch):
         monkeypatch.setattr("device_utils._enumerate_nvidia", lambda: None)
