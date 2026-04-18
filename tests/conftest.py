@@ -1,5 +1,6 @@
 """Shared pytest configuration and fixtures for CorridorKey tests."""
 
+import os
 import platform
 import sys
 from types import ModuleType
@@ -8,6 +9,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+
+# OpenCV reads OPENCV_IO_ENABLE_OPENEXR at import time; set it before any test imports cv2.
+os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
 
 
 def _has_gpu():
