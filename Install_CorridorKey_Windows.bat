@@ -61,7 +61,7 @@ if exist "%SAFETENSORS_PATH%" (
     echo Downloading CorridorKey.safetensors...
     REM --fail returns non-zero on HTTP errors (e.g. 404 before the safetensors
     REM upload lands); fall back to the legacy .pth in that case.
-    curl.exe -L --fail -o "%SAFETENSORS_PATH%" "%HF_BASE%/CorridorKey.safetensors"
+    curl.exe -L --fail -o "%SAFETENSORS_PATH%" "%HF_BASE%/CorridorKey_v1.0.safetensors"
     if errorlevel 1 (
         echo safetensors not available yet -- falling back to CorridorKey.pth...
         if exist "%SAFETENSORS_PATH%" del "%SAFETENSORS_PATH%"

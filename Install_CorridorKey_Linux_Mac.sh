@@ -76,7 +76,7 @@ else
     echo "Downloading CorridorKey.safetensors..."
     # --fail returns non-zero on HTTP errors (e.g. 404 before the safetensors
     # upload lands); fall back to the legacy .pth in that case.
-    if ! curl -L --fail -o "$SAFETENSORS_PATH" "$HF_BASE/CorridorKey.safetensors"; then
+    if ! curl -L --fail -o "$SAFETENSORS_PATH" "$HF_BASE/CorridorKey_v1.0.safetensors"; then
         echo "safetensors not available yet — falling back to CorridorKey.pth..."
         rm -f "$SAFETENSORS_PATH"
         # DEPRECATED: remove after .pth sunset

@@ -216,7 +216,7 @@ class TestDiscoverCheckpoint:
         assert SAFETENSORS_EXT == MLX_EXT
 
     def test_ensure_torch_checkpoint_happy_path(self, tmp_path):
-        """Mock hf_hub_download, verify copy to CHECKPOINT_DIR/CorridorKey.safetensors."""
+        """Mock hf_hub_download, verify copy to CHECKPOINT_DIR/CorridorKey_v1.0.safetensors."""
         cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
         cached.parent.mkdir()
         cached.write_bytes(b"fake-checkpoint-data")

@@ -75,7 +75,7 @@ This project uses **[uv](https://docs.astral.sh/uv/)** to manage Python and all 
     ```
     For **AMD ROCm** setup, see the [AMD ROCm Setup](#amd-rocm-setup) section below.
 4.  **Download the Models:**
-    *   **CorridorKey v1.0 Model (~300MB):** Downloads automatically on first run. If no checkpoint is found in `CorridorKeyModule/checkpoints/`, the engine fetches it from [CorridorKey's HuggingFace](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and saves it as `CorridorKey.safetensors` (preferred — safer, no pickle). Legacy `.pth` files are still loaded automatically if already present. No manual download needed.
+    *   **CorridorKey v1.0 Model (~300MB):** Downloads automatically on first run. If no checkpoint is found in `CorridorKeyModule/checkpoints/`, the engine fetches it from [CorridorKey's HuggingFace](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and saves it as `CorridorKey_v1.0.safetensors` (preferred — safer, no pickle). Legacy `.pth` files are still loaded automatically if already present. No manual download needed.
     *   **GVM Weights (Optional):** [HuggingFace: geyongtao/gvm](https://huggingface.co/geyongtao/gvm)
         *   Download using the CLI: `uv run hf download geyongtao/gvm --local-dir gvm_core/weights`
     *   **VideoMaMa Weights (Optional):** [HuggingFace: SammyLim/VideoMaMa](https://huggingface.co/SammyLim/VideoMaMa)

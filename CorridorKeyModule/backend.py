@@ -30,8 +30,8 @@ VALID_BACKENDS = ("auto", "torch", "mlx")
 
 # Update HF_REPO_ID and HF_CHECKPOINT_FILENAME_* if a new model version is released.
 HF_REPO_ID = "nikopueringer/CorridorKey_v1.0"
-HF_CHECKPOINT_FILENAME_SAFETENSORS = "CorridorKey.safetensors"
-HF_CHECKPOINT_FILENAME = "CorridorKey.pth"  # DEPRECATED: remove after .pth sunset
+HF_CHECKPOINT_FILENAME_SAFETENSORS = "CorridorKey_v1.0.safetensors"
+HF_CHECKPOINT_FILENAME = "CorridorKey_v1.0.pth"  # DEPRECATED: remove after .pth sunset
 
 
 def resolve_backend(requested: str | None = None) -> str:
