@@ -1,12 +1,14 @@
 """Unit tests for CorridorKeyModule.backend — no GPU/MLX required."""
 
 import errno
+import inspect
 import logging
 import os
 from unittest import mock
 
 import numpy as np
 import pytest
+import torch
 
 from CorridorKeyModule.backend import (
     BACKEND_ENV_VAR,
@@ -344,3 +346,65 @@ class TestWrapMlxOutput:
         # (same behavior as Torch engine — linear_to_srgb doesn't clamp)
         for key in ("comp", "processed"):
             assert result[key].min() >= 0.0, f"{key} has negative values"
+
+
+# --- create_engine model_precision parameter ---
+
+
+class TestCreateEngineModelPrecision:
+    """create_engine exposes and forwards a model_precision parameter for Torch."""
+
+    def test_signature_has_model_precision(self):
+        """create_engine's signature includes a model_precision parameter."""
+        from CorridorKeyModule.backend import create_engine
+
+        params = inspect.signature(create_engine).parameters
+        assert "model_precision" in params
+
+    def test_default_model_precision_is_float16(self):
+        """Default model_precision is torch.float16 to keep CLI and service aligned."""
+        from CorridorKeyModule.backend import create_engine
+
+        params = inspect.signature(create_engine).parameters
+        assert params["model_precision"].default is torch.float16
+
+    def test_model_precision_forwarded_to_torch_engine(self, tmp_path):
+        """create_engine forwards the requested model_precision to CorridorKeyEngine."""
+        from CorridorKeyModule.backend import create_engine
+
+        ckpt = tmp_path / "model.safetensors"
+        ckpt.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("CorridorKeyModule.inference_engine.CorridorKeyEngine") as mock_engine_cls:
+                create_engine(backend="torch", device="cpu", model_precision=torch.float32)
+                mock_engine_cls.assert_called_once()
+                kwargs = mock_engine_cls.call_args.kwargs
+                assert kwargs["model_precision"] is torch.float32
+
+
+# --- Service routes engine construction through the factory ---
+
+
+class TestServiceEngineRouting:
+    """CorridorKeyService._get_engine delegates engine construction to create_engine."""
+
+    def test_get_engine_calls_create_engine_with_torch_and_fp32(self):
+        """_get_engine invokes the factory with explicit backend="torch" and FP32 precision.
+
+        FP32 is passed explicitly to preserve the service's existing quality-first
+        behavior (FP32 weights plus mixed_precision autocast for speed on safe ops).
+        The factory's default FP16 matches the CLI's long-standing VRAM tradeoff.
+        """
+        from backend.service import CorridorKeyService
+
+        service = CorridorKeyService()
+        with mock.patch("CorridorKeyModule.backend.create_engine") as mock_factory:
+            mock_factory.return_value = object()
+            service._get_engine()
+
+            mock_factory.assert_called_once()
+            kwargs = mock_factory.call_args.kwargs
+            assert kwargs["backend"] == "torch"
+            assert kwargs["device"] == "cpu"
+            assert kwargs["img_size"] == 2048
+            assert kwargs["model_precision"] is torch.float32

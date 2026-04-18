@@ -284,25 +284,25 @@ class CorridorKeyService:
         self._active_model = needed
 
     def _get_engine(self):
-        """Lazy-load the CorridorKey inference engine."""
+        """Lazy-load the CorridorKey inference engine via the backend factory."""
         self._ensure_model(_ActiveModel.INFERENCE)
 
         if self._engine is not None:
             return self._engine
 
         try:
-            from CorridorKeyModule.backend import TORCH_EXT, _discover_checkpoint
-            from CorridorKeyModule.inference_engine import CorridorKeyEngine
+            import torch
+
+            from CorridorKeyModule.backend import create_engine
         except ImportError as exc:
             raise RuntimeError("CorridorKeyModule is not installed. Run: uv sync") from exc
 
-        ckpt_path = _discover_checkpoint(TORCH_EXT)
-        logger.info(f"Loading checkpoint: {os.path.basename(ckpt_path)}")
         t0 = time.monotonic()
-        self._engine = CorridorKeyEngine(
-            checkpoint_path=ckpt_path,
+        self._engine = create_engine(
+            backend="torch",
             device=self._device,
             img_size=2048,
+            model_precision=torch.float32,
         )
         logger.info(f"Engine loaded in {time.monotonic() - t0:.1f}s")
         return self._engine

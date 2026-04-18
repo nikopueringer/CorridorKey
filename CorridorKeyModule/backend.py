@@ -372,12 +372,16 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
+    model_precision: torch.dtype = torch.float16,
     tile_size: int | None = DEFAULT_MLX_TILE_SIZE,
     overlap: int = DEFAULT_MLX_TILE_OVERLAP,
 ):
     """Factory: returns an engine with process_frame() matching the Torch contract.
 
     Args:
+        model_precision: Torch only. Model weight dtype. Defaults to
+            torch.float16 for lower VRAM. Override with torch.float32 if
+            numerical parity with eager CPU inference is required.
         tile_size: MLX only — tile size for tiled inference (default 512).
             Set to None to disable tiling and use full-frame inference.
         overlap: MLX only — overlap pixels between tiles (default 64).
@@ -398,5 +402,5 @@ def create_engine(
 
         logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
         return CorridorKeyEngine(
-            checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size, model_precision=torch.float16
+            checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size, model_precision=model_precision
         )
