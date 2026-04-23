@@ -372,10 +372,10 @@ def run_inference_cmd(
             auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
-            generate_comp=generate_comp,
-            gpu_post_processing=gpu_post,
-            image_size=image_size,
-            tiled_inference=tiled_inference,
+            generate_comp=generate_comp if generate_comp is not None else InferenceSettings.generate_comp,
+            gpu_post_processing=gpu_post if gpu_post is not None else InferenceSettings.gpu_post_processing,
+            image_size=image_size if image_size is not None else InferenceSettings.image_size,
+            tiled_inference=tiled_inference if tiled_inference is not None else InferenceSettings.tiled_inference,
         )
     else:
         settings = _prompt_inference_settings(

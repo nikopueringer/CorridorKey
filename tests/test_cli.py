@@ -255,3 +255,39 @@ class TestNonInteractiveFlags:
         mock_run.assert_called_once()
         _, kwargs = mock_run.call_args
         assert kwargs["skip_existing"] is True
+
+    @patch("corridorkey_cli.scan_clips")
+    @patch("corridorkey_cli.run_inference")
+    def test_headless_optional_flags_use_dataclass_defaults(self, mock_run, mock_scan):
+        """Unset optional flags fall back to InferenceSettings defaults, not None.
+
+        When the four required flags (--linear/--srgb, --despill, --despeckle,
+        --refiner) are provided, the headless branch skips the interactive
+        prompt. Optional flags (--comp, --gpu-post, --image-size, --tile) left
+        unset must inherit the InferenceSettings dataclass defaults rather
+        than propagate as None, since downstream code uses these fields as
+        bool/int without None-guards.
+        """
+        mock_scan.return_value = []
+
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "5",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+            ],
+        )
+        assert result.exit_code == 0
+
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        settings = kwargs["settings"]
+        assert settings.generate_comp is True
+        assert settings.gpu_post_processing is False
+        assert settings.image_size == 2048
+        assert settings.tiled_inference is False
