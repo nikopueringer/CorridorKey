@@ -381,11 +381,19 @@ uv run pytest -v       # verbose output (shows each test name)
 
 ## CorridorKey Licensing and Permissions
 
-Use this tool for whatever you'd like, including for processing images as part of a commercial project! You MAY NOT repackage this tool and sell it, and any variations or improvements of this tool that are released must remain under the same license, and must include the name Corridor Key.
+Use this tool for whatever you'd like, including for processing images as part of a commercial project! 
 
-You MAY NOT offer inference with this model as a paid API service. If you run a commercial software package or inference service and wish to incoporate this tool into your software, shoot us an email to work out an agreement! I promise we're easy to work with. contact@corridordigital.com. Outside of the stipulations listed above, this license is effectively a variation of [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+You **MAY NOT** repackage this tool and sell it, and any variations or improvements of this tool that are released must remain under the same license, and must include the name **CorridorKey**.
 
-Please keep the Corridor Key name in any future forks or releases!
+You **MAY** NOT offer inference with this model as a paid API service. 
+
+If you run a commercial software package or inference service and wish to incoporate this tool into your software, shoot us an email to work out an agreement! I promise we're easy to work with. You can contact us at:
+
+[contact@corridordigital.com](mailto:contact@corridordigital.com)
+
+Outside of the stipulations listed above, this license is effectively a variation of [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+Please keep the **CorridorKey** name in any future forks or releases!
 
 ## Community Extensions
 * [CorridorKeyOpenVINO](https://github.com/daniil-lyakhov/CorridorKeyOpenVINO) - Run the CorridorKey model quickly on Intel hardware with the OpenVINO inference framework.
