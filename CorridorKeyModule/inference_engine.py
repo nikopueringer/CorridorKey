@@ -253,6 +253,7 @@ class CorridorKeyEngine:
         auto_despeckle: bool,
         despeckle_size: int,
         generate_comp: bool,
+        screen_channel: int = 1,
     ) -> dict[str, np.ndarray]:
         # 6. Post-Process (Resize Back to Original Resolution)
         # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
@@ -274,7 +275,9 @@ class CorridorKeyEngine:
 
         # B. Despill FG
         # res_fg is sRGB.
-        fg_despilled = cu.despill_opencv(res_fg, green_limit_mode="average", strength=despill_strength)
+        fg_despilled = cu.despill_opencv(
+            res_fg, limit_mode="average", strength=despill_strength, screen_channel=screen_channel
+        )
 
         # C. Premultiply (for EXR Output)
         # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
@@ -321,6 +324,7 @@ class CorridorKeyEngine:
         auto_despeckle: bool,
         despeckle_size: int,
         generate_comp: bool,
+        screen_channel: int = 1,
     ) -> list[dict[str, np.ndarray]]:
         """Post-process on GPU, transfer final results to CPU.
 
@@ -350,7 +354,7 @@ class CorridorKeyEngine:
             processed_alpha = alpha
 
         # B. Despill on GPU
-        processed_fg = cu.despill_torch(fg, despill_strength)
+        processed_fg = cu.despill_torch(fg, despill_strength, screen_channel=screen_channel)
 
         # C. sRGB → linear on GPU
         processed_fg_lin = cu.srgb_to_linear(processed_fg)
@@ -404,6 +408,7 @@ class CorridorKeyEngine:
         despeckle_size: int = 400,
         generate_comp: bool = True,
         post_process_on_gpu: bool = True,
+        screen_channel: int = 1,
     ) -> dict[str, np.ndarray] | list[dict[str, np.ndarray]]:
         """
         Process a single frame.
@@ -481,6 +486,7 @@ class CorridorKeyEngine:
                 auto_despeckle,
                 despeckle_size,
                 generate_comp,
+                screen_channel=screen_channel,
             )
         else:
             # Move prediction to CPU before post-processing
@@ -499,6 +505,7 @@ class CorridorKeyEngine:
                     auto_despeckle,
                     despeckle_size,
                     generate_comp,
+                    screen_channel=screen_channel,
                 )
                 out.append(result)
 
