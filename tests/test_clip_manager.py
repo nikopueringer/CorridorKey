@@ -966,3 +966,197 @@ class TestScanClips:
         organize_clips(fake_path)
 
         assert "not found" in caplog.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Screen-color auto-detection orchestration
+# ---------------------------------------------------------------------------
+
+
+def _write_jpg_clip(tmp_path, clip_name: str, screen_rgb: tuple[float, float, float]):
+    """Build a sequence-style clip on disk with a constant-color background and a small subject.
+
+    Returns the ClipEntry after find_assets() has been called, so the helpers under test
+    receive the same shape they would in the real pipeline.
+    """
+    from clip_manager import ClipEntry as _ClipEntry
+
+    clip_root = tmp_path / clip_name
+    input_dir = clip_root / "Input"
+    alpha_dir = clip_root / "AlphaHint"
+    input_dir.mkdir(parents=True)
+    alpha_dir.mkdir(parents=True)
+
+    h = w = 64
+    img = np.full((h, w, 3), screen_rgb, dtype=np.float32)
+    img[16:48, 16:48] = 1.0  # white subject in the centre
+    img_bgr_u8 = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(input_dir / "0001.jpg"), img_bgr_u8)
+
+    alpha = np.zeros((h, w), dtype=np.uint8)
+    alpha[16:48, 16:48] = 255
+    cv2.imwrite(str(alpha_dir / "0001.png"), alpha)
+
+    entry = _ClipEntry(clip_name, str(clip_root))
+    entry.find_assets()
+    return entry
+
+
+class TestPeekFirstFrameWithAlpha:
+    """Auto-detection helper: read the first input frame + alpha hint of a clip."""
+
+    def test_returns_image_and_alpha(self, tmp_path):
+        from clip_manager import _peek_first_frame_with_alpha
+
+        clip = _write_jpg_clip(tmp_path, "green_clip", (0.05, 0.85, 0.10))
+        img, alpha = _peek_first_frame_with_alpha(clip)
+        assert img is not None and alpha is not None
+        assert img.shape == (64, 64, 3)
+        assert alpha.shape == (64, 64)
+        assert img.dtype == np.float32
+        # Background (alpha < 0.3) must be roughly the green we wrote.
+        bg_mean = img[alpha < 0.3].mean(axis=0)
+        assert bg_mean[1] > bg_mean[0] and bg_mean[1] > bg_mean[2], "green channel should dominate"
+
+    def test_returns_none_on_missing_input(self, tmp_path):
+        from clip_manager import _peek_first_frame_with_alpha
+
+        clip = _write_jpg_clip(tmp_path, "broken", (0.05, 0.85, 0.10))
+        # Wipe the input directory so the peek can't find a frame.
+        for f in os.listdir(clip.input_asset.path):
+            os.remove(os.path.join(clip.input_asset.path, f))
+
+        img, alpha = _peek_first_frame_with_alpha(clip)
+        assert img is None and alpha is None
+
+
+class TestResolveScreenColor:
+    """Map a settings-level screen_color to a concrete one, with auto-detect."""
+
+    def test_explicit_green_short_circuits(self, tmp_path, caplog):
+        """When the user passes 'green', no peek runs and the choice is logged."""
+        import logging
+
+        from clip_manager import _resolve_screen_color
+
+        clip = _write_jpg_clip(tmp_path, "any", (0.05, 0.85, 0.10))
+        with caplog.at_level(logging.INFO, logger="clip_manager"):
+            assert _resolve_screen_color("green", [clip]) == "green"
+        assert any("explicitly" in m and "green" in m for m in caplog.messages)
+
+    def test_explicit_blue_short_circuits(self, tmp_path):
+        from clip_manager import _resolve_screen_color
+
+        clip = _write_jpg_clip(tmp_path, "any", (0.05, 0.10, 0.85))
+        assert _resolve_screen_color("blue", [clip]) == "blue"
+
+    def test_auto_detects_blue_from_first_clip(self, tmp_path, caplog):
+        import logging
+
+        from clip_manager import _resolve_screen_color
+
+        blue_clip = _write_jpg_clip(tmp_path, "blue_clip", (0.05, 0.10, 0.85))
+        with caplog.at_level(logging.INFO, logger="clip_manager"):
+            assert _resolve_screen_color("auto", [blue_clip]) == "blue"
+        assert any("auto-detected" in m for m in caplog.messages)
+
+    def test_auto_detects_green_from_first_clip(self, tmp_path):
+        from clip_manager import _resolve_screen_color
+
+        green_clip = _write_jpg_clip(tmp_path, "green_clip", (0.05, 0.85, 0.10))
+        assert _resolve_screen_color("auto", [green_clip]) == "green"
+
+    def test_auto_with_no_ready_clips_defaults_to_green(self, caplog):
+        import logging
+
+        from clip_manager import _resolve_screen_color
+
+        with caplog.at_level(logging.WARNING, logger="clip_manager"):
+            assert _resolve_screen_color("auto", []) == "green"
+        assert any("no ready clips" in m for m in caplog.messages)
+
+    def test_auto_with_unreadable_first_clip_falls_back(self, tmp_path, caplog):
+        """When the peek fails (e.g. corrupt clip), auto-detect falls back to green with a warning."""
+        import logging
+
+        from clip_manager import _resolve_screen_color
+
+        clip = _write_jpg_clip(tmp_path, "broken", (0.05, 0.10, 0.85))
+        for f in os.listdir(clip.input_asset.path):
+            os.remove(os.path.join(clip.input_asset.path, f))
+
+        with caplog.at_level(logging.WARNING, logger="clip_manager"):
+            assert _resolve_screen_color("auto", [clip]) == "green"
+        assert any("could not read a sample frame" in m for m in caplog.messages)
+
+
+class TestRunInferenceDriftWarning:
+    """When auto-detect picks a color from clip 0 but a later clip in the batch looks
+    like a different color, run_inference must log a warning so the user can re-run
+    explicitly. Direct unit test of the drift-detection branch."""
+
+    def test_warning_logged_when_clip_disagrees(self, tmp_path, caplog):
+        import logging
+        from unittest.mock import patch
+
+        from clip_manager import InferenceSettings, run_inference
+
+        green_clip = _write_jpg_clip(tmp_path, "01_green", (0.05, 0.85, 0.10))
+        blue_clip = _write_jpg_clip(tmp_path, "02_blue", (0.05, 0.10, 0.85))
+
+        engine = MagicMock()
+        engine.process_frame.return_value = {
+            "alpha": np.zeros((64, 64, 1), dtype=np.float32),
+            "fg": np.zeros((64, 64, 3), dtype=np.float32),
+            "comp": np.zeros((64, 64, 3), dtype=np.float32),
+            "processed": np.zeros((64, 64, 4), dtype=np.float32),
+        }
+
+        with (
+            patch("CorridorKeyModule.backend.create_engine", return_value=engine),
+            caplog.at_level(logging.WARNING, logger="clip_manager"),
+        ):
+            run_inference(
+                [green_clip, blue_clip],
+                device="cpu",
+                max_frames=1,
+                settings=InferenceSettings(screen_color="auto"),
+            )
+
+        # Drift warning must appear, naming the second clip and both colors.
+        drift_msgs = [m for m in caplog.messages if "looks like a" in m]
+        assert drift_msgs, "expected a drift warning for the second clip"
+        assert "02_blue" in drift_msgs[0]
+        assert "blue" in drift_msgs[0] and "green" in drift_msgs[0]
+
+    def test_no_warning_when_screen_color_explicit(self, tmp_path, caplog):
+        """When the user passes --screen-color green/blue, the per-clip drift check is skipped
+        entirely (it only runs in 'auto' mode)."""
+        import logging
+        from unittest.mock import patch
+
+        from clip_manager import InferenceSettings, run_inference
+
+        green_clip = _write_jpg_clip(tmp_path, "01_green", (0.05, 0.85, 0.10))
+        blue_clip = _write_jpg_clip(tmp_path, "02_blue", (0.05, 0.10, 0.85))
+
+        engine = MagicMock()
+        engine.process_frame.return_value = {
+            "alpha": np.zeros((64, 64, 1), dtype=np.float32),
+            "fg": np.zeros((64, 64, 3), dtype=np.float32),
+            "comp": np.zeros((64, 64, 3), dtype=np.float32),
+            "processed": np.zeros((64, 64, 4), dtype=np.float32),
+        }
+
+        with (
+            patch("CorridorKeyModule.backend.create_engine", return_value=engine),
+            caplog.at_level(logging.WARNING, logger="clip_manager"),
+        ):
+            run_inference(
+                [green_clip, blue_clip],
+                device="cpu",
+                max_frames=1,
+                settings=InferenceSettings(screen_color="green"),
+            )
+
+        assert not any("looks like a" in m for m in caplog.messages), "drift warning must not fire on explicit color"

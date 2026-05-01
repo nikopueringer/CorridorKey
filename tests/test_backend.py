@@ -339,6 +339,21 @@ class TestDiscoverCheckpoint:
             with pytest.raises(ValueError, match="screen_color"):
                 _discover_checkpoint(TORCH_EXT, screen_color="red")
 
+    def test_mlx_adapter_rejects_blue_screen_channel(self):
+        """If anyone reaches the MLX adapter directly with screen_channel != 1, raise instead of
+        silently keying with the wrong despill (the green-channel _wrap_mlx_output is the only
+        despill MLX has)."""
+        from CorridorKeyModule.backend import _MLXEngineAdapter
+
+        adapter = _MLXEngineAdapter.__new__(_MLXEngineAdapter)  # bypass __init__ — no MLX engine needed
+        adapter._engine = mock.MagicMock()
+        with pytest.raises(NotImplementedError, match="screen_channel"):
+            adapter.process_frame(
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                np.zeros((4, 4), dtype=np.uint8),
+                screen_channel=2,
+            )
+
     def test_logging_on_download(self, tmp_path, caplog):
         """Info-level log messages emitted at download start and completion."""
         cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
