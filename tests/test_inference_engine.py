@@ -278,6 +278,79 @@ class TestProcessFramePostProcessing:
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
     @pytest.mark.parametrize("batched", [True, False])
+    def test_despill_blue_screen_channel(self, sample_frame_rgb, sample_mask, backend, batched):
+        """screen_channel=2 must despill the blue channel; default screen_channel=1 must leave a
+        blue-heavy plate untouched (the green-channel despill never triggers when G is below the
+        R/B average).
+
+        Without channel routing, a blue-screen plate would never get its spill removed because
+        the green-default math only looks at G excess. This test guards against that regression:
+        if someone reverts the channel parameter, blue plates would silently skip despill and
+        the cast would survive into the comp.
+        """
+        from unittest.mock import MagicMock
+
+        def blue_heavy_forward(x):
+            b, c, h, w = x.shape
+            fg = torch.zeros(b, 3, h, w, dtype=torch.float32)
+            fg[:, 0, :, :] = 0.2  # R
+            fg[:, 1, :, :] = 0.2  # G
+            fg[:, 2, :, :] = 0.8  # B — heavy blue spill: B >> (R+G)/2
+            return {
+                "alpha": torch.full((b, 1, h, w), 0.8, dtype=torch.float32),
+                "fg": fg,
+            }
+
+        blue_mock = MagicMock()
+        blue_mock.side_effect = blue_heavy_forward
+        blue_mock.refiner = None
+        blue_mock.use_refiner = False
+
+        engine = _make_engine_with_mock(blue_mock)
+
+        if batched:
+            sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
+            sample_mask = np.stack([sample_mask] * 2, axis=0)
+            result_green_default = engine.process_frame(
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                post_process_on_gpu=backend == "torch",
+            )[0]
+            result_blue = engine.process_frame(
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                screen_channel=2,
+                post_process_on_gpu=backend == "torch",
+            )[0]
+        else:
+            result_green_default = engine.process_frame(
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                post_process_on_gpu=backend == "torch",
+            )
+            result_blue = engine.process_frame(
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                screen_channel=2,
+                post_process_on_gpu=backend == "torch",
+            )
+
+        rgb_green_default = result_green_default["processed"][:, :, :3]
+        rgb_blue = result_blue["processed"][:, :, :3]
+
+        # Default (green) path: blue channel is untouched because G is below (R+B)/2.
+        # Blue path: blue channel is reduced because B >> (R+G)/2.
+        assert rgb_blue[:, :, 2].mean() < rgb_green_default[:, :, 2].mean(), (
+            "screen_channel=2 should reduce the blue channel, while screen_channel=1 (default) "
+            "leaves a blue-heavy plate untouched"
+        )
+
+    @pytest.mark.parametrize("backend", ["openCV", "torch"])
+    @pytest.mark.parametrize("batched", [True, False])
     def test_auto_despeckle_toggle(self, sample_frame_rgb, sample_mask, mock_greenformer, backend, batched):
         """auto_despeckle=False should skip clean_matte without crashing."""
         engine = _make_engine_with_mock(mock_greenformer)

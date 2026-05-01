@@ -279,6 +279,9 @@ class TestPreservationLinearEXRInference:
             mock_settings.auto_despeckle = False
             mock_settings.despeckle_size = 400
             mock_settings.refiner_scale = 1.0
+            # Pin screen_color so run_inference takes the explicit-green path and
+            # does not try to auto-detect from a MagicMock'd clip asset.
+            mock_settings.screen_color = "green"
 
             mock_engine = MagicMock()
             mock_engine.process_frame = mock_process_frame
