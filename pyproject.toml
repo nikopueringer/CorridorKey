@@ -58,7 +58,11 @@ rocm = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov", "ruff", "hypothesis"]
+# `pytest-env` is required so that `[tool.pytest.ini_options].env` below is
+# honoured locally. CI sets OPENCV_IO_ENABLE_OPENEXR via the workflow env, but
+# without this plugin pytest emits "Unknown config option: env" and any test
+# that calls cv2.imread/imwrite on .exr before clip_manager imports fails.
+dev = ["pytest", "pytest-cov", "pytest-env", "ruff", "hypothesis"]
 docs = ["zensical>=0.0.24"]
 
 [project.scripts]
