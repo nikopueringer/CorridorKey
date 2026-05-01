@@ -427,6 +427,9 @@ class CorridorKeyEngine:
             despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
             generate_comp: bool. If True, also generates a composite on checkerboard for quick checking.
             post_process_on_gpu: bool. If True, performs post-processing on GPU using PyTorch instead of OpenCV.
+            screen_channel: int. RGB index of the screen color to despill against. 1=green (default,
+                            backwards-compatible), 2=blue. Routed through to despill_opencv/despill_torch
+                            so the same despill math operates on the correct channel for the loaded model.
         Returns:
              dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
         """

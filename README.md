@@ -25,7 +25,7 @@ Naturally, I have not tested everything. If you encounter errors, please conside
 ## Features
 
 *   **Physically Accurate Unmixing:** Clean extraction of straight color foreground and linear alpha channels, preserving hair, motion blur, and translucency.
-*   **Green or Blue Screen:** Dedicated checkpoints for green and blue plates. Auto-detects which one to use from your footage, or pick explicitly via `--screen-color {auto,green,blue}`. The despill removes spill from the screen channel you're actually shooting against.
+*   **Green or Blue Screen:** Dedicated checkpoints for green and blue plates. By default (`--screen-color auto`) CorridorKey samples the first frame of the first clip in your batch and picks the dominant screen color from the background pixels; pass `--screen-color green` or `--screen-color blue` to skip the heuristic and force the choice. The despill then removes spill from the channel you're actually shooting against. *Currently Torch backend only — the MLX path is green-screen until the blue MLX checkpoint ships.*
 *   **Resolution Independent:** The engine dynamically scales inference to handle 4K plates while predicting using its native 2048x2048 high-fidelity backbone.
 *   **VFX Standard Outputs:** Natively reads and writes 16-bit and 32-bit Linear float EXR files, preserving true color math for integration in Nuke, Fusion, or Resolve.
 *   **Auto-Cleanup:** Includes a morphological cleanup system to automatically prune any tracking markers or tiny background features that slip through CorridorKey's detection.
