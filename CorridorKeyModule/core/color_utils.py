@@ -296,6 +296,26 @@ def despill_torch(image: torch.Tensor, strength: float, screen_channel: int = 1)
     return despilled
 
 
+SCREEN_CHANNEL_BY_COLOR = {"green": 1, "blue": 2}
+
+
+def screen_channel_for_color(screen_color: str) -> int:
+    """Map a screen-color name ("green"/"blue") to its RGB channel index.
+
+    This is the single source of truth for the mapping — every caller that
+    needs to despill against the correct channel routes through here.
+
+    Raises ValueError on unknown values (including "auto" — callers must
+    resolve auto to a concrete color before calling this).
+    """
+    try:
+        return SCREEN_CHANNEL_BY_COLOR[screen_color]
+    except KeyError:
+        raise ValueError(
+            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(SCREEN_CHANNEL_BY_COLOR)}"
+        ) from None
+
+
 def estimate_screen_color(image_srgb: np.ndarray, alpha_hint: np.ndarray, ambiguity_threshold: float = 0.05) -> str:
     """Detect dominant screen color from an image + coarse alpha hint.
 

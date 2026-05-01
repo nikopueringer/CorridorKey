@@ -737,9 +737,10 @@ def run_inference(
     if device is None:
         device = resolve_device()
     from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
+    from CorridorKeyModule.core.color_utils import screen_channel_for_color
 
     resolved_screen_color = _resolve_screen_color(settings.screen_color, ready_clips)
-    screen_channel = 2 if resolved_screen_color == "blue" else 1
+    screen_channel = screen_channel_for_color(resolved_screen_color)
 
     engine = create_engine(
         backend=backend,

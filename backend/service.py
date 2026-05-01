@@ -650,8 +650,10 @@ class CorridorKeyService:
         # of this clip. We peek before locking the GPU because this only needs
         # to run once per clip and is cheap.
         sample_img, sample_alpha = self._peek_first_frame_for_color(clip)
+        from CorridorKeyModule.core.color_utils import screen_channel_for_color
+
         resolved_color = self._resolve_screen_color(params.screen_color, sample_img, sample_alpha)
-        screen_channel = 2 if resolved_color == "blue" else 1
+        screen_channel = screen_channel_for_color(resolved_color)
 
         with self._gpu_lock:
             engine = self._get_engine(screen_color=resolved_color)
@@ -928,8 +930,10 @@ class CorridorKeyService:
             return None
 
         sample_img, sample_alpha = self._peek_first_frame_for_color(clip)
+        from CorridorKeyModule.core.color_utils import screen_channel_for_color
+
         resolved_color = self._resolve_screen_color(params.screen_color, sample_img, sample_alpha)
-        screen_channel = 2 if resolved_color == "blue" else 1
+        screen_channel = screen_channel_for_color(resolved_color)
 
         with self._gpu_lock:
             engine = self._get_engine(screen_color=resolved_color)
