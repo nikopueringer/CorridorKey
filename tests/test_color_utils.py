@@ -236,72 +236,95 @@ class TestCompositing:
 # ---------------------------------------------------------------------------
 
 
-class TestDespill:
-    """Green spill removal.
+def _make_pixel(screen_channel: int, screen_value: float, off_a: float, off_b: float):
+    """Build a single-pixel RGB array with arbitrary screen channel."""
+    px = [0.0, 0.0, 0.0]
+    others = [i for i in (0, 1, 2) if i != screen_channel]
+    px[screen_channel] = screen_value
+    px[others[0]] = off_a
+    px[others[1]] = off_b
+    return _to_np([px])
 
-    The despill function clamps excess green based on red/blue, then
-    redistributes the removed energy to preserve luminance.
+
+class TestDespill:
+    """Screen-color spill removal (channel-agnostic).
+
+    The despill function clamps excess in the screen channel based on the two
+    other channels, then redistributes the removed energy to preserve luminance.
+    Default screen_channel=1 (green) preserves historical behavior; pass 2 for
+    blue-screen plates.
     """
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_pure_green_reduced_average_mode_numpy(self, backend):
-        """A pure green pixel should have green clamped to (R+B)/2 = 0."""
-        img = _to_np([[0.0, 1.0, 0.0]])
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_pure_screen_reduced_average_mode(self, backend, screen_channel):
+        """Pure screen-color pixel should have its screen channel clamped to 0."""
+        img = _make_pixel(screen_channel, 1.0, 0.0, 0.0)
         if backend == "openCV":
-            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+            result = cu.despill_opencv(
+                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
+            )
         else:
             img_t = torch.from_numpy(img)
-            result = cu.despill_torch(img_t, strength=1.0).numpy()
-        # Green should be 0 (clamped to avg of R=0, B=0)
-        assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
+            result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
+        assert result[0, screen_channel] == pytest.approx(0.0, abs=1e-6)
 
-    def test_pure_green_reduced_max_mode_numpy(self):
-        """With 'max' mode, green clamped to max(R, B) = 0 for pure green."""
-        img = _to_np([[0.0, 1.0, 0.0]])
-        result = cu.despill_opencv(img, green_limit_mode="max", strength=1.0)
-        assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_pure_screen_reduced_max_mode(self, screen_channel):
+        """With 'max' mode, screen clamped to max(other_a, other_b) = 0 for pure screen pixel."""
+        img = _make_pixel(screen_channel, 1.0, 0.0, 0.0)
+        result = cu.despill_opencv(
+            img, limit_mode="max", strength=1.0, screen_channel=screen_channel
+        )
+        assert result[0, screen_channel] == pytest.approx(0.0, abs=1e-6)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_pure_red_unchanged_numpy(self, backend):
-        """A pixel with no green excess should not be modified."""
-        img = _to_np([[1.0, 0.0, 0.0]])
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_pure_off_screen_unchanged(self, backend, screen_channel):
+        """A pixel with no screen excess should not be modified."""
+        # Strong red, zero in the other channels.
+        img = _make_pixel(screen_channel, 0.0, 1.0, 0.0)
         if backend == "openCV":
-            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+            result = cu.despill_opencv(
+                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
+            )
         else:
             img_t = torch.from_numpy(img)
-            result = cu.despill_torch(img_t, strength=1.0).numpy()
+            result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
         np.testing.assert_allclose(result, img, atol=1e-6)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_strength_zero_is_noop_numpy(self, backend):
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_strength_zero_is_noop(self, backend, screen_channel):
         """strength=0 should return the input unchanged."""
-        img = _to_np([[0.2, 0.9, 0.1]])
+        img = _make_pixel(screen_channel, 0.9, 0.2, 0.1)
         if backend == "openCV":
-            result = cu.despill_opencv(img, strength=0.0)
+            result = cu.despill_opencv(img, strength=0.0, screen_channel=screen_channel)
         else:
             img_t = torch.from_numpy(img)
-            result = cu.despill_torch(img_t, strength=0.0).numpy()
+            result = cu.despill_torch(img_t, strength=0.0, screen_channel=screen_channel).numpy()
         np.testing.assert_allclose(result, img, atol=1e-7)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_partial_green_average_mode_numpy(self, backend):
-        """Green slightly above (R+B)/2 should be reduced, not zeroed."""
-        img = _to_np([[0.4, 0.8, 0.2]])
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_partial_spill_average_mode(self, backend, screen_channel):
+        """Screen slightly above (other_a + other_b)/2 should be reduced, not zeroed."""
+        img = _make_pixel(screen_channel, 0.8, 0.4, 0.2)
         if backend == "openCV":
-            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+            result = cu.despill_opencv(
+                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
+            )
         else:
             img_t = torch.from_numpy(img)
-            result = cu.despill_torch(img_t, strength=1.0).numpy()
-        limit = (0.4 + 0.2) / 2.0  # 0.3
-        expected_green = limit  # green clamped to limit
-        assert result[0, 1] == pytest.approx(expected_green, abs=1e-5)
+            result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
+        limit = (0.4 + 0.2) / 2.0
+        assert result[0, screen_channel] == pytest.approx(limit, abs=1e-5)
 
     def test_max_mode_higher_limit_than_average(self):
-        """'max' mode uses max(R,B) which is >= (R+B)/2, so less despill."""
-        img = _to_np([[0.6, 0.8, 0.1]])
-        result_avg = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
-        result_max = cu.despill_opencv(img, green_limit_mode="max", strength=1.0)
-        # max(R,B)=0.6 vs avg(R,B)=0.35, so max mode removes less green
+        """'max' mode uses max(other_a, other_b) >= average, so less despill."""
+        img = _to_np([[0.6, 0.8, 0.1]])  # green screen
+        result_avg = cu.despill_opencv(img, limit_mode="average", strength=1.0)
+        result_max = cu.despill_opencv(img, limit_mode="max", strength=1.0)
         assert result_max[0, 1] >= result_avg[0, 1]
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
@@ -309,45 +332,103 @@ class TestDespill:
         """strength=0.5 should produce a result between original and fully despilled."""
         img = _to_np([[0.2, 0.9, 0.1]])
         if backend == "openCV":
-            full = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
-            half = cu.despill_opencv(img, green_limit_mode="average", strength=0.5)
+            full = cu.despill_opencv(img, limit_mode="average", strength=1.0)
+            half = cu.despill_opencv(img, limit_mode="average", strength=0.5)
         else:
             img_t = torch.from_numpy(img)
             full = cu.despill_torch(img_t, strength=1.0).numpy()
             half = cu.despill_torch(img_t, strength=0.5).numpy()
-        # Half-strength green should be between original green and fully despilled green
-        assert half[0, 1] < img[0, 1]  # less green than original
-        assert half[0, 1] > full[0, 1]  # more green than full despill
-        # Verify it's actually the midpoint: img * 0.5 + full * 0.5
+        assert half[0, 1] < img[0, 1]
+        assert half[0, 1] > full[0, 1]
         expected = img * 0.5 + full * 0.5
         np.testing.assert_allclose(half, expected, atol=1e-6)
 
-    def test_despill_torch(self):
+    def test_despill_torch_matches_numpy(self):
         """Verify torch path matches numpy path."""
         img_np = _to_np([[0.3, 0.9, 0.2]])
         img_t = _to_torch([[0.3, 0.9, 0.2]])
-        result_np = cu.despill_opencv(img_np, green_limit_mode="average", strength=1.0)
-        result_t = cu.despill_opencv(img_t, green_limit_mode="average", strength=1.0)
+        result_np = cu.despill_opencv(img_np, limit_mode="average", strength=1.0)
+        result_t = cu.despill_opencv(img_t, limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result_np, result_t.numpy(), atol=1e-5)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
-    def test_green_below_limit_unchanged_numpy(self, backend):
-        """spill_amount is clamped to zero when G < (R+B)/2 — pixel is returned unchanged.
+    @pytest.mark.parametrize("screen_channel", [1, 2])
+    def test_screen_below_limit_unchanged(self, backend, screen_channel):
+        """spill_amount is clamped to zero when screen < (other_a + other_b)/2 — pixel returned unchanged.
 
-        When a pixel has less green than the luminance limit ((R+B)/2) it
-        carries no green spill.  The max(..., 0) clamp on spill_amount ensures
-        the pixel is left untouched.  Without that clamp despill would
-        *increase* green and *decrease* red/blue, corrupting non-spill regions.
+        When a pixel has less in the screen channel than the luminance limit it
+        carries no spill.  The max(..., 0) clamp on spill_amount ensures the
+        pixel is left untouched.  Without that clamp despill would corrupt
+        non-spill regions.
         """
-        # G=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
-        # spill_amount = max(0.3 - 0.7, 0) = 0  →  output equals input
-        img = _to_np([[0.8, 0.3, 0.6]])
+        # screen=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
+        img = _make_pixel(screen_channel, 0.3, 0.8, 0.6)
         if backend == "openCV":
-            result = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+            result = cu.despill_opencv(
+                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
+            )
         else:
             img_t = torch.from_numpy(img)
-            result = cu.despill_torch(img_t, strength=1.0).numpy()
+            result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
         np.testing.assert_allclose(result, img, atol=1e-6)
+
+    def test_default_remains_green(self):
+        """Calling despill_opencv without screen_channel must still target green (regression guard)."""
+        img = _to_np([[0.0, 1.0, 0.0]])
+        result = cu.despill_opencv(img, strength=1.0)
+        assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
+
+    def test_legacy_green_limit_mode_kwarg(self):
+        """Old callers (Nuke, Houdini) pass green_limit_mode= — must still work."""
+        img = _to_np([[0.4, 0.8, 0.2]])
+        result_legacy = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        result_new = cu.despill_opencv(img, limit_mode="average", strength=1.0)
+        np.testing.assert_allclose(result_legacy, result_new, atol=1e-7)
+
+    def test_invalid_channel_raises(self):
+        img = _to_np([[0.5, 0.5, 0.5]])
+        with pytest.raises(ValueError):
+            cu.despill_opencv(img, strength=1.0, screen_channel=3)
+        with pytest.raises(ValueError):
+            cu.despill_torch(torch.from_numpy(img), strength=1.0, screen_channel=-1)
+
+
+class TestEstimateScreenColor:
+    """Auto-detect screen color from background pixels."""
+
+    @staticmethod
+    def _make_scene(screen_rgb: tuple[float, float, float], subject_size: int = 20):
+        """Build a 100x100 image with given screen color and a centered white subject."""
+        h = w = 100
+        img = np.full((h, w, 3), screen_rgb, dtype=np.float32)
+        cy, cx = h // 2, w // 2
+        s = subject_size // 2
+        img[cy - s : cy + s, cx - s : cx + s] = 1.0  # white subject
+        alpha = np.zeros((h, w), dtype=np.float32)
+        alpha[cy - s : cy + s, cx - s : cx + s] = 1.0
+        return img, alpha
+
+    def test_detects_green(self):
+        img, alpha = self._make_scene((0.05, 0.85, 0.10))
+        assert cu.estimate_screen_color(img, alpha) == "green"
+
+    def test_detects_blue(self):
+        img, alpha = self._make_scene((0.05, 0.10, 0.85))
+        assert cu.estimate_screen_color(img, alpha) == "blue"
+
+    def test_ambiguous_defaults_to_green(self):
+        img, alpha = self._make_scene((0.10, 0.50, 0.51))  # G ≈ B
+        assert cu.estimate_screen_color(img, alpha) == "green"
+
+    def test_no_background_defaults_to_green(self):
+        img = np.full((100, 100, 3), (0.05, 0.10, 0.85), dtype=np.float32)
+        alpha = np.ones((100, 100), dtype=np.float32)  # everything is foreground
+        assert cu.estimate_screen_color(img, alpha) == "green"
+
+    def test_alpha_with_channel_dim(self):
+        img, alpha = self._make_scene((0.05, 0.10, 0.85))
+        alpha_3d = alpha[..., np.newaxis]
+        assert cu.estimate_screen_color(img, alpha_3d) == "blue"
 
 
 # ---------------------------------------------------------------------------
