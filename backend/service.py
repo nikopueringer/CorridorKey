@@ -77,6 +77,9 @@ class _ActiveModel(Enum):
     VIDEOMAMA = "videomama"
 
 
+VALID_SCREEN_COLOR_CHOICES = ("auto", "green", "blue")
+
+
 @dataclass
 class InferenceParams:
     """Frozen parameters for a single inference job."""
@@ -87,6 +90,12 @@ class InferenceParams:
     despeckle_size: int = 400
     refiner_scale: float = 1.0
     screen_color: str = "auto"  # "auto", "green", or "blue"
+
+    def __post_init__(self):
+        if self.screen_color not in VALID_SCREEN_COLOR_CHOICES:
+            raise ValueError(
+                f"Invalid screen_color '{self.screen_color}'. Valid: {', '.join(VALID_SCREEN_COLOR_CHOICES)}"
+            )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -290,8 +299,10 @@ class CorridorKeyService:
         """Lazy-load the CorridorKey inference engine for the requested screen color.
 
         If a previously-loaded engine matches ``screen_color``, it is reused.
-        Otherwise the existing engine is unloaded and the correct checkpoint is
-        loaded — so the UI can switch between green and blue clips at runtime.
+        Otherwise the existing engine is unloaded (with VRAM reclaimed via the
+        same pattern as ``_ensure_model``) and the correct checkpoint is loaded
+        so the UI can switch between green and blue clips at runtime without
+        accumulating allocations.
         """
         self._ensure_model(_ActiveModel.INFERENCE)
 
@@ -299,14 +310,32 @@ class CorridorKeyService:
             return self._engine
 
         if self._engine is not None and self._engine_screen_color != screen_color:
+            vram_before_mb = self._vram_allocated_mb()
             logger.info(
-                "Switching engine: %s → %s checkpoint",
+                "Switching engine: %s → %s checkpoint (VRAM before: %.0fMB)",
                 self._engine_screen_color,
                 screen_color,
+                vram_before_mb,
             )
             self._safe_offload(self._engine)
             self._engine = None
             self._engine_screen_color = None
+
+            import gc
+
+            gc.collect()
+            try:
+                from device_utils import clear_device_cache
+
+                clear_device_cache(self._device)
+            except ImportError:
+                logger.debug("device_utils not available for cache clear during checkpoint switch")
+            vram_after_mb = self._vram_allocated_mb()
+            logger.info(
+                "VRAM after checkpoint unload: %.0fMB (freed %.0fMB)",
+                vram_after_mb,
+                vram_before_mb - vram_after_mb,
+            )
 
         try:
             from CorridorKeyModule.backend import TORCH_EXT, _discover_checkpoint

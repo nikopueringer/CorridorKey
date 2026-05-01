@@ -749,8 +749,28 @@ def run_inference(
         screen_color=resolved_screen_color,
     )
 
-    for clip in ready_clips:
+    for clip_index, clip in enumerate(ready_clips):
         logger.info(f"Running Inference on: {clip.name}")
+
+        # When auto-detecting, warn if a later clip looks like a different
+        # screen color than the one we locked in for this batch — keying it
+        # against the wrong checkpoint produces visible spill. The user can
+        # always re-run with --screen-color blue/green to force the choice.
+        if clip_index > 0 and settings.screen_color == "auto":
+            sample_img, sample_alpha = _peek_first_frame_with_alpha(clip)
+            if sample_img is not None and sample_alpha is not None:
+                from CorridorKeyModule.core.color_utils import estimate_screen_color
+
+                clip_color = estimate_screen_color(sample_img, sample_alpha)
+                if clip_color != resolved_screen_color:
+                    logger.warning(
+                        "Clip '%s' looks like a %s screen but the batch is running with the %s "
+                        "checkpoint. Re-run with --screen-color %s for correct keying.",
+                        clip.name,
+                        clip_color,
+                        resolved_screen_color,
+                        clip_color,
+                    )
 
         # Setup Outputs in ClipFolder/Output/...
         clip_out_root = os.path.join(clip.root_path, "Output")

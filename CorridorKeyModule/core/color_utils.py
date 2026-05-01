@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 from collections.abc import Callable
 
 import cv2
@@ -8,6 +9,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.v2.functional as TF
+
+logger = logging.getLogger(__name__)
 
 
 def _is_tensor(x: np.ndarray | torch.Tensor) -> bool:
@@ -306,10 +309,6 @@ def estimate_screen_color(image_srgb: np.ndarray, alpha_hint: np.ndarray, ambigu
     image_srgb: [H, W, 3] float (0-1) sRGB.
     alpha_hint: [H, W] or [H, W, 1] float (0-1), high = foreground subject.
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     if alpha_hint.ndim == 3:
         alpha_hint = alpha_hint[..., 0]
 
