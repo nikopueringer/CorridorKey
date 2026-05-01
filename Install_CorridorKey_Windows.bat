@@ -70,6 +70,23 @@ if exist "%SAFETENSORS_PATH%" (
     )
 )
 
+REM CorridorKeyBlue (dedicated blue-screen weights). Optional download:
+REM if it fails (repo missing, network blip, etc.) the Python runtime will
+REM retry on first --screen-color blue use, so failure here is non-fatal --
+REM users keying green plates aren't blocked by an unrelated download.
+set "BLUE_SAFETENSORS_PATH=%CKPT_DIR%\CorridorKeyBlue_1.0.safetensors"
+set "HF_BLUE_BASE=https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0/resolve/main"
+if exist "%BLUE_SAFETENSORS_PATH%" (
+    echo CorridorKeyBlue checkpoint already exists!
+) else (
+    echo Downloading CorridorKeyBlue_1.0.safetensors ^(blue-screen model^)...
+    curl.exe -L --fail -o "%BLUE_SAFETENSORS_PATH%" "%HF_BLUE_BASE%/CorridorKeyBlue_1.0.safetensors"
+    if errorlevel 1 (
+        echo [INFO] Blue checkpoint not downloaded -- it will fetch automatically the first time you run with --screen-color blue.
+        if exist "%BLUE_SAFETENSORS_PATH%" del "%BLUE_SAFETENSORS_PATH%"
+    )
+)
+
 echo.
 echo ===================================================
 echo   Setup Complete! You are ready to key!

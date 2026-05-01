@@ -84,6 +84,24 @@ else
     fi
 fi
 
+# CorridorKeyBlue (dedicated blue-screen weights). Optional: the green
+# checkpoint above is the primary install. If the blue download fails — repo
+# missing, network blip, etc. — we just skip it. The Python runtime
+# (_ensure_torch_checkpoint) will retry the download on first --screen-color
+# blue use, so a failure here only costs the user a one-time 300 MB pull at
+# render time instead of bricking the install.
+BLUE_SAFETENSORS_PATH="$CKPT_DIR/CorridorKeyBlue_1.0.safetensors"
+HF_BLUE_BASE="https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0/resolve/main"
+if [ -f "$BLUE_SAFETENSORS_PATH" ]; then
+    echo "CorridorKeyBlue checkpoint already exists!"
+else
+    echo "Downloading CorridorKeyBlue_1.0.safetensors (blue-screen model)..."
+    if ! curl -L --fail -o "$BLUE_SAFETENSORS_PATH" "$HF_BLUE_BASE/CorridorKeyBlue_1.0.safetensors"; then
+        echo "[INFO] Blue checkpoint not downloaded — it will fetch automatically the first time you run with --screen-color blue."
+        rm -f "$BLUE_SAFETENSORS_PATH"
+    fi
+fi
+
 echo ""
 echo "==================================================="
 echo "  Setup Complete! You are ready to key!"
