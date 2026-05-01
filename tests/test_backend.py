@@ -11,8 +11,10 @@ import pytest
 from CorridorKeyModule.backend import (
     BACKEND_ENV_VAR,
     HF_CHECKPOINT_FILENAME,
+    HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS,
     HF_CHECKPOINT_FILENAME_SAFETENSORS,
     HF_REPO_ID,
+    HF_REPO_ID_BLUE,
     MLX_EXT,
     SAFETENSORS_EXT,
     TORCH_EXT,
@@ -276,6 +278,66 @@ class TestDiscoverCheckpoint:
                 ):
                     with pytest.raises(OSError, match="300 MB"):
                         _ensure_torch_checkpoint()
+
+    # --- screen_color (blue vs green) ---
+
+    def test_blue_picks_blue_checkpoint(self, tmp_path):
+        """When both green and blue checkpoints coexist, screen_color='blue' picks blue."""
+        green = tmp_path / "CorridorKey_v1.0.safetensors"
+        blue = tmp_path / "CorridorKeyBlue_1.0.safetensors"
+        green.touch()
+        blue.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT, screen_color="blue")
+                assert result == blue
+                mock_dl.assert_not_called()
+
+    def test_green_skips_blue_checkpoint(self, tmp_path):
+        """When both coexist, screen_color='green' picks green and ignores blue."""
+        green = tmp_path / "CorridorKey_v1.0.safetensors"
+        blue = tmp_path / "CorridorKeyBlue_1.0.safetensors"
+        green.touch()
+        blue.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT, screen_color="green")
+                assert result == green
+                mock_dl.assert_not_called()
+
+    def test_blue_with_only_green_present_triggers_download(self, tmp_path):
+        """If only green is on disk and blue is requested, auto-download from the blue HF repo."""
+        (tmp_path / "CorridorKey_v1.0.safetensors").touch()
+        cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS
+        cached.parent.mkdir()
+        cached.write_bytes(b"blue-bytes")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download", return_value=str(cached)) as mock_dl:
+                result = _discover_checkpoint(TORCH_EXT, screen_color="blue")
+                assert result == tmp_path / HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS
+                mock_dl.assert_called_once()
+                assert mock_dl.call_args.kwargs["repo_id"] == HF_REPO_ID_BLUE
+                assert mock_dl.call_args.kwargs["filename"] == HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS
+
+    def test_multiple_blue_raises(self, tmp_path):
+        """Two blue safetensors files cause ValueError, ignoring any green ones."""
+        (tmp_path / "CorridorKey_v1.0.safetensors").touch()  # green — should be ignored
+        (tmp_path / "CorridorKeyBlue_1.0.safetensors").touch()
+        (tmp_path / "CorridorKeyBlue_v2.safetensors").touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with pytest.raises(ValueError, match="Multiple"):
+                _discover_checkpoint(TORCH_EXT, screen_color="blue")
+
+    def test_mlx_blue_raises(self, tmp_path):
+        """MLX backend does not yet have a blue checkpoint — must surface an actionable error."""
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with pytest.raises(RuntimeError, match="MLX"):
+                _discover_checkpoint(MLX_EXT, screen_color="blue")
+
+    def test_invalid_screen_color_raises(self, tmp_path):
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with pytest.raises(ValueError, match="screen_color"):
+                _discover_checkpoint(TORCH_EXT, screen_color="red")
 
     def test_logging_on_download(self, tmp_path, caplog):
         """Info-level log messages emitted at download start and completion."""

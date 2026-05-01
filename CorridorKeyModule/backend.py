@@ -33,6 +33,15 @@ HF_REPO_ID = "nikopueringer/CorridorKey_v1.0"
 HF_CHECKPOINT_FILENAME_SAFETENSORS = "CorridorKey_v1.0.safetensors"
 HF_CHECKPOINT_FILENAME = "CorridorKey_v1.0.pth"  # DEPRECATED: remove after .pth sunset
 
+# Dedicated blue-screen weights (CorridorKeyBlue). Same architecture as the
+# green checkpoint — only the trained weights differ.
+HF_REPO_ID_BLUE = "nikopueringer/CorridorKeyBlue_1.0"
+HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS = "CorridorKeyBlue_1.0.safetensors"
+HF_CHECKPOINT_FILENAME_BLUE = "CorridorKeyBlue_1.0.pth"  # DEPRECATED: remove after .pth sunset
+
+VALID_SCREEN_COLORS = ("green", "blue")
+BLUE_FILENAME_TOKEN = "blue"  # case-insensitive substring marking a blue checkpoint
+
 
 def resolve_backend(requested: str | None = None) -> str:
     """Resolve backend: CLI flag > env var > auto-detect.
@@ -138,23 +147,41 @@ def _copy_to_checkpoint_dir(cached_path: str, dest: Path) -> Path:
     return dest
 
 
-def _ensure_torch_checkpoint_pth_fallback() -> Path:
+def _hf_repo_for_color(screen_color: str) -> str:
+    return HF_REPO_ID_BLUE if screen_color == "blue" else HF_REPO_ID
+
+
+def _hf_safetensors_for_color(screen_color: str) -> str:
+    return (
+        HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS
+        if screen_color == "blue"
+        else HF_CHECKPOINT_FILENAME_SAFETENSORS
+    )
+
+
+def _hf_pth_for_color(screen_color: str) -> str:
+    return HF_CHECKPOINT_FILENAME_BLUE if screen_color == "blue" else HF_CHECKPOINT_FILENAME
+
+
+def _ensure_torch_checkpoint_pth_fallback(screen_color: str = "green") -> Path:
     """DEPRECATED: remove after .pth sunset.
 
     Download the legacy .pth checkpoint from HuggingFace. Used only when the
     official .safetensors file is not yet published to the HF repo.
     """
-    dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME
-    hf_url = f"https://huggingface.co/{HF_REPO_ID}"
+    repo_id = _hf_repo_for_color(screen_color)
+    pth_filename = _hf_pth_for_color(screen_color)
+    dest = Path(CHECKPOINT_DIR) / pth_filename
+    hf_url = f"https://huggingface.co/{repo_id}"
 
     from huggingface_hub import hf_hub_download
 
-    logger.info("Downloading legacy .pth CorridorKey checkpoint from %s ...", hf_url)
+    logger.info("Downloading legacy .pth CorridorKey (%s) checkpoint from %s ...", screen_color, hf_url)
 
     try:
         cached_path = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_CHECKPOINT_FILENAME,
+            repo_id=repo_id,
+            filename=pth_filename,
         )
     except Exception as exc:
         raise RuntimeError(
@@ -166,7 +193,7 @@ def _ensure_torch_checkpoint_pth_fallback() -> Path:
     return _copy_to_checkpoint_dir(cached_path, dest)
 
 
-def _ensure_torch_checkpoint() -> Path:
+def _ensure_torch_checkpoint(screen_color: str = "green") -> Path:
     """Download the Torch checkpoint from HuggingFace if not present.
 
     Prefers the safer .safetensors format. If the HF repo does not yet host a
@@ -178,28 +205,28 @@ def _ensure_torch_checkpoint() -> Path:
         RuntimeError: Network or download failure.
         OSError: Disk space or filesystem error.
     """
-    dest = Path(CHECKPOINT_DIR) / HF_CHECKPOINT_FILENAME_SAFETENSORS
-    hf_url = f"https://huggingface.co/{HF_REPO_ID}"
+    repo_id = _hf_repo_for_color(screen_color)
+    safetensors_filename = _hf_safetensors_for_color(screen_color)
+    dest = Path(CHECKPOINT_DIR) / safetensors_filename
+    hf_url = f"https://huggingface.co/{repo_id}"
 
     from huggingface_hub import hf_hub_download
     from huggingface_hub.utils import EntryNotFoundError
 
-    logger.info("Downloading CorridorKey checkpoint (.safetensors) from %s ...", hf_url)
+    logger.info("Downloading CorridorKey (%s) checkpoint (.safetensors) from %s ...", screen_color, hf_url)
 
     try:
         cached_path = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_CHECKPOINT_FILENAME_SAFETENSORS,
+            repo_id=repo_id,
+            filename=safetensors_filename,
         )
     except EntryNotFoundError:
         # DEPRECATED: remove after .pth sunset.
-        # The HF repo doesn't have the .safetensors yet — fall back to .pth so
-        # this code can ship before the safetensors upload lands.
         logger.info(
             "No %s found on the HF repo yet — falling back to legacy .pth.",
-            HF_CHECKPOINT_FILENAME_SAFETENSORS,
+            safetensors_filename,
         )
-        return _ensure_torch_checkpoint_pth_fallback()
+        return _ensure_torch_checkpoint_pth_fallback(screen_color)
     except Exception as exc:
         raise RuntimeError(
             f"Failed to download CorridorKey checkpoint from {hf_url}. "
@@ -214,42 +241,71 @@ def _find_single(ext: str) -> list[str]:
     return glob.glob(os.path.join(CHECKPOINT_DIR, f"*{ext}"))
 
 
-def _discover_checkpoint(ext: str) -> Path:
-    """Find exactly one checkpoint for the requested backend.
+def _filter_by_color(paths: list[str], screen_color: str) -> list[str]:
+    """Keep only checkpoint files whose basename matches the requested screen color.
+
+    Convention: filenames containing the substring 'blue' (case-insensitive)
+    are blue weights; everything else is treated as green.
+    """
+    is_blue_target = screen_color == "blue"
+    out: list[str] = []
+    for p in paths:
+        is_blue_file = BLUE_FILENAME_TOKEN in os.path.basename(p).lower()
+        if is_blue_file == is_blue_target:
+            out.append(p)
+    return out
+
+
+def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
+    """Find exactly one checkpoint for the requested backend and screen color.
 
     For Torch (``ext == TORCH_EXT``): accepts both ``.safetensors`` and ``.pth``,
     preferring ``.safetensors`` when both are present. Auto-downloads when
-    nothing is found locally.
+    nothing is found locally for the requested color.
 
-    For MLX (``ext == MLX_EXT``): strictly ``.safetensors`` as before.
+    For MLX (``ext == MLX_EXT``): strictly ``.safetensors``. Blue is not yet
+    supported on MLX — raises RuntimeError.
 
-    Raises FileNotFoundError (0 found) or ValueError (>1 of the chosen format).
+    Raises FileNotFoundError (0 found, no auto-download) or ValueError (>1 match).
     """
+    if screen_color not in VALID_SCREEN_COLORS:
+        raise ValueError(
+            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}"
+        )
+
     if ext == TORCH_EXT:
-        safetensors_matches = _find_single(SAFETENSORS_EXT)
-        pth_matches = _find_single(TORCH_EXT)
+        safetensors_matches = _filter_by_color(_find_single(SAFETENSORS_EXT), screen_color)
+        pth_matches = _filter_by_color(_find_single(TORCH_EXT), screen_color)
 
         if safetensors_matches and pth_matches:
             logger.info(
-                "Both .safetensors and .pth checkpoints present in %s — preferring .safetensors.",
+                "Both .safetensors and .pth %s checkpoints present in %s — preferring .safetensors.",
+                screen_color,
                 CHECKPOINT_DIR,
             )
 
-        # Prefer safetensors
         matches = safetensors_matches or pth_matches
         chosen_ext = SAFETENSORS_EXT if safetensors_matches else TORCH_EXT
 
         if not matches:
-            return _ensure_torch_checkpoint()
+            return _ensure_torch_checkpoint(screen_color)
 
         if len(matches) > 1:
             names = [os.path.basename(f) for f in matches]
-            raise ValueError(f"Multiple {chosen_ext} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
+            raise ValueError(
+                f"Multiple {chosen_ext} {screen_color} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one."
+            )
 
         return Path(matches[0])
 
     # MLX path — strict .safetensors match.
-    matches = _find_single(ext)
+    if screen_color == "blue":
+        raise RuntimeError(
+            "Blue-screen support is not yet available on the MLX backend. "
+            "Use --backend torch with --screen-color blue, or wait for the MLX blue release."
+        )
+
+    matches = _filter_by_color(_find_single(ext), screen_color)
 
     if len(matches) == 0:
         other_ext = TORCH_EXT
@@ -257,11 +313,13 @@ def _discover_checkpoint(ext: str) -> Path:
         hint = ""
         if other_files:
             hint = f" (Found {other_ext} files — did you mean --backend=torch?)"
-        raise FileNotFoundError(f"No {ext} checkpoint found in {CHECKPOINT_DIR}.{hint}")
+        raise FileNotFoundError(f"No {ext} {screen_color} checkpoint found in {CHECKPOINT_DIR}.{hint}")
 
     if len(matches) > 1:
         names = [os.path.basename(f) for f in matches]
-        raise ValueError(f"Multiple {ext} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
+        raise ValueError(
+            f"Multiple {ext} {screen_color} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one."
+        )
 
     return Path(matches[0])
 
@@ -293,7 +351,7 @@ def _wrap_mlx_output(raw: dict, despill_strength: float, auto_despeckle: bool, d
         processed_alpha = alpha
 
     # Apply despill (MLX stubs this)
-    fg_despilled = cu.despill_opencv(fg, green_limit_mode="average", strength=despill_strength)
+    fg_despilled = cu.despill_opencv(fg, limit_mode="average", strength=despill_strength)
 
     # Composite over checkerboard for comp output
     h, w = fg.shape[:2]
@@ -374,6 +432,7 @@ def create_engine(
     img_size: int = DEFAULT_IMG_SIZE,
     tile_size: int | None = DEFAULT_MLX_TILE_SIZE,
     overlap: int = DEFAULT_MLX_TILE_OVERLAP,
+    screen_color: str = "green",
 ):
     """Factory: returns an engine with process_frame() matching the Torch contract.
 
@@ -381,22 +440,28 @@ def create_engine(
         tile_size: MLX only — tile size for tiled inference (default 512).
             Set to None to disable tiling and use full-frame inference.
         overlap: MLX only — overlap pixels between tiles (default 64).
+        screen_color: 'green' (default) or 'blue'. Selects which checkpoint to
+            load. Blue is currently Torch-only.
     """
+    if screen_color not in VALID_SCREEN_COLORS:
+        raise ValueError(
+            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}"
+        )
     backend = resolve_backend(backend)
 
     if backend == "mlx":
-        ckpt = _discover_checkpoint(MLX_EXT)
+        ckpt = _discover_checkpoint(MLX_EXT, screen_color=screen_color)
         from corridorkey_mlx import CorridorKeyMLXEngine  # type: ignore[import-not-found]
 
         raw_engine = CorridorKeyMLXEngine(str(ckpt), img_size=img_size, tile_size=tile_size, overlap=overlap)
         mode = f"tiled (tile={tile_size}, overlap={overlap})" if tile_size else "full-frame"
-        logger.info("MLX engine loaded: %s [%s]", ckpt.name, mode)
+        logger.info("MLX engine loaded: %s [%s, screen=%s]", ckpt.name, mode, screen_color)
         return _MLXEngineAdapter(raw_engine)
     else:
-        ckpt = _discover_checkpoint(TORCH_EXT)
+        ckpt = _discover_checkpoint(TORCH_EXT, screen_color=screen_color)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
+        logger.info("Torch engine loaded: %s (device=%s, screen=%s)", ckpt.name, device, screen_color)
         return CorridorKeyEngine(
             checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size, model_precision=torch.float16
         )
