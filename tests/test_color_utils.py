@@ -369,9 +369,10 @@ class TestDespill:
         assert result[0, 1] == pytest.approx(0.0, abs=1e-6)
 
     def test_legacy_green_limit_mode_kwarg(self):
-        """Old callers (Nuke, Houdini) pass green_limit_mode= — must still work."""
+        """Old callers (Nuke, Houdini) pass green_limit_mode= — must still work AND emit DeprecationWarning."""
         img = _to_np([[0.4, 0.8, 0.2]])
-        result_legacy = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
+        with pytest.warns(DeprecationWarning, match="green_limit_mode"):
+            result_legacy = cu.despill_opencv(img, green_limit_mode="average", strength=1.0)
         result_new = cu.despill_opencv(img, limit_mode="average", strength=1.0)
         np.testing.assert_allclose(result_legacy, result_new, atol=1e-7)
 
@@ -419,6 +420,52 @@ class TestEstimateScreenColor:
         img, alpha = self._make_scene((0.05, 0.10, 0.85))
         alpha_3d = alpha[..., np.newaxis]
         assert cu.estimate_screen_color(img, alpha_3d) == "blue"
+
+    def test_rejects_image_wrong_ndim(self):
+        """A 2D 'image' (missing channel dim) must fail fast, not crash later in indexing."""
+        with pytest.raises(ValueError, match="HxWx3"):
+            cu.estimate_screen_color(np.zeros((100, 100), dtype=np.float32), np.zeros((100, 100)))
+
+    def test_rejects_image_too_few_channels(self):
+        """A grayscale-stacked image with 2 channels must fail fast."""
+        with pytest.raises(ValueError, match="HxWx3"):
+            cu.estimate_screen_color(np.zeros((100, 100, 2), dtype=np.float32), np.zeros((100, 100)))
+
+    def test_rejects_alpha_wrong_ndim(self):
+        """A 4D alpha (e.g. accidentally batched) must fail fast."""
+        with pytest.raises(ValueError, match="HxW or HxWx1"):
+            cu.estimate_screen_color(
+                np.zeros((100, 100, 3), dtype=np.float32),
+                np.zeros((1, 100, 100, 1), dtype=np.float32),
+            )
+
+    def test_rejects_shape_mismatch(self):
+        """Image and alpha must agree on H,W."""
+        with pytest.raises(ValueError, match="must agree on H,W"):
+            cu.estimate_screen_color(np.zeros((100, 100, 3), dtype=np.float32), np.zeros((50, 50), dtype=np.float32))
+
+
+class TestScreenChannelForColor:
+    """Single-source-of-truth helper: 'green' → 1, 'blue' → 2."""
+
+    def test_known_colors(self):
+        assert cu.screen_channel_for_color("green") == 1
+        assert cu.screen_channel_for_color("blue") == 2
+
+    def test_auto_is_rejected(self):
+        """'auto' is the unresolved sentinel — callers must resolve before mapping."""
+        with pytest.raises(ValueError, match="auto"):
+            cu.screen_channel_for_color("auto")
+
+    def test_unknown_is_rejected(self):
+        with pytest.raises(ValueError, match="red"):
+            cu.screen_channel_for_color("red")
+
+    def test_constants_are_aligned(self):
+        """SCREEN_COLOR_CHOICES must be exactly the keys of SCREEN_CHANNEL_BY_COLOR,
+        and SCREEN_COLOR_CHOICES_WITH_AUTO must add only the 'auto' sentinel."""
+        assert set(cu.SCREEN_COLOR_CHOICES) == set(cu.SCREEN_CHANNEL_BY_COLOR.keys())
+        assert set(cu.SCREEN_COLOR_CHOICES_WITH_AUTO) - set(cu.SCREEN_COLOR_CHOICES) == {cu.SCREEN_COLOR_AUTO}
 
 
 # ---------------------------------------------------------------------------

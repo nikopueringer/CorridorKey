@@ -31,6 +31,8 @@ import numpy as np
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 
+from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
+
 from .clip_state import (
     ClipAsset,
     ClipEntry,
@@ -75,9 +77,6 @@ class _ActiveModel(Enum):
     INFERENCE = "inference"
     GVM = "gvm"
     VIDEOMAMA = "videomama"
-
-
-VALID_SCREEN_COLOR_CHOICES = ("auto", "green", "blue")
 
 
 @dataclass
@@ -646,13 +645,11 @@ class CorridorKeyService:
 
         t_start = time.monotonic()
 
-        # Resolve screen color (auto-detect if requested) using the first frame
-        # of this clip. We peek before locking the GPU because this only needs
-        # to run once per clip and is cheap.
-        sample_img, sample_alpha = self._peek_first_frame_for_color(clip)
+        # Resolve screen color. ``_resolve_screen_color`` only peeks the clip when
+        # the user asked for ``auto``; an explicit "green"/"blue" choice does no I/O.
         from CorridorKeyModule.core.color_utils import screen_channel_for_color
 
-        resolved_color = self._resolve_screen_color(params.screen_color, sample_img, sample_alpha)
+        resolved_color = self._resolve_screen_color(params.screen_color, clip)
         screen_channel = screen_channel_for_color(resolved_color)
 
         with self._gpu_lock:
@@ -856,16 +853,26 @@ class CorridorKeyService:
 
     # --- Single-Frame Reprocess (Preview) ---
 
-    def _resolve_screen_color(self, requested: str, sample_img, sample_alpha) -> str:
-        """Map a settings-level screen_color to a concrete color, auto-detecting if needed."""
+    def _resolve_screen_color(self, requested: str, clip: ClipEntry) -> str:
+        """Map a settings-level screen_color to a concrete color, auto-detecting if needed.
+
+        For explicit ``"green"``/``"blue"`` the clip is never read — the choice is logged and
+        returned. Only ``"auto"`` triggers a peek of the first frame, which keeps the preview
+        path (``reprocess_single_frame``) from doing a redundant disk read on every scrub.
+        """
         if requested != "auto":
+            logger.info("Screen color set explicitly to '%s'", requested)
             return requested
+
+        sample_img, sample_alpha = self._peek_first_frame_for_color(clip)
         if sample_img is None or sample_alpha is None:
             logger.warning("Auto screen-color: no sample frame available, defaulting to 'green'.")
             return "green"
         from CorridorKeyModule.core.color_utils import estimate_screen_color
 
-        return estimate_screen_color(sample_img, sample_alpha)
+        detected = estimate_screen_color(sample_img, sample_alpha)
+        logger.info("Screen color auto-detected from clip '%s': %s", clip.name, detected)
+        return detected
 
     def _peek_first_frame_for_color(self, clip: ClipEntry):
         """Read the first input frame + alpha hint for screen-color auto-detection.
@@ -929,10 +936,9 @@ class CorridorKeyService:
         if job and job.is_cancelled:
             return None
 
-        sample_img, sample_alpha = self._peek_first_frame_for_color(clip)
         from CorridorKeyModule.core.color_utils import screen_channel_for_color
 
-        resolved_color = self._resolve_screen_color(params.screen_color, sample_img, sample_alpha)
+        resolved_color = self._resolve_screen_color(params.screen_color, clip)
         screen_channel = screen_channel_for_color(resolved_color)
 
         with self._gpu_lock:

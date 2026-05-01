@@ -227,6 +227,13 @@ def despill_opencv(
     green_limit_mode: deprecated alias for limit_mode kept for backward compat.
     """
     if green_limit_mode is not None:
+        import warnings
+
+        warnings.warn(
+            "despill_opencv(green_limit_mode=...) is deprecated; pass limit_mode=... instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         limit_mode = green_limit_mode
     if screen_channel not in (0, 1, 2):
         raise ValueError(f"screen_channel must be 0, 1, or 2, got {screen_channel}")
@@ -296,14 +303,19 @@ def despill_torch(image: torch.Tensor, strength: float, screen_channel: int = 1)
     return despilled
 
 
-SCREEN_CHANNEL_BY_COLOR = {"green": 1, "blue": 2}
+# --- Screen color: single source of truth ---------------------------------
+# All callers (CLI, settings dataclasses, service layer, checkpoint discovery,
+# despill pipelines) import these constants instead of hard-coding the strings.
+# Adding a new screen color requires only updating SCREEN_CHANNEL_BY_COLOR.
+
+SCREEN_CHANNEL_BY_COLOR: dict[str, int] = {"green": 1, "blue": 2}
+SCREEN_COLOR_CHOICES: tuple[str, ...] = tuple(SCREEN_CHANNEL_BY_COLOR.keys())
+SCREEN_COLOR_AUTO: str = "auto"
+SCREEN_COLOR_CHOICES_WITH_AUTO: tuple[str, ...] = (SCREEN_COLOR_AUTO,) + SCREEN_COLOR_CHOICES
 
 
 def screen_channel_for_color(screen_color: str) -> int:
     """Map a screen-color name ("green"/"blue") to its RGB channel index.
-
-    This is the single source of truth for the mapping — every caller that
-    needs to despill against the correct channel routes through here.
 
     Raises ValueError on unknown values (including "auto" — callers must
     resolve auto to a concrete color before calling this).
@@ -311,9 +323,7 @@ def screen_channel_for_color(screen_color: str) -> int:
     try:
         return SCREEN_CHANNEL_BY_COLOR[screen_color]
     except KeyError:
-        raise ValueError(
-            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(SCREEN_CHANNEL_BY_COLOR)}"
-        ) from None
+        raise ValueError(f"Unknown screen_color '{screen_color}'. Valid: {', '.join(SCREEN_COLOR_CHOICES)}") from None
 
 
 def estimate_screen_color(image_srgb: np.ndarray, alpha_hint: np.ndarray, ambiguity_threshold: float = 0.05) -> str:
@@ -329,8 +339,16 @@ def estimate_screen_color(image_srgb: np.ndarray, alpha_hint: np.ndarray, ambigu
     image_srgb: [H, W, 3] float (0-1) sRGB.
     alpha_hint: [H, W] or [H, W, 1] float (0-1), high = foreground subject.
     """
+    if image_srgb.ndim != 3 or image_srgb.shape[2] < 3:
+        raise ValueError(f"estimate_screen_color expects HxWx3 image, got shape {image_srgb.shape}")
+    if alpha_hint.ndim not in (2, 3):
+        raise ValueError(f"estimate_screen_color expects HxW or HxWx1 alpha_hint, got shape {alpha_hint.shape}")
     if alpha_hint.ndim == 3:
         alpha_hint = alpha_hint[..., 0]
+    if alpha_hint.shape[:2] != image_srgb.shape[:2]:
+        raise ValueError(
+            f"image_srgb and alpha_hint must agree on H,W: got {image_srgb.shape[:2]} vs {alpha_hint.shape[:2]}"
+        )
 
     bg_mask = alpha_hint < 0.3
     coverage = float(bg_mask.mean()) if bg_mask.size else 0.0

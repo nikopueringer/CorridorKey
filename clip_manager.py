@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 
 from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
+from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -24,9 +25,6 @@ if TYPE_CHECKING:
 from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 
 logger = logging.getLogger(__name__)
-
-
-VALID_SCREEN_COLOR_CHOICES = ("auto", "green", "blue")
 
 
 @dataclass
@@ -607,11 +605,16 @@ def run_videomama(
             traceback.print_exc()
 
 
-def _peek_first_frame_with_alpha(clip):
+def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
     """Read the first input frame + alpha hint from a clip without consuming streams.
 
     Returns (img_srgb_float [0-1], alpha_float [0-1]) or (None, None) on failure.
     Used by screen-color auto-detection — we only need the first valid frame.
+
+    ``input_is_linear`` mirrors the same setting in run_inference: when reading
+    an EXR plate, we gamma-correct only when the user said the plate is sRGB-encoded.
+    Without this, linear EXR plates would feed the screen-color estimator pixels in
+    a different colorspace than the rest of the pipeline uses.
     """
     try:
         if clip.input_asset.type == "video":
@@ -630,7 +633,7 @@ def _peek_first_frame_with_alpha(clip):
                 return None, None
             fpath = os.path.join(clip.input_asset.path, input_files[0])
             if fpath.lower().endswith(".exr"):
-                img_srgb = read_image_frame(fpath, gamma_correct_exr=True)
+                img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
                 if img_srgb is None:
                     return None, None
             else:
@@ -678,12 +681,15 @@ def _peek_first_frame_with_alpha(clip):
         return None, None
 
 
-def _resolve_screen_color(requested: str, ready_clips) -> str:
+def _resolve_screen_color(requested: str, ready_clips, input_is_linear: bool = False) -> str:
     """Map a settings-level screen_color ("auto"/"green"/"blue") to a concrete color.
 
     For "auto", probes the first ready clip's first frame and runs
     estimate_screen_color. Falls back to "green" if no probe is possible.
     The result is logged so users see which checkpoint will be loaded.
+
+    ``input_is_linear`` is forwarded to the EXR reader so the auto-detector sees pixels
+    in the same colorspace the inference pipeline will use for this batch.
     """
     if requested != "auto":
         logger.info("Screen color set explicitly to '%s'", requested)
@@ -695,7 +701,7 @@ def _resolve_screen_color(requested: str, ready_clips) -> str:
 
     from CorridorKeyModule.core.color_utils import estimate_screen_color
 
-    img_srgb, alpha = _peek_first_frame_with_alpha(ready_clips[0])
+    img_srgb, alpha = _peek_first_frame_with_alpha(ready_clips[0], input_is_linear=input_is_linear)
     if img_srgb is None or alpha is None:
         logger.warning("Auto screen-color detection: could not read a sample frame, defaulting to 'green'.")
         return "green"
@@ -739,7 +745,9 @@ def run_inference(
     from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
     from CorridorKeyModule.core.color_utils import screen_channel_for_color
 
-    resolved_screen_color = _resolve_screen_color(settings.screen_color, ready_clips)
+    resolved_screen_color = _resolve_screen_color(
+        settings.screen_color, ready_clips, input_is_linear=settings.input_is_linear
+    )
     screen_channel = screen_channel_for_color(resolved_screen_color)
 
     engine = create_engine(
@@ -758,7 +766,7 @@ def run_inference(
         # against the wrong checkpoint produces visible spill. The user can
         # always re-run with --screen-color blue/green to force the choice.
         if clip_index > 0 and settings.screen_color == "auto":
-            sample_img, sample_alpha = _peek_first_frame_with_alpha(clip)
+            sample_img, sample_alpha = _peek_first_frame_with_alpha(clip, input_is_linear=settings.input_is_linear)
             if sample_img is not None and sample_alpha is not None:
                 from CorridorKeyModule.core.color_utils import estimate_screen_color
 

@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES
+
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
@@ -39,7 +41,8 @@ HF_REPO_ID_BLUE = "nikopueringer/CorridorKeyBlue_1.0"
 HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS = "CorridorKeyBlue_1.0.safetensors"
 HF_CHECKPOINT_FILENAME_BLUE = "CorridorKeyBlue_1.0.pth"  # DEPRECATED: remove after .pth sunset
 
-VALID_SCREEN_COLORS = ("green", "blue")
+# Re-exported alias for callers/tests that import VALID_SCREEN_COLORS from this module.
+VALID_SCREEN_COLORS = SCREEN_COLOR_CHOICES
 BLUE_FILENAME_TOKEN = "blue"  # case-insensitive substring marking a blue checkpoint
 
 
@@ -382,9 +385,24 @@ class _MLXEngineAdapter:
         despill_strength=1.0,
         auto_despeckle=True,
         despeckle_size=400,
+        screen_channel: int = 1,
         **_kwargs,
     ):
-        """Delegate to MLX engine, then normalize output to Torch contract."""
+        """Delegate to MLX engine, then normalize output to Torch contract.
+
+        ``screen_channel`` is accepted for API parity with the Torch engine but
+        only ``1`` (green) is supported here — the MLX backend has no blue
+        checkpoint yet, so the despill in ``_wrap_mlx_output`` is hard-wired to
+        the green channel. Calling with ``screen_channel != 1`` is a programmer
+        error (the public ``create_engine`` rejects MLX + blue earlier); we
+        raise instead of silently returning a green-keyed result.
+        """
+        if screen_channel != 1:
+            raise NotImplementedError(
+                f"_MLXEngineAdapter does not support screen_channel={screen_channel}. "
+                "MLX has no blue-screen checkpoint yet; use the Torch backend with "
+                "--screen-color blue, or wait for the MLX blue release."
+            )
         # MLX engine expects uint8 input — convert if float
         if image.dtype != np.uint8:
             image_u8 = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
