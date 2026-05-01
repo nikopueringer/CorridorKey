@@ -152,11 +152,7 @@ def _hf_repo_for_color(screen_color: str) -> str:
 
 
 def _hf_safetensors_for_color(screen_color: str) -> str:
-    return (
-        HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS
-        if screen_color == "blue"
-        else HF_CHECKPOINT_FILENAME_SAFETENSORS
-    )
+    return HF_CHECKPOINT_FILENAME_BLUE_SAFETENSORS if screen_color == "blue" else HF_CHECKPOINT_FILENAME_SAFETENSORS
 
 
 def _hf_pth_for_color(screen_color: str) -> str:
@@ -269,9 +265,7 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
     Raises FileNotFoundError (0 found, no auto-download) or ValueError (>1 match).
     """
     if screen_color not in VALID_SCREEN_COLORS:
-        raise ValueError(
-            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}"
-        )
+        raise ValueError(f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}")
 
     if ext == TORCH_EXT:
         safetensors_matches = _filter_by_color(_find_single(SAFETENSORS_EXT), screen_color)
@@ -317,9 +311,7 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
 
     if len(matches) > 1:
         names = [os.path.basename(f) for f in matches]
-        raise ValueError(
-            f"Multiple {ext} {screen_color} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one."
-        )
+        raise ValueError(f"Multiple {ext} {screen_color} checkpoints in {CHECKPOINT_DIR}: {names}. Keep exactly one.")
 
     return Path(matches[0])
 
@@ -444,9 +436,7 @@ def create_engine(
             load. Blue is currently Torch-only.
     """
     if screen_color not in VALID_SCREEN_COLORS:
-        raise ValueError(
-            f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}"
-        )
+        raise ValueError(f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}")
     backend = resolve_backend(backend)
 
     if backend == "mlx":

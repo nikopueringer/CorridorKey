@@ -261,9 +261,7 @@ class TestDespill:
         """Pure screen-color pixel should have its screen channel clamped to 0."""
         img = _make_pixel(screen_channel, 1.0, 0.0, 0.0)
         if backend == "openCV":
-            result = cu.despill_opencv(
-                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
-            )
+            result = cu.despill_opencv(img, limit_mode="average", strength=1.0, screen_channel=screen_channel)
         else:
             img_t = torch.from_numpy(img)
             result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
@@ -273,9 +271,7 @@ class TestDespill:
     def test_pure_screen_reduced_max_mode(self, screen_channel):
         """With 'max' mode, screen clamped to max(other_a, other_b) = 0 for pure screen pixel."""
         img = _make_pixel(screen_channel, 1.0, 0.0, 0.0)
-        result = cu.despill_opencv(
-            img, limit_mode="max", strength=1.0, screen_channel=screen_channel
-        )
+        result = cu.despill_opencv(img, limit_mode="max", strength=1.0, screen_channel=screen_channel)
         assert result[0, screen_channel] == pytest.approx(0.0, abs=1e-6)
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
@@ -285,9 +281,7 @@ class TestDespill:
         # Strong red, zero in the other channels.
         img = _make_pixel(screen_channel, 0.0, 1.0, 0.0)
         if backend == "openCV":
-            result = cu.despill_opencv(
-                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
-            )
+            result = cu.despill_opencv(img, limit_mode="average", strength=1.0, screen_channel=screen_channel)
         else:
             img_t = torch.from_numpy(img)
             result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
@@ -311,9 +305,7 @@ class TestDespill:
         """Screen slightly above (other_a + other_b)/2 should be reduced, not zeroed."""
         img = _make_pixel(screen_channel, 0.8, 0.4, 0.2)
         if backend == "openCV":
-            result = cu.despill_opencv(
-                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
-            )
+            result = cu.despill_opencv(img, limit_mode="average", strength=1.0, screen_channel=screen_channel)
         else:
             img_t = torch.from_numpy(img)
             result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()
@@ -364,9 +356,7 @@ class TestDespill:
         # screen=0.3 is well below the average limit (0.8+0.6)/2 = 0.7
         img = _make_pixel(screen_channel, 0.3, 0.8, 0.6)
         if backend == "openCV":
-            result = cu.despill_opencv(
-                img, limit_mode="average", strength=1.0, screen_channel=screen_channel
-            )
+            result = cu.despill_opencv(img, limit_mode="average", strength=1.0, screen_channel=screen_channel)
         else:
             img_t = torch.from_numpy(img)
             result = cu.despill_torch(img_t, strength=1.0, screen_channel=screen_channel).numpy()

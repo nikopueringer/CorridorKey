@@ -671,9 +671,7 @@ def _peek_first_frame_with_alpha(clip):
                 alpha = mask_in.astype(np.float32)
 
         if alpha.shape[:2] != img_srgb.shape[:2]:
-            alpha = cv2.resize(
-                alpha, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
-            )
+            alpha = cv2.resize(alpha, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR)
         return img_srgb, alpha
     except Exception as exc:
         logger.warning("Could not peek first frame of clip '%s' for screen-color detection: %s", clip.name, exc)
@@ -699,9 +697,7 @@ def _resolve_screen_color(requested: str, ready_clips) -> str:
 
     img_srgb, alpha = _peek_first_frame_with_alpha(ready_clips[0])
     if img_srgb is None or alpha is None:
-        logger.warning(
-            "Auto screen-color detection: could not read a sample frame, defaulting to 'green'."
-        )
+        logger.warning("Auto screen-color detection: could not read a sample frame, defaulting to 'green'.")
         return "green"
 
     detected = estimate_screen_color(img_srgb, alpha)

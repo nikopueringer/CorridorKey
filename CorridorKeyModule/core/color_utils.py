@@ -293,9 +293,7 @@ def despill_torch(image: torch.Tensor, strength: float, screen_channel: int = 1)
     return despilled
 
 
-def estimate_screen_color(
-    image_srgb: np.ndarray, alpha_hint: np.ndarray, ambiguity_threshold: float = 0.05
-) -> str:
+def estimate_screen_color(image_srgb: np.ndarray, alpha_hint: np.ndarray, ambiguity_threshold: float = 0.05) -> str:
     """Detect dominant screen color from an image + coarse alpha hint.
 
     Looks at pixels where ``alpha_hint < 0.3`` (i.e. the background = the screen)

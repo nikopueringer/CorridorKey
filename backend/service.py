@@ -863,9 +863,7 @@ class CorridorKeyService:
                 alpha_files = clip.alpha_asset.get_frame_files()
                 if not alpha_files:
                     return None, None
-                alpha = read_mask_frame(
-                    os.path.join(clip.alpha_asset.path, alpha_files[0]), clip.name, 0
-                )
+                alpha = read_mask_frame(os.path.join(clip.alpha_asset.path, alpha_files[0]), clip.name, 0)
             if alpha is None:
                 return None, None
 
