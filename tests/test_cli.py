@@ -241,6 +241,69 @@ class TestNonInteractiveFlags:
         assert "--refiner" in plain
         assert "--despeckle-size" in plain
         assert "--skip-existing" in plain
+        assert "--screen-color" in plain
+
+    @patch("corridorkey_cli.scan_clips")
+    @patch("corridorkey_cli.run_inference")
+    def test_screen_color_blue_propagates(self, mock_run, mock_scan):
+        """--screen-color blue lands in InferenceSettings.screen_color."""
+        mock_scan.return_value = []
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "5",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+                "--screen-color",
+                "blue",
+            ],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_run.call_args
+        assert kwargs["settings"].screen_color == "blue"
+
+    @patch("corridorkey_cli.scan_clips")
+    @patch("corridorkey_cli.run_inference")
+    def test_screen_color_default_is_auto(self, mock_run, mock_scan):
+        """Without --screen-color, settings.screen_color defaults to 'auto' in headless mode."""
+        mock_scan.return_value = []
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "5",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+            ],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_run.call_args
+        assert kwargs["settings"].screen_color == "auto"
+
+    def test_invalid_screen_color_rejected(self):
+        """--screen-color red must be rejected before settings are built."""
+        result = runner.invoke(
+            app,
+            [
+                "run-inference",
+                "--srgb",
+                "--despill",
+                "5",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+                "--screen-color",
+                "red",
+            ],
+        )
+        assert result.exit_code != 0
 
     @patch("corridorkey_cli.scan_clips")
     @patch("corridorkey_cli.run_inference")

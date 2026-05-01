@@ -26,6 +26,9 @@ from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 logger = logging.getLogger(__name__)
 
 
+VALID_SCREEN_COLOR_CHOICES = ("auto", "green", "blue")
+
+
 @dataclass
 class InferenceSettings:
     """Settings for CorridorKey inference, extracted from interactive prompts.
@@ -42,6 +45,13 @@ class InferenceSettings:
     gpu_post_processing: bool = False
     image_size: int = 2048
     tiled_inference: bool = False
+    screen_color: str = "auto"  # "auto" (detect from first frame), "green", or "blue"
+
+    def __post_init__(self):
+        if self.screen_color not in VALID_SCREEN_COLOR_CHOICES:
+            raise ValueError(
+                f"Invalid screen_color '{self.screen_color}'. Valid: {', '.join(VALID_SCREEN_COLOR_CHOICES)}"
+            )
 
 
 # Core Paths
@@ -597,6 +607,108 @@ def run_videomama(
             traceback.print_exc()
 
 
+def _peek_first_frame_with_alpha(clip):
+    """Read the first input frame + alpha hint from a clip without consuming streams.
+
+    Returns (img_srgb_float [0-1], alpha_float [0-1]) or (None, None) on failure.
+    Used by screen-color auto-detection — we only need the first valid frame.
+    """
+    try:
+        if clip.input_asset.type == "video":
+            cap = cv2.VideoCapture(clip.input_asset.path)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None, None
+            import numpy as np  # local — clip_manager defers numpy import in run_inference
+
+            img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img_srgb = img_rgb.astype(np.float32) / 255.0
+        else:
+            input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+            if not input_files:
+                return None, None
+            fpath = os.path.join(clip.input_asset.path, input_files[0])
+            if fpath.lower().endswith(".exr"):
+                img_srgb = read_image_frame(fpath, gamma_correct_exr=True)
+                if img_srgb is None:
+                    return None, None
+            else:
+                img_bgr = cv2.imread(fpath)
+                if img_bgr is None:
+                    return None, None
+                import numpy as np
+
+                img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                img_srgb = img_rgb.astype(np.float32) / 255.0
+
+        if clip.alpha_asset.type == "video":
+            cap = cv2.VideoCapture(clip.alpha_asset.path)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None, None
+            import numpy as np
+
+            alpha = frame[:, :, 2].astype(np.float32) / 255.0
+        else:
+            alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
+            if not alpha_files:
+                return None, None
+            apath = os.path.join(clip.alpha_asset.path, alpha_files[0])
+            mask_in = cv2.imread(apath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
+            if mask_in is None:
+                return None, None
+            import numpy as np
+
+            if mask_in.ndim == 3:
+                mask_in = mask_in[:, :, 0]
+            if mask_in.dtype == np.uint8:
+                alpha = mask_in.astype(np.float32) / 255.0
+            elif mask_in.dtype == np.uint16:
+                alpha = mask_in.astype(np.float32) / 65535.0
+            else:
+                alpha = mask_in.astype(np.float32)
+
+        if alpha.shape[:2] != img_srgb.shape[:2]:
+            alpha = cv2.resize(
+                alpha, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+            )
+        return img_srgb, alpha
+    except Exception as exc:
+        logger.warning("Could not peek first frame of clip '%s' for screen-color detection: %s", clip.name, exc)
+        return None, None
+
+
+def _resolve_screen_color(requested: str, ready_clips) -> str:
+    """Map a settings-level screen_color ("auto"/"green"/"blue") to a concrete color.
+
+    For "auto", probes the first ready clip's first frame and runs
+    estimate_screen_color. Falls back to "green" if no probe is possible.
+    The result is logged so users see which checkpoint will be loaded.
+    """
+    if requested != "auto":
+        logger.info("Screen color set explicitly to '%s'", requested)
+        return requested
+
+    if not ready_clips:
+        logger.warning("Auto screen-color detection: no ready clips, defaulting to 'green'.")
+        return "green"
+
+    from CorridorKeyModule.core.color_utils import estimate_screen_color
+
+    img_srgb, alpha = _peek_first_frame_with_alpha(ready_clips[0])
+    if img_srgb is None or alpha is None:
+        logger.warning(
+            "Auto screen-color detection: could not read a sample frame, defaulting to 'green'."
+        )
+        return "green"
+
+    detected = estimate_screen_color(img_srgb, alpha)
+    logger.info("Screen color auto-detected from clip '%s': %s", ready_clips[0].name, detected)
+    return detected
+
+
 def run_inference(
     clips,
     device=None,
@@ -630,11 +742,15 @@ def run_inference(
         device = resolve_device()
     from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
 
+    resolved_screen_color = _resolve_screen_color(settings.screen_color, ready_clips)
+    screen_channel = 2 if resolved_screen_color == "blue" else 1
+
     engine = create_engine(
         backend=backend,
         device=device,
         tile_size=DEFAULT_MLX_TILE_SIZE if settings.tiled_inference else None,
         img_size=settings.image_size,
+        screen_color=resolved_screen_color,
     )
 
     for clip in ready_clips:
@@ -774,6 +890,7 @@ def run_inference(
                 refiner_scale=settings.refiner_scale,
                 generate_comp=settings.generate_comp,
                 post_process_on_gpu=settings.gpu_post_processing,
+                screen_channel=screen_channel,
             )
 
             pred_fg = res["fg"]  # sRGB

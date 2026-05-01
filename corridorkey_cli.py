@@ -155,6 +155,7 @@ def _prompt_inference_settings(
     default_gpu_post: bool | None = None,
     default_image_size: int | None = None,
     default_tiled_inference: bool | None = None,
+    default_screen_color: str | None = None,
 ) -> InferenceSettings:
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
@@ -163,6 +164,15 @@ def _prompt_inference_settings(
     tiled_inference = (
         default_tiled_inference if default_tiled_inference is not None else InferenceSettings.tiled_inference
     )
+
+    if default_screen_color is not None:
+        screen_color = default_screen_color
+    else:
+        screen_color = Prompt.ask(
+            "Screen color",
+            choices=["auto", "green", "blue"],
+            default="auto",
+        )
 
     if default_linear is not None:
         input_is_linear = default_linear
@@ -259,6 +269,7 @@ def _prompt_inference_settings(
         gpu_post_processing=gpu_post_processing,
         image_size=image_size,
         tiled_inference=tiled_inference,
+        screen_color=screen_color,
     )
 
 
@@ -353,12 +364,22 @@ def run_inference_cmd(
         Optional[bool],
         typer.Option("--tile/--no-tile", help="Use mlx tiled inference (default: prompt)"),
     ] = None,
+    screen_color: Annotated[
+        Optional[str],
+        typer.Option(
+            "--screen-color",
+            help="Screen color: auto (detect), green, or blue (default: prompt)",
+        ),
+    ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
     Settings can be passed as flags for non-interactive use, or omitted to
     prompt interactively.
     """
+    if screen_color is not None and screen_color not in ("auto", "green", "blue"):
+        raise typer.BadParameter(f"--screen-color must be one of: auto, green, blue (got '{screen_color}')")
+
     clips = scan_clips()
 
     # despeckle_size excluded — sensible default even in headless mode
@@ -376,6 +397,7 @@ def run_inference_cmd(
             gpu_post_processing=gpu_post,
             image_size=image_size,
             tiled_inference=tiled_inference,
+            screen_color=screen_color if screen_color is not None else "auto",
         )
     else:
         settings = _prompt_inference_settings(
@@ -388,6 +410,7 @@ def run_inference_cmd(
             default_gpu_post=gpu_post,
             default_image_size=image_size,
             default_tiled_inference=tiled_inference,
+            default_screen_color=screen_color,
         )
 
     with ProgressContext() as ctx_progress:
