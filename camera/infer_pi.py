@@ -48,14 +48,14 @@ def preprocess(image_pil: PILImage, target_size: int) -> np.ndarray:
     resized = image_pil.resize((target_size, target_size), Image.Resampling.LANCZOS)
     rgb = np.array(resized, dtype=np.float32)
 
-    chw = (rgb / 255.0).transpose(2, 0, 1)           # [3, H, W]
+    chw = (rgb / 255.0).transpose(2, 0, 1)  # [3, H, W]
     chw = (chw - _IMAGENET_MEAN) / _IMAGENET_STD
 
     mask = generate_green_hint_mask(rgb.astype(np.uint8))  # [H, W]
-    mask = mask[np.newaxis]                                  # [1, H, W]
+    mask = mask[np.newaxis]  # [1, H, W]
 
-    rgba = np.concatenate([chw, mask], axis=0)             # [4, H, W]
-    return rgba[np.newaxis].astype(np.float32)             # [1, 4, H, W]
+    rgba = np.concatenate([chw, mask], axis=0)  # [4, H, W]
+    return rgba[np.newaxis].astype(np.float32)  # [1, 4, H, W]
 
 
 def infer(session: ort.InferenceSession, image_pil: PILImage, target_size: int = 512):
@@ -67,8 +67,8 @@ def infer(session: ort.InferenceSession, image_pil: PILImage, target_size: int =
     input_tensor = preprocess(image_pil, target_size)
     alpha_raw, fg_raw = session.run(["alpha", "fg"], {"rgba_input": input_tensor})
     # alpha_raw: [1, 1, H, W]  fg_raw: [1, 3, H, W]
-    alpha = alpha_raw[0, 0]                        # [H, W]
-    fg = fg_raw[0].transpose(1, 2, 0)             # [H, W, 3]
+    alpha = alpha_raw[0, 0]  # [H, W]
+    fg = fg_raw[0].transpose(1, 2, 0)  # [H, W, 3]
     return alpha, fg
 
 

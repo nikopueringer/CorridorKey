@@ -40,9 +40,10 @@ def _load_state_dict(checkpoint_path: str) -> dict:
     if path.suffix == ".safetensors":
         try:
             from safetensors.torch import load_file
+
             return load_file(checkpoint_path)
-        except ImportError:
-            raise ImportError("safetensors not installed. Run: pip install safetensors")
+        except ImportError as e:
+            raise ImportError("safetensors not installed. Run: pip install safetensors") from e
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     return state.get("state_dict", state)
 
@@ -64,10 +65,10 @@ def _fix_pos_embeds(state_dict: dict, model: nn.Module) -> dict:
         if "pos_embed" in k and k in model_state and v.shape != model_state[k].shape:
             n_src = v.shape[1]
             n_dst = model_state[k].shape[1]
-            c     = v.shape[2]
+            c = v.shape[2]
             g_src = int(math.sqrt(n_src))
             g_dst = int(math.sqrt(n_dst))
-            v_img     = v.permute(0, 2, 1).view(1, c, g_src, g_src)
+            v_img = v.permute(0, 2, 1).view(1, c, g_src, g_src)
             v_resized = F.interpolate(v_img, size=(g_dst, g_dst), mode="bicubic", align_corners=False)
             v = v_resized.flatten(2).transpose(1, 2)
             print(f"  resized pos_embed {k}: {n_src} -> {n_dst} tokens")

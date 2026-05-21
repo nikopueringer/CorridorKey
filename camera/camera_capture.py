@@ -22,7 +22,7 @@ from PIL import Image
 # Allow running from both the project root and the camera/ directory
 sys.path.insert(0, str(Path(__file__).parent))
 
-from infer_pi import composite_over_black, generate_green_hint_mask, infer, load_model
+from infer_pi import composite_over_black, infer, load_model
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
@@ -91,12 +91,18 @@ def main() -> None:
             orig_h, orig_w = frame_bgr.shape[:2]
 
             # Resize model outputs back to camera resolution
-            alpha_up = np.array(
-                Image.fromarray((alpha * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.Resampling.LANCZOS)
-            ) / 255.0
-            fg_up = np.array(
-                Image.fromarray((fg * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.Resampling.LANCZOS)
-            ) / 255.0
+            alpha_up = (
+                np.array(
+                    Image.fromarray((alpha * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.Resampling.LANCZOS)
+                )
+                / 255.0
+            )
+            fg_up = (
+                np.array(
+                    Image.fromarray((fg * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.Resampling.LANCZOS)
+                )
+                / 255.0
+            )
 
             result_rgb = composite_over_black(alpha_up, fg_up)
             result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)

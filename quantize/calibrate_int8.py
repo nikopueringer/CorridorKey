@@ -17,14 +17,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
-
 from onnxruntime.quantization import (
     CalibrationDataReader,
     QuantFormat,
     quantize_static,
 )
 from onnxruntime.quantization.shape_inference import quant_pre_process
+from PIL import Image
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
@@ -44,15 +43,15 @@ def generate_green_hint_mask(rgb: np.ndarray) -> np.ndarray:
 def preprocess(rgb: np.ndarray, img_size: int) -> np.ndarray:
     """Return [1, 4, H, W] float32 tensor (ImageNet-normalised RGB + hint mask)."""
     pil = Image.fromarray(rgb).resize((img_size, img_size), Image.Resampling.LANCZOS)
-    arr = np.array(pil, dtype=np.float32) / 255.0          # [H, W, 3]
-    chw = arr.transpose(2, 0, 1)                            # [3, H, W]
+    arr = np.array(pil, dtype=np.float32) / 255.0  # [H, W, 3]
+    chw = arr.transpose(2, 0, 1)  # [3, H, W]
     chw = (chw - _IMAGENET_MEAN) / _IMAGENET_STD
 
-    mask = generate_green_hint_mask(np.array(pil))         # [H, W]
-    mask = mask[np.newaxis]                                 # [1, H, W]
+    mask = generate_green_hint_mask(np.array(pil))  # [H, W]
+    mask = mask[np.newaxis]  # [1, H, W]
 
-    rgba = np.concatenate([chw, mask], axis=0)             # [4, H, W]
-    return rgba[np.newaxis].astype(np.float32)             # [1, 4, H, W]
+    rgba = np.concatenate([chw, mask], axis=0)  # [4, H, W]
+    return rgba[np.newaxis].astype(np.float32)  # [1, 4, H, W]
 
 
 class GreenScreenCalibrationReader(CalibrationDataReader):

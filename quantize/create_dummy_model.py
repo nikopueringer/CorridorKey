@@ -43,30 +43,30 @@ def build_dummy_model(img_size: int) -> onnx.ModelProto:
     pad = 1
 
     # ── weights (stored as ONNX initialisers) ──────────────────────────────
-    w_rgb1  = _conv_weights(8, 3, 3, seed=0)
-    b_rgb1  = np.zeros(8,  dtype=np.float32)
-    w_rgb2  = _conv_weights(3, 8, 3, seed=1)
-    b_rgb2  = np.zeros(3,  dtype=np.float32)
+    w_rgb1 = _conv_weights(8, 3, 3, seed=0)
+    b_rgb1 = np.zeros(8, dtype=np.float32)
+    w_rgb2 = _conv_weights(3, 8, 3, seed=1)
+    b_rgb2 = np.zeros(3, dtype=np.float32)
 
-    w_msk1  = _conv_weights(8, 1, 3, seed=2)
-    b_msk1  = np.zeros(8,  dtype=np.float32)
-    w_msk2  = _conv_weights(1, 8, 3, seed=3)
-    b_msk2  = np.zeros(1,  dtype=np.float32)
+    w_msk1 = _conv_weights(8, 1, 3, seed=2)
+    b_msk1 = np.zeros(8, dtype=np.float32)
+    w_msk2 = _conv_weights(1, 8, 3, seed=3)
+    b_msk2 = np.zeros(1, dtype=np.float32)
 
     inits = [
-        numpy_helper.from_array(w_rgb1,  name="w_rgb1"),
-        numpy_helper.from_array(b_rgb1,  name="b_rgb1"),
-        numpy_helper.from_array(w_rgb2,  name="w_rgb2"),
-        numpy_helper.from_array(b_rgb2,  name="b_rgb2"),
-        numpy_helper.from_array(w_msk1,  name="w_msk1"),
-        numpy_helper.from_array(b_msk1,  name="b_msk1"),
-        numpy_helper.from_array(w_msk2,  name="w_msk2"),
-        numpy_helper.from_array(b_msk2,  name="b_msk2"),
-        numpy_helper.from_array(np.array([0],   dtype=np.int64), name="s_rgb_start"),
-        numpy_helper.from_array(np.array([3],   dtype=np.int64), name="s_rgb_end"),
-        numpy_helper.from_array(np.array([3],   dtype=np.int64), name="s_msk_start"),
-        numpy_helper.from_array(np.array([4],   dtype=np.int64), name="s_msk_end"),
-        numpy_helper.from_array(np.array([1],   dtype=np.int64), name="s_axis"),
+        numpy_helper.from_array(w_rgb1, name="w_rgb1"),
+        numpy_helper.from_array(b_rgb1, name="b_rgb1"),
+        numpy_helper.from_array(w_rgb2, name="w_rgb2"),
+        numpy_helper.from_array(b_rgb2, name="b_rgb2"),
+        numpy_helper.from_array(w_msk1, name="w_msk1"),
+        numpy_helper.from_array(b_msk1, name="b_msk1"),
+        numpy_helper.from_array(w_msk2, name="w_msk2"),
+        numpy_helper.from_array(b_msk2, name="b_msk2"),
+        numpy_helper.from_array(np.array([0], dtype=np.int64), name="s_rgb_start"),
+        numpy_helper.from_array(np.array([3], dtype=np.int64), name="s_rgb_end"),
+        numpy_helper.from_array(np.array([3], dtype=np.int64), name="s_msk_start"),
+        numpy_helper.from_array(np.array([4], dtype=np.int64), name="s_msk_end"),
+        numpy_helper.from_array(np.array([1], dtype=np.int64), name="s_axis"),
     ]
 
     # ── nodes ──────────────────────────────────────────────────────────────
@@ -74,22 +74,16 @@ def build_dummy_model(img_size: int) -> onnx.ModelProto:
         # Split channels
         helper.make_node("Slice", ["rgba_input", "s_rgb_start", "s_rgb_end", "s_axis"], ["rgb_slice"]),
         helper.make_node("Slice", ["rgba_input", "s_msk_start", "s_msk_end", "s_axis"], ["msk_slice"]),
-
         # RGB branch → fg
-        helper.make_node("Conv",    ["rgb_slice", "w_rgb1", "b_rgb1"], ["rgb_h1"],
-                         pads=[pad]*4),
-        helper.make_node("Relu",    ["rgb_h1"],  ["rgb_r1"]),
-        helper.make_node("Conv",    ["rgb_r1", "w_rgb2", "b_rgb2"],  ["rgb_h2"],
-                         pads=[pad]*4),
-        helper.make_node("Sigmoid", ["rgb_h2"],  ["fg"]),
-
+        helper.make_node("Conv", ["rgb_slice", "w_rgb1", "b_rgb1"], ["rgb_h1"], pads=[pad] * 4),
+        helper.make_node("Relu", ["rgb_h1"], ["rgb_r1"]),
+        helper.make_node("Conv", ["rgb_r1", "w_rgb2", "b_rgb2"], ["rgb_h2"], pads=[pad] * 4),
+        helper.make_node("Sigmoid", ["rgb_h2"], ["fg"]),
         # Mask branch → alpha
-        helper.make_node("Conv",    ["msk_slice", "w_msk1", "b_msk1"], ["msk_h1"],
-                         pads=[pad]*4),
-        helper.make_node("Relu",    ["msk_h1"],  ["msk_r1"]),
-        helper.make_node("Conv",    ["msk_r1", "w_msk2", "b_msk2"],  ["msk_h2"],
-                         pads=[pad]*4),
-        helper.make_node("Sigmoid", ["msk_h2"],  ["alpha"]),
+        helper.make_node("Conv", ["msk_slice", "w_msk1", "b_msk1"], ["msk_h1"], pads=[pad] * 4),
+        helper.make_node("Relu", ["msk_h1"], ["msk_r1"]),
+        helper.make_node("Conv", ["msk_r1", "w_msk2", "b_msk2"], ["msk_h2"], pads=[pad] * 4),
+        helper.make_node("Sigmoid", ["msk_h2"], ["alpha"]),
     ]
 
     # ── graph ──────────────────────────────────────────────────────────────
@@ -97,14 +91,11 @@ def build_dummy_model(img_size: int) -> onnx.ModelProto:
         nodes,
         "GreenFormerDummy",
         inputs=[
-            helper.make_tensor_value_info("rgba_input", TensorProto.FLOAT,
-                                          [1, 4, img_size, img_size]),
+            helper.make_tensor_value_info("rgba_input", TensorProto.FLOAT, [1, 4, img_size, img_size]),
         ],
         outputs=[
-            helper.make_tensor_value_info("alpha", TensorProto.FLOAT,
-                                          [1, 1, img_size, img_size]),
-            helper.make_tensor_value_info("fg",    TensorProto.FLOAT,
-                                          [1, 3, img_size, img_size]),
+            helper.make_tensor_value_info("alpha", TensorProto.FLOAT, [1, 1, img_size, img_size]),
+            helper.make_tensor_value_info("fg", TensorProto.FLOAT, [1, 3, img_size, img_size]),
         ],
         initializer=inits,
     )
@@ -118,7 +109,7 @@ def build_dummy_model(img_size: int) -> onnx.ModelProto:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create dummy GreenFormer ONNX model for pipeline testing")
     parser.add_argument("--output", default="models/dummy_512.onnx", help="Output path")
-    parser.add_argument("--size",   type=int, default=512,            help="Input resolution")
+    parser.add_argument("--size", type=int, default=512, help="Input resolution")
     args = parser.parse_args()
 
     out = Path(args.output)
@@ -130,7 +121,7 @@ def main() -> None:
 
     size_kb = out.stat().st_size / 1024
     print(f"Saved: {out}  ({size_kb:.1f} KB)")
-    print(f"\nTest it with:")
+    print("\nTest it with:")
     print(f"  python camera/infer_pi.py --model {out} --image <your_image.jpg> --output result.png")
 
 
