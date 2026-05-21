@@ -1,0 +1,10 @@
+# Edge device inference requirements (Raspberry Pi, NVIDIA Jetson, USB stick cameras)
+# Install with: pip install -r requirements-edge.txt
+#
+# No PyTorch needed — only ONNX Runtime.
+
+onnxruntime>=1.18          # CPU inference (use onnxruntime-gpu for Jetson)
+opencv-python-headless>=4  # Headless for Pi (no GUI dependencies)
+Pillow>=10
+numpy>=1.24
+sympy                      # Required by onnxruntime.quantization
