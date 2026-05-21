@@ -359,6 +359,58 @@ MLX uses img_size=2048 by default (same as Torch).
 - **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
 - **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
 
+## Edge Deployment (Raspberry Pi / Low-Power Devices)
+
+CorridorKey can be quantized to INT8 ONNX format and deployed on edge hardware — **no PyTorch required at runtime**. This makes it usable on a Raspberry Pi camera, a USB-stick camera, or any low-spec machine where installing PyTorch is impractical.
+
+| Model | Size | Notes |
+|-------|------|-------|
+| Original `.safetensors` | 380 MB | Full PyTorch pipeline |
+| FP32 ONNX | 275.7 MB | No PyTorch at runtime |
+| **INT8 ONNX** | **70.8 MB** | 3.9x smaller, ARM NEON speedup on Pi |
+
+### Quick Start
+
+**Step 1 — Export to ONNX** (run once on your main machine):
+```bash
+pip install -r requirements-export.txt
+
+python quantize/export_onnx.py \
+    --checkpoint CorridorKeyModule/checkpoints/CorridorKey_v1.0.safetensors \
+    --output models/corridorkey_fp32.onnx \
+    --img-size 512
+```
+
+**Step 2 — Calibrate to INT8** (needs 100–200 green screen frames in `calibration_frames/`):
+```bash
+python quantize/calibrate_int8.py \
+    --fp32-model models/corridorkey_fp32.onnx \
+    --int8-model models/corridorkey_int8.onnx \
+    --frames-dir calibration_frames/
+```
+
+**Step 3 — Run on Pi / edge device** (only 5 lightweight packages needed):
+```bash
+pip install -r requirements-edge.txt   # no PyTorch!
+
+# Single image
+python camera/infer_pi.py \
+    --model models/corridorkey_int8.onnx \
+    --image frame.jpg \
+    --output result.png
+
+# Live camera
+python camera/camera_capture.py \
+    --model models/corridorkey_int8.onnx \
+    --camera 0
+```
+
+> **No green screen hint needed** — the camera scripts auto-generate the hint mask using fast HSV chroma-keying, so no GVM or BiRefNet step is required on the edge device.
+
+For the full pipeline walkthrough, benchmark numbers, and Raspberry Pi setup instructions, see **[EDGE_DEPLOY.md](EDGE_DEPLOY.md)**.
+
+---
+
 ## Advanced Usage
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.
@@ -385,6 +437,7 @@ Please keep the Corridor Key name in any future forks or releases!
 
 ## Community Extensions
 * [CorridorKeyOpenVINO](https://github.com/daniil-lyakhov/CorridorKeyOpenVINO) - Run the CorridorKey model quickly on Intel hardware with the OpenVINO inference framework.
+* [Edge / INT8 Quantization](https://github.com/nikopueringer/CorridorKey/pull/250) - Deploy CorridorKey on Raspberry Pi and low-power devices via INT8 ONNX quantization (3.9x smaller, no PyTorch at runtime).
 
 ## Acknowledgements and Licensing
 
