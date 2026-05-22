@@ -311,6 +311,6 @@ class TestPreservationLinearEXRInference:
             )
 
             # input_is_linear should be True
-            assert captured_args["input_is_linear"] is True, (
-                f"process_frame received input_is_linear={captured_args['input_is_linear']}, expected True"
-            )
+            assert (
+                captured_args["input_is_linear"] is True
+            ), f"process_frame received input_is_linear={captured_args['input_is_linear']}, expected True"

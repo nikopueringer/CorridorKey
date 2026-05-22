@@ -30,7 +30,9 @@ def _power(x: np.ndarray | torch.Tensor, exponent: float) -> np.ndarray | torch.
 
 
 def _where(
-    condition: np.ndarray | torch.Tensor, x: np.ndarray | torch.Tensor, y: np.ndarray | torch.Tensor
+    condition: np.ndarray | torch.Tensor,
+    x: np.ndarray | torch.Tensor,
+    y: np.ndarray | torch.Tensor,
 ) -> np.ndarray | torch.Tensor:
     """
     Where function that supports both Numpy arrays and PyTorch tensors.
@@ -92,7 +94,9 @@ def unpremultiply(
 
 
 def composite_straight(
-    fg: np.ndarray | torch.Tensor, bg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor
+    fg: np.ndarray | torch.Tensor,
+    bg: np.ndarray | torch.Tensor,
+    alpha: np.ndarray | torch.Tensor,
 ) -> np.ndarray | torch.Tensor:
     """
     Composites Straight FG over BG.
@@ -102,7 +106,9 @@ def composite_straight(
 
 
 def composite_premul(
-    fg: np.ndarray | torch.Tensor, bg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor
+    fg: np.ndarray | torch.Tensor,
+    bg: np.ndarray | torch.Tensor,
+    alpha: np.ndarray | torch.Tensor,
 ) -> np.ndarray | torch.Tensor:
     """
     Composites Premultiplied FG over BG.
@@ -403,7 +409,10 @@ def connected_components(mask: torch.Tensor, min_component_distance=1, max_itera
 
     for _ in range(max_iterations):
         comp[mask == 1] = F.max_pool2d(
-            comp, kernel_size=(2 * min_component_distance) + 1, stride=1, padding=min_component_distance
+            comp,
+            kernel_size=(2 * min_component_distance) + 1,
+            stride=1,
+            padding=min_component_distance,
         )[mask == 1]
 
     comp = comp.long()
@@ -420,7 +429,10 @@ def connected_components(mask: torch.Tensor, min_component_distance=1, max_itera
 
 
 def clean_matte_opencv(
-    alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5
+    alpha_np: np.ndarray,
+    area_threshold: int = 300,
+    dilation: int = 15,
+    blur_size: int = 5,
 ) -> np.ndarray:
     """
     Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
@@ -506,7 +518,11 @@ def clean_matte_torch(alpha: torch.Tensor, area_threshold: int, dilation: int = 
 
 
 def create_checkerboard(
-    width: int, height: int, checker_size: int = 64, color1: float = 0.2, color2: float = 0.4
+    width: int,
+    height: int,
+    checker_size: int = 64,
+    color1: float = 0.2,
+    color2: float = 0.4,
 ) -> np.ndarray:
     """
     Creates a linear grayscale checkerboard pattern.

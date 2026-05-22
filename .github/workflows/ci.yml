@@ -33,10 +33,13 @@ jobs:
         run: uv sync --group dev
 
       - name: Check formatting
-        run: uv run ruff format --check
+        run: uv run black --check .
 
-      - name: Check lint
+      - name: Check lint with Ruff
         run: uv run ruff check
+
+      - name: Check lint with Flake8
+        run: uv run flake8
 
   test:
     strategy:

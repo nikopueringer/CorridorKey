@@ -41,7 +41,8 @@ def generate_test_images(img_path, mask_path):
                 f"./Output/foreground_{img_size}_{str(precision)[-7:]}.png",
             )
             save_image(
-                torch.from_numpy(out["alpha"]).permute(2, 0, 1), f"./Output/alpha_{img_size}_{str(precision)[-7:]}.png"
+                torch.from_numpy(out["alpha"]).permute(2, 0, 1),
+                f"./Output/alpha_{img_size}_{str(precision)[-7:]}.png",
             )
 
             peak_vram = torch.cuda.max_memory_allocated() / (1024**3)
@@ -61,7 +62,12 @@ def compare_implementations(src, comparison, output_dir="./Output"):
             if is_mask:
                 difference = difference[0].unsqueeze(0)
                 difference = torch.cat(
-                    (difference.clamp(-1, 0).abs(), difference.clamp(0, 1), torch.zeros_like(difference)), dim=0
+                    (
+                        difference.clamp(-1, 0).abs(),
+                        difference.clamp(0, 1),
+                        torch.zeros_like(difference),
+                    ),
+                    dim=0,
                 )
                 print(difference.shape)
                 print(difference.min(), difference.max())
@@ -90,7 +96,12 @@ def compare_floating_point_precision(folder, ref="float64"):
             if is_mask:
                 difference = difference[0].unsqueeze(0)
                 difference = torch.cat(
-                    (difference.clamp(-1, 0).abs(), difference.clamp(0, 1), torch.zeros_like(difference)), dim=0
+                    (
+                        difference.clamp(-1, 0).abs(),
+                        difference.clamp(0, 1),
+                        torch.zeros_like(difference),
+                    ),
+                    dim=0,
                 )
             else:
                 difference = difference.abs()
@@ -124,7 +135,12 @@ def compare_img_sizes(folder, ref=1024):
             if is_mask:
                 difference = difference[0].unsqueeze(0)
                 difference = torch.cat(
-                    (difference.clamp(-1, 0).abs(), difference.clamp(0, 1), torch.zeros_like(difference)), dim=0
+                    (
+                        difference.clamp(-1, 0).abs(),
+                        difference.clamp(0, 1),
+                        torch.zeros_like(difference),
+                    ),
+                    dim=0,
                 )
             else:
                 difference = difference.abs()

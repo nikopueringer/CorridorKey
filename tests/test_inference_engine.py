@@ -156,11 +156,17 @@ class TestProcessFrameColorSpace:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                input_is_linear=False,
+                post_process_on_gpu=backend == "torch",
             )[0]
         else:
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, input_is_linear=False, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                input_is_linear=False,
+                post_process_on_gpu=backend == "torch",
             )
 
         np.testing.assert_allclose(result["comp"], 0.545655, atol=1e-4)
@@ -174,11 +180,17 @@ class TestProcessFrameColorSpace:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                input_is_linear=True,
+                post_process_on_gpu=backend == "torch",
             )[0]
         else:
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, input_is_linear=True, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                input_is_linear=True,
+                post_process_on_gpu=backend == "torch",
             )
         assert result["comp"].shape == sample_frame_rgb.shape[1:] if batched else sample_frame_rgb.shape
 
@@ -250,17 +262,29 @@ class TestProcessFramePostProcessing:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
             result_no_despill = engine.process_frame(
-                sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=0.0,
+                post_process_on_gpu=backend == "torch",
             )[0]
             result_full_despill = engine.process_frame(
-                sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                post_process_on_gpu=backend == "torch",
             )[0]
         else:
             result_no_despill = engine.process_frame(
-                sample_frame_rgb, sample_mask, despill_strength=0.0, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=0.0,
+                post_process_on_gpu=backend == "torch",
             )
             result_full_despill = engine.process_frame(
-                sample_frame_rgb, sample_mask, despill_strength=1.0, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                despill_strength=1.0,
+                post_process_on_gpu=backend == "torch",
             )
 
         rgb_none = result_no_despill["processed"][:, :, :3]
@@ -272,9 +296,9 @@ class TestProcessFramePostProcessing:
         assert rgb_full.min() >= 0.0
 
         # Green channel must be reduced by despill (spill_amount > 0 is guaranteed by construction)
-        assert rgb_full[:, :, 1].mean() < rgb_none[:, :, 1].mean(), (
-            "despill_strength=1.0 should reduce the green channel relative to strength=0.0 when G > (R+B)/2"
-        )
+        assert (
+            rgb_full[:, :, 1].mean() < rgb_none[:, :, 1].mean()
+        ), "despill_strength=1.0 should reduce the green channel relative to strength=0.0 when G > (R+B)/2"
 
     @pytest.mark.parametrize("backend", ["openCV", "torch"])
     @pytest.mark.parametrize("batched", [True, False])
@@ -358,12 +382,18 @@ class TestProcessFramePostProcessing:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                auto_despeckle=False,
+                post_process_on_gpu=backend == "torch",
             )[0]
             sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
         else:
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, auto_despeckle=False, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                auto_despeckle=False,
+                post_process_on_gpu=backend == "torch",
             )
         assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
 
@@ -427,12 +457,18 @@ class TestProcessFramePostProcessing:
             sample_frame_rgb = np.stack([sample_frame_rgb] * 2, axis=0)
             sample_mask = np.stack([sample_mask] * 2, axis=0)
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                refiner_scale=0.5,
+                post_process_on_gpu=backend == "torch",
             )[0]
             sample_frame_rgb = sample_frame_rgb[0]  # for the shape assertion below
         else:
             result = engine.process_frame(
-                sample_frame_rgb, sample_mask, refiner_scale=0.5, post_process_on_gpu=backend == "torch"
+                sample_frame_rgb,
+                sample_mask,
+                refiner_scale=0.5,
+                post_process_on_gpu=backend == "torch",
             )
         assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
 
@@ -528,7 +564,10 @@ class TestLoadModelFormatDispatch:
 
         self._patch_greenformer(monkeypatch)
         # torch.load must NOT be called when the checkpoint is safetensors.
-        with mock.patch("torch.load", side_effect=AssertionError("torch.load called for .safetensors")):
+        with mock.patch(
+            "torch.load",
+            side_effect=AssertionError("torch.load called for .safetensors"),
+        ):
             engine = object.__new__(CorridorKeyEngine)
             engine.device = torch.device("cpu")
             engine.img_size = 64

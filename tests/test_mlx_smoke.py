@@ -32,7 +32,11 @@ def test_mlx_smoke_2048(mlx_engine):
     assert result["alpha"].shape == (h, w, 1), f"alpha shape: {result['alpha'].shape}"
     assert result["fg"].shape == (h, w, 3), f"fg shape: {result['fg'].shape}"
     assert result["comp"].shape == (h, w, 3), f"comp shape: {result['comp'].shape}"
-    assert result["processed"].shape == (h, w, 4), f"processed shape: {result['processed'].shape}"
+    assert result["processed"].shape == (
+        h,
+        w,
+        4,
+    ), f"processed shape: {result['processed'].shape}"
 
     # Dtypes
     for key in ("alpha", "fg", "comp", "processed"):

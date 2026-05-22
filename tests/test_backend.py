@@ -260,7 +260,10 @@ class TestDiscoverCheckpoint:
                 "huggingface_hub.hf_hub_download",
                 side_effect=ConnectionError("connection refused"),
             ) as mock_dl:
-                with pytest.raises(RuntimeError, match=r"huggingface\.co/nikopueringer/CorridorKey_v1\.0"):
+                with pytest.raises(
+                    RuntimeError,
+                    match=r"huggingface\.co/nikopueringer/CorridorKey_v1\.0",
+                ):
                     _ensure_torch_checkpoint()
                 mock_dl.assert_called_once()
 
@@ -386,33 +389,63 @@ class TestWrapMlxOutput:
         }
 
     def test_output_keys(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=True, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=1.0,
+            auto_despeckle=True,
+            despeckle_size=400,
+        )
         assert set(result.keys()) == {"alpha", "fg", "comp", "processed"}
 
     def test_alpha_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=1.0,
+            auto_despeckle=False,
+            despeckle_size=400,
+        )
         assert result["alpha"].shape == (64, 64, 1)
         assert result["alpha"].dtype == np.float32
         assert result["alpha"].min() >= 0.0
         assert result["alpha"].max() <= 1.0
 
     def test_fg_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=0.0, auto_despeckle=False, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=0.0,
+            auto_despeckle=False,
+            despeckle_size=400,
+        )
         assert result["fg"].shape == (64, 64, 3)
         assert result["fg"].dtype == np.float32
 
     def test_processed_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=1.0,
+            auto_despeckle=False,
+            despeckle_size=400,
+        )
         assert result["processed"].shape == (64, 64, 4)
         assert result["processed"].dtype == np.float32
 
     def test_comp_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=1.0,
+            auto_despeckle=False,
+            despeckle_size=400,
+        )
         assert result["comp"].shape == (64, 64, 3)
         assert result["comp"].dtype == np.float32
 
     def test_value_ranges(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
+        result = _wrap_mlx_output(
+            mlx_raw_output,
+            despill_strength=1.0,
+            auto_despeckle=False,
+            despeckle_size=400,
+        )
         # alpha and fg come from uint8 / 255 so strictly 0-1
         for key in ("alpha", "fg"):
             assert result[key].min() >= 0.0, f"{key} has negative values"

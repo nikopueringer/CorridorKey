@@ -312,7 +312,16 @@ class TestNonInteractiveFlags:
         mock_scan.return_value = []
         result = runner.invoke(
             app,
-            ["run-inference", "--skip-existing", "--srgb", "--despill", "5", "--despeckle", "--refiner", "1.0"],
+            [
+                "run-inference",
+                "--skip-existing",
+                "--srgb",
+                "--despill",
+                "5",
+                "--despeckle",
+                "--refiner",
+                "1.0",
+            ],
         )
         assert result.exit_code == 0
         mock_run.assert_called_once()
