@@ -158,8 +158,7 @@ def read_video_mask_at(
 ) -> np.ndarray | None:
     """Read a single mask frame from a video by index, as float32 [H, W] [0, 1].
 
-    Extracts the blue channel (index 2) from BGR, matching the convention
-    used by alpha-channel video masks.
+    Converts BGR to grayscale, matching how image masks are normalized.
 
     Args:
         video_path: Path to video file.
@@ -177,6 +176,6 @@ def read_video_mask_at(
         ret, frame = cap.read()
         if not ret:
             return None
-        return frame[:, :, 2].astype(np.float32) / 255.0
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
     finally:
         cap.release()

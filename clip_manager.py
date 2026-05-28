@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import glob
 import logging
 import os
@@ -16,12 +15,14 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import numpy as np
 
+from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
 from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
 from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
     from gvm_core import GVMProcessor
+from backend.natural_sort import natsorted
 from BiRefNetModule.wrapper import BiRefNetHandler, usage_to_weights_file
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ class ClipAsset:
 
     def _calculate_length(self) -> None:
         if self.type == "sequence":
-            files = sorted([f for f in os.listdir(self.path) if is_image_file(f)])
+            files = natsorted([f for f in os.listdir(self.path) if is_image_file(f)])
             self.frame_count = len(files)
         elif self.type == "video":
             cap = cv2.VideoCapture(self.path)
@@ -264,14 +265,14 @@ def generate_alphas(
             )
 
             # Post-Process: Naming Convention
-            generated_files = sorted([f for f in os.listdir(alpha_output_dir) if f.endswith(".png")])
+            generated_files = natsorted([f for f in os.listdir(alpha_output_dir) if f.endswith(".png")])
 
             if not generated_files:
                 logger.error(f"GVM finished but no PNGs found in {alpha_output_dir}")
                 continue
 
             if clip.input_asset.type == "sequence":
-                in_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+                in_files = natsorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
                 stems = [os.path.splitext(f)[0] for f in in_files]
             else:
                 base_name = os.path.splitext(os.path.basename(clip.input_asset.path))[0]
@@ -292,11 +293,8 @@ def generate_alphas(
 
             logger.info(f"Saved {len(generated_files)} alpha frames to {alpha_output_dir}")
 
-        except Exception as e:
-            logger.error(f"Error generating alpha for {clip.name}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception:
+            logger.exception(f"Error generating alpha for {clip.name}")
 
 
 def get_birefnet_usage_options():
@@ -351,11 +349,8 @@ def run_birefnet(
                     on_frame_complete=on_frame_complete,
                 )
                 logger.info(f"BiRefNet complete for {clip.name}")
-            except Exception as e:
-                logger.error(f"BiRefNet failed for {clip.name}: {e}")
-                import traceback
-
-                traceback.print_exc()
+            except Exception:
+                logger.exception(f"BiRefNet failed for {clip.name}")
 
     finally:
         handler.cleanup()
@@ -464,7 +459,7 @@ def run_videomama(
                 input_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             cap.release()
         else:
-            files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+            files = natsorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
             for f in files:
                 fpath = os.path.join(clip.input_asset.path, f)
                 # Handle EXR (Float 0-1) vs Standard (Int 0-255)
@@ -494,7 +489,7 @@ def run_videomama(
         # Check if VideoMamaMaskHint is a directory or a file (video)
         if os.path.isdir(mask_hint_path):
             # Directory of Images
-            mask_files = sorted([f for f in os.listdir(mask_hint_path) if is_image_file(f)])
+            mask_files = natsorted([f for f in os.listdir(mask_hint_path) if is_image_file(f)])
             for f in mask_files:
                 fpath = os.path.join(mask_hint_path, f)
                 m = None
@@ -566,9 +561,10 @@ def run_videomama(
 
             # Name setup
             if clip.input_asset.type == "sequence":
-                in_names = sorted(
-                    [os.path.splitext(f)[0] for f in os.listdir(clip.input_asset.path) if is_image_file(f)]
-                )
+                in_names = [
+                    os.path.splitext(f)[0]
+                    for f in natsorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+                ]
             else:
                 stem = os.path.splitext(os.path.basename(clip.input_asset.path))[0]
                 in_names = [f"{stem}_{i:05d}" for i in range(num_frames)]
@@ -598,11 +594,8 @@ def run_videomama(
             # Update clip state in memory (dummy) - re-scan will pick it up properly
             clip.alpha_asset = ClipAsset(alpha_output_dir, "sequence")
 
-        except Exception as e:
-            logger.error(f"VideoMaMa failed for {clip.name}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception:
+            logger.exception(f"VideoMaMa failed for {clip.name}")
 
 
 def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
@@ -738,8 +731,6 @@ def run_inference(
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    import numpy as np
-
     if device is None:
         device = resolve_device()
     from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
@@ -811,12 +802,12 @@ def run_inference(
         if clip.input_asset.type == "video":
             input_cap = cv2.VideoCapture(clip.input_asset.path)
         else:
-            input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
+            input_files = natsorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
 
         if clip.alpha_asset.type == "video":
             alpha_cap = cv2.VideoCapture(clip.alpha_asset.path)
         else:
-            alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
+            alpha_files = natsorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
 
         if on_clip_start:
             on_clip_start(clip.name, num_frames)
@@ -874,7 +865,7 @@ def run_inference(
                 ret, frame = alpha_cap.read()
                 if not ret:
                     break
-                mask_linear = frame[:, :, 2].astype(np.float32) / 255.0
+                mask_linear = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
             else:
                 fpath = os.path.join(clip.alpha_asset.path, alpha_files[i])
                 mask_in = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
@@ -966,39 +957,34 @@ def run_inference(
 
         # 7. Stitch comp frames into MP4 (if input was video)
         if clip.input_asset and clip.input_asset.type == "video":
-            try:
-                from backend.ffmpeg_tools import find_ffmpeg, probe_video, stitch_video
+            if find_ffmpeg():
+                # Get source fps
+                try:
+                    video_info = probe_video(clip.input_asset.path)
+                    fps = video_info.get("fps", 24.0)
+                except Exception:
+                    fps = 24.0
 
-                if find_ffmpeg():
-                    # Get source fps
-                    try:
-                        video_info = probe_video(clip.input_asset.path)
-                        fps = video_info.get("fps", 24.0)
-                    except Exception:
-                        fps = 24.0
+                comp_video_path = os.path.join(clip_out_root, f"{clip.name}_comp.mp4")
 
-                    comp_video_path = os.path.join(clip_out_root, f"{clip.name}_comp.mp4")
-
-                    # Detect frame pattern from saved files
-                    comp_files = sorted(f for f in os.listdir(comp_dir) if f.endswith(".png"))
-                    if comp_files:
-                        # Frames are named {input_stem}.png — e.g. 00000.png
-                        # Build ffmpeg pattern from first file
-                        first = comp_files[0]
-                        stem = os.path.splitext(first)[0]
-                        if stem.isdigit():
-                            pattern = f"%0{len(stem)}d.png"
-                        else:
-                            pattern = "frame_%06d.png"
-
-                        logger.info(f"Stitching comp video: {comp_dir} -> {comp_video_path} @ {fps} fps")
-                        stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
+                # Detect frame pattern from saved files
+                comp_files = natsorted(f for f in os.listdir(comp_dir) if f.endswith(".png"))
+                if comp_files:
+                    # Frames are named {input_stem}.png — e.g. 00000.png
+                    # Build ffmpeg pattern from first file
+                    first = comp_files[0]
+                    stem = os.path.splitext(first)[0]
+                    if stem.isdigit():
+                        pattern = f"%0{len(stem)}d.png"
                     else:
-                        logger.warning(f"No comp frames found in {comp_dir}, skipping video stitch.")
+                        pattern = "frame_%06d.png"
+
+                    logger.info(f"Stitching comp video: {comp_dir} -> {comp_video_path} @ {fps} fps")
+                    stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
                 else:
-                    logger.info("ffmpeg not found — skipping comp video stitch.")
-            except Exception as e:
-                logger.warning(f"Comp video stitch failed (non-fatal): {e}")
+                    logger.warning(f"No comp frames found in {comp_dir}, skipping video stitch.")
+            else:
+                logger.info("ffmpeg not found — skipping comp video stitch.")
 
         logger.info(f"Clip {clip.name} Complete.")
 
@@ -1143,46 +1129,3 @@ def scan_clips() -> list[ClipEntry]:
         logger.info("All clip folders appear valid.")
 
     return valid_clips
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
-    parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
-    parser.add_argument(
-        "--device",
-        choices=["auto", "cuda", "mps", "cpu"],
-        default="auto",
-        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["auto", "torch", "mlx"],
-        default="auto",
-        help="Inference backend (default: auto-detect MLX on Apple Silicon, else Torch)",
-    )
-    parser.add_argument(
-        "--max-frames",
-        type=int,
-        default=None,
-        help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
-    )
-
-    args = parser.parse_args()
-
-    device = resolve_device(args.device)
-    logger.info(f"Using device: {device}")
-
-    if args.action == "list":
-        scan_clips()
-    elif args.action == "generate_alphas":
-        clips = scan_clips()
-        generate_alphas(clips, device=device)
-    elif args.action == "run_inference":
-        clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
-    elif args.action == "wizard":
-        if not args.win_path:
-            print("Error: --win_path required for wizard.")
-        else:
-            raise NotImplementedError("interactive_wizard is not yet implemented")

@@ -71,7 +71,6 @@ def resolve_backend(requested: str | None = None) -> str:
     return backend
 
 
-CHECKPOINT_DIR = os.path.join("CorridorKeyModule", "checkpoints")
 MLX_MODEL_URL = "https://github.com/nikopueringer/corridorkey-mlx/releases/download/v1.0.0/corridorkey_mlx.safetensors"
 MLX_MODEL_FILENAME = "corridorkey_mlx.safetensors"
 
@@ -88,7 +87,6 @@ def _auto_detect_backend() -> str:
         logger.info("corridorkey_mlx not installed — using torch backend")
         return "torch"
 
-        # Auto-download logic for the .safetensors file
     model_path = os.path.join(CHECKPOINT_DIR, MLX_MODEL_FILENAME)
     cache_path = model_path + ".tmp"
 
@@ -111,8 +109,8 @@ def _auto_detect_backend() -> str:
             logger.info("Falling back to torch backend due to download failure.")
 
             # Clean up corrupted/partial file if the download failed midway
-            if os.path.exists(model_path):
-                os.remove(model_path)
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
 
             return "torch"
 
