@@ -1,0 +1,19 @@
+# Export + quantization requirements (run on your main machine, not the edge device)
+# Install with: pip install -r requirements-export.txt
+#
+# Then download the CorridorKey checkpoint from HuggingFace before running export_onnx.py:
+#   pip install huggingface_hub
+#   python -c "from huggingface_hub import hf_hub_download; hf_hub_download('nikopueringer/CorridorKey_v1.0', 'CorridorKey_v1.0.safetensors', local_dir='models')"
+
+torch>=2.0
+torchvision
+# timm — must use the CorridorKey fork (FlashAttention fix for Hiera):
+#   pip install git+https://github.com/Raiden129/pytorch-image-models-fix@fix/hiera-flash-attention-global-4d
+safetensors
+onnx>=1.14
+onnxsim              # optional: graph simplification
+sympy                # required by onnxruntime.quantization
+onnxruntime>=1.18
+opencv-python>=4
+Pillow>=10
+numpy>=1.24
