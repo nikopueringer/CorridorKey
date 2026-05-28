@@ -23,12 +23,17 @@ if current_dir not in sys.path:
 
 from .pipeline import VideoInferencePipeline
 
-def load_videomama_model(base_model_path: Optional[str] = None, unet_checkpoint_path: Optional[str] = None, device: str = "cpu") -> VideoInferencePipeline:
+
+def load_videomama_model(
+    base_model_path: Optional[str] = None,
+    unet_checkpoint_path: Optional[str] = None,
+    device: str = "cpu",
+) -> VideoInferencePipeline:
     """
     Load VideoMaMa pipeline with pretrained weights.
 
     Args:
-        base_model_path (str, optional): Path to the base Stable Video Diffusion model. 
+        base_model_path (str, optional): Path to the base Stable Video Diffusion model.
                                          Defaults to 'checkpoints/stable-video-diffusion-img2vid-xt' in module dir.
         unet_checkpoint_path (str, optional): Path to the fine-tuned UNet checkpoint.
                                               Defaults to 'checkpoints/VideoMaMa' in module dir.
@@ -39,31 +44,38 @@ def load_videomama_model(base_model_path: Optional[str] = None, unet_checkpoint_
     """
     # Default to local checkpoints if not provided
     if base_model_path is None:
-        base_model_path = os.path.join(current_dir, "checkpoints", "stable-video-diffusion-img2vid-xt")
-    
+        base_model_path = os.path.join(
+            current_dir, "checkpoints", "stable-video-diffusion-img2vid-xt"
+        )
+
     if unet_checkpoint_path is None:
         unet_checkpoint_path = os.path.join(current_dir, "checkpoints", "VideoMaMa")
 
     print(f"Loading Base model from {base_model_path}...")
     print(f"Loading VideoMaMa UNet from {unet_checkpoint_path}...")
-    
+
     # Check if paths exist
     if not os.path.exists(base_model_path):
         raise FileNotFoundError(f"Base model path not found: {base_model_path}")
     if not os.path.exists(unet_checkpoint_path):
-        raise FileNotFoundError(f"UNet checkpoint path not found: {unet_checkpoint_path}")
+        raise FileNotFoundError(
+            f"UNet checkpoint path not found: {unet_checkpoint_path}"
+        )
 
     pipeline = VideoInferencePipeline(
         base_model_path=base_model_path,
         unet_checkpoint_path=unet_checkpoint_path,
-        weight_dtype=torch.float16, # Use float16 for inference by default
-        device=device
+        weight_dtype=torch.float16,  # Use float16 for inference by default
+        device=device,
     )
-    
+
     print("VideoMaMa pipeline loaded successfully!")
     return pipeline
 
-def extract_frames_from_video(video_path: str, max_frames: Optional[int] = None) -> tuple[List[np.ndarray], float]:
+
+def extract_frames_from_video(
+    video_path: str, max_frames: Optional[int] = None
+) -> tuple[List[np.ndarray], float]:
     """
     Extract frames from video file.
 
@@ -79,7 +91,7 @@ def extract_frames_from_video(video_path: str, max_frames: Optional[int] = None)
 
     cap = cv2.VideoCapture(video_path)
     original_fps = cap.get(cv2.CAP_PROP_FPS)
-    
+
     all_frames = []
     while cap.isOpened():
         ret, frame = cap.read()
@@ -88,21 +100,22 @@ def extract_frames_from_video(video_path: str, max_frames: Optional[int] = None)
         # Convert BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         all_frames.append(frame_rgb)
-    
+
     cap.release()
-    
+
     if max_frames and len(all_frames) > max_frames:
         frames = all_frames[:max_frames]
     else:
         frames = all_frames
-    
+
     return frames, original_fps
+
 
 def run_inference(
     pipeline: VideoInferencePipeline,
     input_frames: List[np.ndarray],
     mask_frames: List[np.ndarray],
-    chunk_size: int = 24  # Adjusted default chunk size
+    chunk_size: int = 24,  # Adjusted default chunk size
 ) -> List[np.ndarray]:
     """
     Run VideoMaMa inference on video frames with mask conditioning.
@@ -121,59 +134,69 @@ def run_inference(
         # For strict correctness, we'll raise an error or warn.
         # But let's assume the user provides matching lengths or we might need to handle it.
         # Here we just raise for clarity.
-        raise ValueError(f"Input frames ({len(input_frames)}) and mask frames ({len(mask_frames)}) must have same length.")
+        raise ValueError(
+            f"Input frames ({len(input_frames)}) and mask frames ({len(mask_frames)}) must have same length."
+        )
 
     # Convert numpy arrays to PIL Images
     frames_pil = [Image.fromarray(f) for f in input_frames]
-    
+
     # Handle mask frames - ensure they are PIL "L" mode
     mask_frames_pil = []
     for m in mask_frames:
         if m.ndim == 3:
             # If RGB/BGR mask, convert to grayscale
             m = cv2.cvtColor(m, cv2.COLOR_RGB2GRAY)
-        mask_frames_pil.append(Image.fromarray(m, mode='L'))
-    
+        mask_frames_pil.append(Image.fromarray(m, mode="L"))
+
     # Resize to model input size (1024x576 is standard for SVD)
     target_width, target_height = 1024, 576
-    frames_resized = [f.resize((target_width, target_height), Image.Resampling.BILINEAR) 
-                     for f in frames_pil]
-    masks_resized = [m.resize((target_width, target_height), Image.Resampling.BILINEAR) 
-                    for m in mask_frames_pil]
-    
+    frames_resized = [
+        f.resize((target_width, target_height), Image.Resampling.BILINEAR)
+        for f in frames_pil
+    ]
+    masks_resized = [
+        m.resize((target_width, target_height), Image.Resampling.BILINEAR)
+        for m in mask_frames_pil
+    ]
+
     print(f"Processing {len(frames_resized)} frames in chunks of {chunk_size}...")
-    
+
     # Store original size for resizing back
     if not frames_pil:
         return []
-        
+
     original_size = frames_pil[0].size
-    
+
     for i in range(0, len(frames_resized), chunk_size):
-        chunk_frames = frames_resized[i:i + chunk_size]
-        chunk_masks = masks_resized[i:i + chunk_size]
-        
-        print(f"  Running inference on chunk {i//chunk_size + 1}/{len(frames_resized)//chunk_size + 1} ({len(chunk_frames)} frames)...")
-        
+        chunk_frames = frames_resized[i : i + chunk_size]
+        chunk_masks = masks_resized[i : i + chunk_size]
+
+        print(
+            f"  Running inference on chunk {i//chunk_size + 1}/{len(frames_resized)//chunk_size + 1} ({len(chunk_frames)} frames)..."
+        )
+
         # Clear cache before each chunk
         if pipeline.device.type == "cuda":
             torch.cuda.empty_cache()
-        
+
         chunk_output = pipeline.run(
             cond_frames=chunk_frames,
             mask_frames=chunk_masks,
-            seed=42, # Fixed seed for reproducibility
-            mask_cond_mode="vae"
+            seed=42,  # Fixed seed for reproducibility
+            mask_cond_mode="vae",
         )
-        
+
         # Resize back to original resolution immediately
-        chunk_output_resized = [f.resize(original_size, Image.Resampling.BILINEAR) 
-                                for f in chunk_output]
-        
+        chunk_output_resized = [
+            f.resize(original_size, Image.Resampling.BILINEAR) for f in chunk_output
+        ]
+
         # Convert back to numpy arrays
         chunk_output_np = [np.array(f) for f in chunk_output_resized]
-        
+
         yield chunk_output_np
+
 
 def save_video(frames: List[np.ndarray], output_path: str, fps: float):
     """
@@ -186,16 +209,15 @@ def save_video(frames: List[np.ndarray], output_path: str, fps: float):
     """
     if not frames:
         return
-    
+
     height, width = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    
+
     for frame in frames:
         # Convert RGB to BGR for OpenCV
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         out.write(frame_bgr)
-    
+
     out.release()
     print(f"Saved video to {output_path}")
-

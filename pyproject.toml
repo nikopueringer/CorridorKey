@@ -62,7 +62,7 @@ rocm = [
 # honoured locally. CI sets OPENCV_IO_ENABLE_OPENEXR via the workflow env, but
 # without this plugin pytest emits "Unknown config option: env" and any test
 # that calls cv2.imread/imwrite on .exr before clip_manager imports fails.
-dev = ["pytest", "pytest-cov", "pytest-env", "ruff", "hypothesis"]
+dev = ["pytest", "pytest-cov", "pytest-env", "ruff", "black>=26.5.1", "flake8-pyproject>=1.2.4", "hypothesis"]
 docs = ["zensical>=0.0.24"]
 
 [project.scripts]
@@ -85,6 +85,45 @@ select = ["E", "F", "W", "I", "B"]
 
 [tool.ruff.format]
 # Third-party code excluded via top-level exclude
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312", "py313"]
+extend-exclude = '''
+(
+  ^/gvm_core/
+  | ^/VideoMaMaInferenceModule/
+)
+'''
+
+[tool.flake8]
+max-line-length = 120
+extend-exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "ClipsForInference",
+    "IgnoredClips",
+    "Output",
+    "gvm_core",
+    "site",
+    "uv-cache",
+    "VideoMaMaInferenceModule",
+]
+extend-ignore = [
+    # Black intentionally formats slices in a way pycodestyle flags as E203.
+    "E203",
+    # Black's line wrapping is not compatible with W503.
+    "W503",
+]
+per-file-ignores = [
+    # Public package re-export.
+    "CorridorKeyModule/__init__.py:F401",
+    # These modules must set OPENCV_IO_ENABLE_OPENEXR before importing cv2.
+    "backend/service.py:E402",
+    "clip_manager.py:E402",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

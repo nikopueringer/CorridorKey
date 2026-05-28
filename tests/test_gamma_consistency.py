@@ -57,9 +57,9 @@ class TestGammaInconsistency:
         gamma_22 = float(linear_val ** (1.0 / 2.2))
 
         # They should NOT be equal
-        assert piecewise_srgb != pytest.approx(gamma_22, abs=1e-4), (
-            "Piecewise sRGB and gamma 2.2 now match — has the inconsistency been fixed? If so, remove this test."
-        )
+        assert piecewise_srgb != pytest.approx(
+            gamma_22, abs=1e-4
+        ), "Piecewise sRGB and gamma 2.2 now match — has the inconsistency been fixed? If so, remove this test."
 
     def test_srgb_to_linear_differs_from_gamma_22(self):
         """Inverse direction: srgb_to_linear vs x**2.2."""

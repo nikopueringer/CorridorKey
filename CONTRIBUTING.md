@@ -20,7 +20,7 @@ By submitting a Pull Request, you specifically acknowledge and agree to the term
 ```bash
 git clone https://github.com/nikopueringer/CorridorKey.git
 cd CorridorKey
-uv sync --group dev    # installs all dependencies + dev tools (pytest, ruff)
+uv sync --group dev    # installs all dependencies + dev tools (pytest, black, flake8, ruff)
 ```
 
 That's it. No manual virtualenv creation, no `pip install` — uv handles everything.
@@ -62,12 +62,13 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 ### Linting and Formatting
 
 ```bash
-uv run ruff check          # check for lint errors
-uv run ruff format --check # check formatting (no changes)
-uv run ruff format         # auto-format your code
+uv run black --check .     # check formatting (no changes)
+uv run black .             # auto-format your code
+uv run flake8              # check pycodestyle/pyflakes lint errors
+uv run ruff check          # check Ruff lint rules
 ```
 
-CI runs both checks on every pull request. Running them locally before pushing saves a round-trip.
+CI runs these checks on every pull request. Running them locally before pushing saves a round-trip.
 
 ## Making Changes
 
@@ -75,7 +76,7 @@ CI runs both checks on every pull request. Running them locally before pushing s
 
 1. Fork the repo and create a branch for your change
 2. Make your changes
-3. Run `uv run pytest` and `uv run ruff check` to make sure everything passes
+3. Run `uv run pytest`, `uv run black --check .`, `uv run flake8`, and `uv run ruff check` to make sure everything passes
 4. Open a pull request against `main`
 
 In your PR description, focus on **why** you made the change, not just what changed. If you're fixing a bug, describe the symptoms. If you're adding a feature, explain the use case. A couple of sentences is plenty.
@@ -89,7 +90,8 @@ In your PR description, focus on **why** you made the change, not just what chan
 
 ### Code Style
 
-- The project uses [ruff](https://docs.astral.sh/ruff/) for both linting and formatting
+- The project uses [Black](https://black.readthedocs.io/) for formatting
+- The project uses [Flake8](https://flake8.pycqa.org/) and [Ruff](https://docs.astral.sh/ruff/) for linting
 - Lint rules: `E, F, W, I, B` (basic style, unused imports, import sorting, common bug patterns)
 - Line length: 120 characters
 - Third-party code in `gvm_core/` and `VideoMaMaInferenceModule/` is excluded from lint enforcement — those are derived from research repos and we try to keep them close to upstream

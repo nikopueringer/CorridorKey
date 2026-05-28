@@ -113,7 +113,9 @@ class CorridorKeyEngine:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
-            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
+            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
+            img_size=self.img_size,
+            use_refiner=self.use_refiner,
         )
         model = model.to(self.device)
         model.eval()
@@ -157,7 +159,12 @@ class CorridorKeyEngine:
                     v_img = v.permute(0, 2, 1).view(1, C, grid_src, grid_src)
 
                     # Interpolate
-                    v_resized = F.interpolate(v_img, size=(grid_dst, grid_dst), mode="bicubic", align_corners=False)
+                    v_resized = F.interpolate(
+                        v_img,
+                        size=(grid_dst, grid_dst),
+                        mode="bicubic",
+                        align_corners=False,
+                    )
 
                     # Reshape back
                     v = v_resized.flatten(2).transpose(1, 2)
@@ -197,7 +204,12 @@ class CorridorKeyEngine:
             # Trigger compilation with a dummy input (the actual compile
             # happens here, not in the torch.compile() call above)
             dummy_input = torch.zeros(
-                1, 4, self.img_size, self.img_size, dtype=self.model_precision, device=self.device
+                1,
+                4,
+                self.img_size,
+                self.img_size,
+                dtype=self.model_precision,
+                device=self.device,
             )
             with torch.inference_mode():
                 compiled_model(dummy_input)
@@ -214,7 +226,10 @@ class CorridorKeyEngine:
                 torch.cuda.empty_cache()
 
     def _preprocess_input(
-        self, image_batch: torch.Tensor, mask_batch_linear: torch.Tensor, input_is_linear: bool
+        self,
+        image_batch: torch.Tensor,
+        mask_batch_linear: torch.Tensor,
+        input_is_linear: bool,
     ) -> torch.Tensor:
         # 2. Resize to Model Size
         # If input is linear, we resize in linear to preserve energy/highlights,
@@ -276,7 +291,10 @@ class CorridorKeyEngine:
         # B. Despill FG
         # res_fg is sRGB.
         fg_despilled = cu.despill_opencv(
-            res_fg, limit_mode="average", strength=despill_strength, screen_channel=screen_channel
+            res_fg,
+            limit_mode="average",
+            strength=despill_strength,
+            screen_channel=screen_channel,
         )
 
         # C. Premultiply (for EXR Output)
@@ -469,7 +487,11 @@ class CorridorKeyEngine:
 
             handle = self.model.refiner.register_forward_hook(scale_hook)
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=torch.float16,
+            enabled=self.mixed_precision,
+        ):
             prediction = self.model(inp_t)
 
         # Free up unused VRAM in order to keep peak usage down and avoid OOM errors

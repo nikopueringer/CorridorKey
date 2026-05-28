@@ -175,7 +175,11 @@ def _ensure_torch_checkpoint_pth_fallback(screen_color: str = "green") -> Path:
 
     from huggingface_hub import hf_hub_download
 
-    logger.info("Downloading legacy .pth CorridorKey (%s) checkpoint from %s ...", screen_color, hf_url)
+    logger.info(
+        "Downloading legacy .pth CorridorKey (%s) checkpoint from %s ...",
+        screen_color,
+        hf_url,
+    )
 
     try:
         cached_path = hf_hub_download(
@@ -212,7 +216,11 @@ def _ensure_torch_checkpoint(screen_color: str = "green") -> Path:
     from huggingface_hub import hf_hub_download
     from huggingface_hub.utils import EntryNotFoundError
 
-    logger.info("Downloading CorridorKey (%s) checkpoint (.safetensors) from %s ...", screen_color, hf_url)
+    logger.info(
+        "Downloading CorridorKey (%s) checkpoint (.safetensors) from %s ...",
+        screen_color,
+        hf_url,
+    )
 
     try:
         cached_path = hf_hub_download(
@@ -469,7 +477,15 @@ def create_engine(
         ckpt = _discover_checkpoint(TORCH_EXT, screen_color=screen_color)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s, screen=%s)", ckpt.name, device, screen_color)
+        logger.info(
+            "Torch engine loaded: %s (device=%s, screen=%s)",
+            ckpt.name,
+            device,
+            screen_color,
+        )
         return CorridorKeyEngine(
-            checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size, model_precision=torch.float16
+            checkpoint_path=str(ckpt),
+            device=device or "cpu",
+            img_size=img_size,
+            model_precision=torch.float16,
         )

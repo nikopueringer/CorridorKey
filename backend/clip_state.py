@@ -57,7 +57,12 @@ _TRANSITIONS: dict[ClipState, set[ClipState]] = {
     ClipState.MASKED: {ClipState.READY, ClipState.ERROR},
     ClipState.READY: {ClipState.COMPLETE, ClipState.ERROR},
     ClipState.COMPLETE: {ClipState.READY},  # reprocess with different params
-    ClipState.ERROR: {ClipState.RAW, ClipState.MASKED, ClipState.READY, ClipState.EXTRACTING},
+    ClipState.ERROR: {
+        ClipState.RAW,
+        ClipState.MASKED,
+        ClipState.READY,
+        ClipState.EXTRACTING,
+    },
 }
 
 

@@ -31,7 +31,9 @@ import numpy as np
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 
-from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
+from CorridorKeyModule.core.color_utils import (
+    SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES,
+)
 
 from .clip_state import (
     ClipAsset,
@@ -758,7 +760,11 @@ class CorridorKeyService:
                     continue
 
                 if mask.shape[:2] != img.shape[:2]:
-                    mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+                    mask = cv2.resize(
+                        mask,
+                        (img.shape[1], img.shape[0]),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
 
                 try:
                     t_frame = time.monotonic()
@@ -909,7 +915,11 @@ class CorridorKeyService:
                 alpha = cv2.resize(alpha, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
             return img, alpha
         except Exception as exc:
-            logger.warning("Could not peek first frame of '%s' for screen-color detection: %s", clip.name, exc)
+            logger.warning(
+                "Could not peek first frame of '%s' for screen-color detection: %s",
+                clip.name,
+                exc,
+            )
             return None, None
 
     def is_engine_loaded(self) -> bool:

@@ -152,7 +152,10 @@ class TestGetEngineColorCache:
         with (
             mock.patch.object(svc, "_ensure_model"),
             mock.patch.object(svc, "_safe_offload") as off,
-            mock.patch("CorridorKeyModule.backend._discover_checkpoint", return_value="/tmp/blue.safetensors"),
+            mock.patch(
+                "CorridorKeyModule.backend._discover_checkpoint",
+                return_value="/tmp/blue.safetensors",
+            ),
             mock.patch(
                 "CorridorKeyModule.inference_engine.CorridorKeyEngine",
                 return_value=new_engine,

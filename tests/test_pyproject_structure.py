@@ -122,9 +122,11 @@ class TestConflicts:
         extras_in_groups = [
             {entry["extra"] for entry in group} for group in conflicts if all("extra" in entry for entry in group)
         ]
-        assert {"cuda", "mlx", "rocm"} in extras_in_groups, (
-            "Expected a conflict group containing 'cuda', 'mlx', and 'rocm' extras"
-        )
+        assert {
+            "cuda",
+            "mlx",
+            "rocm",
+        } in extras_in_groups, "Expected a conflict group containing 'cuda', 'mlx', and 'rocm' extras"
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +167,16 @@ class TestDevDependencyGroup:
     def test_dev_group_contains_ruff(self, pyproject: dict) -> None:
         dev = pyproject["dependency-groups"]["dev"]
         assert "ruff" in dev
+
+    def test_dev_group_contains_black(self, pyproject: dict) -> None:
+        dev = pyproject["dependency-groups"]["dev"]
+        black_entries = [d for d in dev if d.startswith("black")]
+        assert len(black_entries) == 1
+
+    def test_dev_group_contains_flake8(self, pyproject: dict) -> None:
+        dev = pyproject["dependency-groups"]["dev"]
+        flake8_entries = [d for d in dev if d.startswith("flake8-pyproject")]
+        assert len(flake8_entries) == 1
 
 
 # ---------------------------------------------------------------------------

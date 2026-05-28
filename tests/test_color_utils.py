@@ -442,7 +442,10 @@ class TestEstimateScreenColor:
     def test_rejects_shape_mismatch(self):
         """Image and alpha must agree on H,W."""
         with pytest.raises(ValueError, match="must agree on H,W"):
-            cu.estimate_screen_color(np.zeros((100, 100, 3), dtype=np.float32), np.zeros((50, 50), dtype=np.float32))
+            cu.estimate_screen_color(
+                np.zeros((100, 100, 3), dtype=np.float32),
+                np.zeros((50, 50), dtype=np.float32),
+            )
 
 
 class TestScreenChannelForColor:

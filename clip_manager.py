@@ -17,7 +17,9 @@ import cv2
 import numpy as np
 
 from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
-from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
+from CorridorKeyModule.core.color_utils import (
+    SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES,
+)
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -430,7 +432,9 @@ def run_videomama(
     try:
         sys.path.append(os.path.join(BASE_DIR, "VideoMaMaInferenceModule"))
         from VideoMaMaInferenceModule.inference import load_videomama_model
-        from VideoMaMaInferenceModule.inference import run_inference as run_videomama_frames
+        from VideoMaMaInferenceModule.inference import (
+            run_inference as run_videomama_frames,
+        )
     except ImportError as e:
         logger.error(f"Failed to import VideoMaMa: {e}")
         return
@@ -674,10 +678,18 @@ def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
                 alpha = mask_in.astype(np.float32)
 
         if alpha.shape[:2] != img_srgb.shape[:2]:
-            alpha = cv2.resize(alpha, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+            alpha = cv2.resize(
+                alpha,
+                (img_srgb.shape[1], img_srgb.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
         return img_srgb, alpha
     except Exception as exc:
-        logger.warning("Could not peek first frame of clip '%s' for screen-color detection: %s", clip.name, exc)
+        logger.warning(
+            "Could not peek first frame of clip '%s' for screen-color detection: %s",
+            clip.name,
+            exc,
+        )
         return None, None
 
 
@@ -899,7 +911,9 @@ def run_inference(
 
             if mask_linear.shape[:2] != img_srgb.shape[:2]:
                 mask_linear = cv2.resize(
-                    mask_linear, (img_srgb.shape[1], img_srgb.shape[0]), interpolation=cv2.INTER_LINEAR
+                    mask_linear,
+                    (img_srgb.shape[1], img_srgb.shape[0]),
+                    interpolation=cv2.INTER_LINEAR,
                 )
 
             # 3. Process
@@ -932,13 +946,20 @@ def run_inference(
             if pred_alpha.ndim == 3:
                 pred_alpha = pred_alpha[:, :, 0]
             # Matte is single channel linear float
-            cv2.imwrite(os.path.join(matte_dir, f"{input_stem}.exr"), pred_alpha, EXR_WRITE_FLAGS)
+            cv2.imwrite(
+                os.path.join(matte_dir, f"{input_stem}.exr"),
+                pred_alpha,
+                EXR_WRITE_FLAGS,
+            )
 
             # 5. Generate Reference Comp
             if res["comp"] is not None:
                 comp_srgb = res["comp"]
                 # Save Comp (PNG 8-bit)
-                comp_bgr = cv2.cvtColor((np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                comp_bgr = cv2.cvtColor(
+                    (np.clip(comp_srgb, 0.0, 1.0) * 255.0).astype(np.uint8),
+                    cv2.COLOR_RGB2BGR,
+                )
                 cv2.imwrite(os.path.join(comp_dir, f"{input_stem}.png"), comp_bgr)
 
             # 6. Save Processed (RGBA EXR)
@@ -947,7 +968,11 @@ def run_inference(
                 proc_rgba = res["processed"]
                 # Convert to BGRA for OpenCV
                 proc_bgra = cv2.cvtColor(proc_rgba, cv2.COLOR_RGBA2BGRA)
-                cv2.imwrite(os.path.join(proc_dir, f"{input_stem}.exr"), proc_bgra, EXR_WRITE_FLAGS)
+                cv2.imwrite(
+                    os.path.join(proc_dir, f"{input_stem}.exr"),
+                    proc_bgra,
+                    EXR_WRITE_FLAGS,
+                )
 
             if on_frame_complete:
                 on_frame_complete(i, num_frames)
@@ -1028,7 +1053,10 @@ def organize_target(target_dir: str) -> None:
         ext = os.path.splitext(main_clip)[1]
 
         try:
-            shutil.move(os.path.join(target_dir, main_clip), os.path.join(target_dir, f"Input{ext}"))
+            shutil.move(
+                os.path.join(target_dir, main_clip),
+                os.path.join(target_dir, f"Input{ext}"),
+            )
             logger.info(f"Renamed '{main_clip}' to 'Input{ext}'")
         except Exception as e:
             logger.error(f"Failed to rename '{main_clip}': {e}")
@@ -1147,8 +1175,16 @@ def scan_clips() -> list[ClipEntry]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
-    parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
+    parser.add_argument(
+        "--action",
+        choices=["generate_alphas", "run_inference", "list", "wizard"],
+        required=True,
+    )
+    parser.add_argument(
+        "--win_path",
+        help=r"Windows Path (example: V:\...) for Wizard Mode",
+        default=None,
+    )
     parser.add_argument(
         "--device",
         choices=["auto", "cuda", "mps", "cpu"],

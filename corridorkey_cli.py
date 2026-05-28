@@ -326,7 +326,10 @@ def run_inference_cmd(
     ] = None,
     skip_existing: Annotated[
         bool,
-        typer.Option("--skip-existing", help="Skip frames whose output files already exist (resume a partial render)"),
+        typer.Option(
+            "--skip-existing",
+            help="Skip frames whose output files already exist (resume a partial render)",
+        ),
     ] = False,
     linear: Annotated[
         Optional[bool],

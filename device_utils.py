@@ -128,7 +128,11 @@ def _enumerate_nvidia() -> list[GPUInfo] | None:
     """Enumerate NVIDIA GPUs via nvidia-smi. Returns None if unavailable."""
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index,name,memory.total,memory.free", "--format=csv,nounits,noheader"],
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,memory.total,memory.free",
+                "--format=csv,nounits,noheader",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -166,7 +170,14 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                     vram_info = gpu.get("vram", {})
                     total_mb = vram_info.get("size", {}).get("value", 0)
                     total_gb = float(total_mb) / 1024 if total_mb else 0
-                    gpus.append(GPUInfo(index=i, name=name, vram_total_gb=total_gb, vram_free_gb=total_gb))
+                    gpus.append(
+                        GPUInfo(
+                            index=i,
+                            name=name,
+                            vram_total_gb=total_gb,
+                            vram_free_gb=total_gb,
+                        )
+                    )
                 except (KeyError, TypeError, ValueError):
                     pass
             if gpus:
@@ -177,7 +188,10 @@ def _enumerate_amd() -> list[GPUInfo] | None:
     # Fallback: rocm-smi (legacy)
     try:
         result = subprocess.run(
-            ["rocm-smi", "--showid", "--showmeminfo", "vram", "--csv"], capture_output=True, text=True, timeout=10
+            ["rocm-smi", "--showid", "--showmeminfo", "vram", "--csv"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
             gpus = []
@@ -216,7 +230,10 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                         continue
                     desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
                     total_gb = 0.0
-                    for reg_name in ("HardwareInformation.qwMemorySize", "HardwareInformation.MemorySize"):
+                    for reg_name in (
+                        "HardwareInformation.qwMemorySize",
+                        "HardwareInformation.MemorySize",
+                    ):
                         try:
                             mem_bytes, _ = winreg.QueryValueEx(subkey, reg_name)
                             total_gb = float(mem_bytes) / (1024**3)
@@ -224,7 +241,14 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                                 break
                         except OSError:
                             continue
-                    gpus.append(GPUInfo(index=len(gpus), name=desc, vram_total_gb=total_gb, vram_free_gb=total_gb))
+                    gpus.append(
+                        GPUInfo(
+                            index=len(gpus),
+                            name=desc,
+                            vram_total_gb=total_gb,
+                            vram_free_gb=total_gb,
+                        )
+                    )
                 except OSError:
                     continue
             if gpus:
@@ -259,7 +283,14 @@ def enumerate_gpus() -> list[GPUInfo]:
             for i in range(torch.cuda.device_count()):
                 props = torch.cuda.get_device_properties(i)
                 total = props.total_memory / (1024**3)
-                fallback.append(GPUInfo(index=i, name=props.name, vram_total_gb=total, vram_free_gb=total))
+                fallback.append(
+                    GPUInfo(
+                        index=i,
+                        name=props.name,
+                        vram_total_gb=total,
+                        vram_free_gb=total,
+                    )
+                )
             return fallback
     except RuntimeError:
         logger.debug("torch.cuda init failed, falling through", exc_info=True)

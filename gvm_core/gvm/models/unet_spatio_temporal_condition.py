@@ -14,17 +14,22 @@ from diffusers.models.attention_processor import (
 )
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unets.unet_3d_blocks import UNetMidBlockSpatioTemporal, get_down_block, get_up_block
+from diffusers.models.unets.unet_3d_blocks import (
+    UNetMidBlockSpatioTemporal,
+    get_down_block,
+    get_up_block,
+)
 from diffusers.loaders import PeftAdapterMixin
 from diffusers.models.unets.unet_spatio_temporal_condition import (
     UNetSpatioTemporalConditionOutput,
 )
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 class UNetSpatioTemporalConditionModel(
-    ModelMixin, 
-    ConfigMixin, 
+    ModelMixin,
+    ConfigMixin,
     UNet2DConditionLoadersMixin,
     PeftAdapterMixin,
     # LoraLoaderMixin,
@@ -91,8 +96,7 @@ class UNetSpatioTemporalConditionModel(
         transformer_layers_per_block: Union[int, Tuple[int], Tuple[Tuple]] = 1,
         num_attention_heads: Union[int, Tuple[int]] = (5, 10, 20, 20),
         num_frames: int = 25,
-
-        class_embed_type: Optional[str] = None, # 'projection',
+        class_embed_type: Optional[str] = None,  # 'projection',
         num_class_embeds: Optional[int] = None,
         act_fn: str = "silu",
     ):
@@ -147,7 +151,7 @@ class UNetSpatioTemporalConditionModel(
         timestep_input_dim = block_out_channels[0]
 
         self.time_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim)
-        
+
         # self.add_time_proj = Timesteps(addition_time_embed_dim, True, downscale_freq_shift=0)
         # self.add_embedding = TimestepEmbedding(projection_class_embeddings_input_dim, time_embed_dim)
 
@@ -283,7 +287,9 @@ class UNetSpatioTemporalConditionModel(
         if class_embed_type is None and num_class_embeds is not None:
             self.class_embedding = nn.Embedding(num_class_embeds, time_embed_dim)
         elif class_embed_type == "timestep":
-            self.class_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim, act_fn=act_fn)
+            self.class_embedding = TimestepEmbedding(
+                timestep_input_dim, time_embed_dim, act_fn=act_fn
+            )
         elif class_embed_type == "identity":
             self.class_embedding = nn.Identity(time_embed_dim, time_embed_dim)
         elif class_embed_type == "projection":
@@ -298,21 +304,29 @@ class UNetSpatioTemporalConditionModel(
             # Note that `TimestepEmbedding` is quite general, being mainly linear layers and activations.
             # When used for embedding actual timesteps, the timesteps are first converted to sinusoidal embeddings.
             # As a result, `TimestepEmbedding` can be passed arbitrary vectors.
-            self.class_embedding = TimestepEmbedding(projection_class_embeddings_input_dim, time_embed_dim)
+            self.class_embedding = TimestepEmbedding(
+                projection_class_embeddings_input_dim, time_embed_dim
+            )
         elif class_embed_type == "simple_projection":
             if projection_class_embeddings_input_dim is None:
                 raise ValueError(
                     "`class_embed_type`: 'simple_projection' requires `projection_class_embeddings_input_dim` be set"
                 )
-            self.class_embedding = nn.Linear(projection_class_embeddings_input_dim, time_embed_dim)
+            self.class_embedding = nn.Linear(
+                projection_class_embeddings_input_dim, time_embed_dim
+            )
         else:
             self.class_embedding = None
 
-    def get_class_embed(self, sample: torch.Tensor, class_labels: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    def get_class_embed(
+        self, sample: torch.Tensor, class_labels: Optional[torch.Tensor]
+    ) -> Optional[torch.Tensor]:
         class_emb = None
         if self.class_embedding is not None:
             if class_labels is None:
-                raise ValueError("class_labels should be provided when num_class_embeds > 0")
+                raise ValueError(
+                    "class_labels should be provided when num_class_embeds > 0"
+                )
 
             if self.config.class_embed_type == "timestep":
                 class_labels = self.time_proj(class_labels)
@@ -323,7 +337,6 @@ class UNetSpatioTemporalConditionModel(
 
             class_emb = self.class_embedding(class_labels).to(dtype=sample.dtype)
         return class_emb
-
 
     @property
     def attn_processors(self) -> Dict[str, AttentionProcessor]:
@@ -512,7 +525,6 @@ class UNetSpatioTemporalConditionModel(
         # there might be better ways to encapsulate this.
         t_emb = t_emb.to(dtype=sample.dtype)
         emb = self.time_embedding(t_emb)
-
 
         # time_embeds = self.add_time_proj(added_time_ids.flatten())
         # time_embeds = time_embeds.reshape((batch_size, -1))

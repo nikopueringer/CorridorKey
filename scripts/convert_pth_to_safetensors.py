@@ -69,7 +69,10 @@ def main() -> int:
         print(f"error: input not found: {args.input}", file=sys.stderr)
         return 1
     if args.output.suffix != ".safetensors":
-        print(f"error: --output must end in .safetensors (got {args.output})", file=sys.stderr)
+        print(
+            f"error: --output must end in .safetensors (got {args.output})",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"Loading {args.input} ...")

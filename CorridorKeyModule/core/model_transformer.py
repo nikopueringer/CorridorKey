@@ -23,7 +23,10 @@ class MLP(nn.Module):
 
 class DecoderHead(nn.Module):
     def __init__(
-        self, feature_channels: list[int] | None = None, embedding_dim: int = 256, output_dim: int = 1
+        self,
+        feature_channels: list[int] | None = None,
+        embedding_dim: int = 256,
+        output_dim: int = 1,
     ) -> None:
         super().__init__()
         if feature_channels is None:

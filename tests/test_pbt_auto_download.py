@@ -292,9 +292,9 @@ class TestNetworkErrorsProduceActionableMessages:
 
                 # Must contain the HuggingFace repo URL
                 expected_url = f"https://huggingface.co/{HF_REPO_ID}"
-                assert expected_url in error_msg, (
-                    f"Error message missing HF repo URL.\nExpected URL: {expected_url}\nGot message: {error_msg}"
-                )
+                assert (
+                    expected_url in error_msg
+                ), f"Error message missing HF repo URL.\nExpected URL: {expected_url}\nGot message: {error_msg}"
 
                 # Must contain the connectivity hint
                 expected_hint = "Check your network connection and try again"

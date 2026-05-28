@@ -168,7 +168,14 @@ class TestCLIErrorHandling:
         out = tmp_path / "out.safetensors"
 
         result = subprocess.run(
-            [sys.executable, str(_SCRIPT), "--input", str(missing), "--output", str(out)],
+            [
+                sys.executable,
+                str(_SCRIPT),
+                "--input",
+                str(missing),
+                "--output",
+                str(out),
+            ],
             capture_output=True,
             text=True,
         )
@@ -185,7 +192,14 @@ class TestCLIErrorHandling:
         wrong_out = tmp_path / "out.pth"  # wrong suffix
 
         result = subprocess.run(
-            [sys.executable, str(_SCRIPT), "--input", str(src), "--output", str(wrong_out)],
+            [
+                sys.executable,
+                str(_SCRIPT),
+                "--input",
+                str(src),
+                "--output",
+                str(wrong_out),
+            ],
             capture_output=True,
             text=True,
         )
