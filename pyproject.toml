@@ -93,7 +93,6 @@ markers = [
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-env = ["OPENCV_IO_ENABLE_OPENEXR=1", ]
 addopts = "--tb=short"
 
 [tool.coverage.run]
