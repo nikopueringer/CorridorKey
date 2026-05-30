@@ -197,14 +197,14 @@ By default, CorridorKey auto-detects the best available compute device: **CUDA >
 
 **Override via CLI flag:**
 ```bash
-uv run python clip_manager.py --action wizard --win_path "V:\..." --device mps
-uv run python clip_manager.py --action run_inference --device cpu
+uv run corridorkey --device mps wizard "V:\..."
+uv run corridorkey --device cpu run-inference
 ```
 
 **Override via environment variable:**
 ```bash
 export CORRIDORKEY_DEVICE=cpu
-uv run python clip_manager.py --action wizard --win_path "V:\..."
+uv run corridorkey wizard "V:\..."
 ```
 
 Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
@@ -213,13 +213,13 @@ Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
 
 **Confirm MPS is active:** Run with verbose logging to see which device was selected:
 ```bash
-uv run python clip_manager.py --action list 2>&1 | grep -i "device\|backend\|mps"
+uv run corridorkey list-clips 2>&1 | grep -i "device\|backend\|mps"
 ```
 
 **MPS operator errors** (`NotImplementedError: ... not implemented for 'MPS'`): Some PyTorch operations are not yet supported on MPS. Enable CPU fallback for those ops:
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-uv run python corridorkey_cli.py wizard --win_path "/path/to/clips"
+uv run corridorkey wizard "/path/to/clips"
 ```
 
 **Silent CPU fallback**: If MPS silently falls back to CPU without this variable, the run will be much slower. Setting `PYTORCH_ENABLE_MPS_FALLBACK=1` in your shell profile (`~/.zshrc`) ensures it is always active.
@@ -308,10 +308,10 @@ CorridorKey supports two inference backends:
 Resolution: `--backend` flag > `CORRIDORKEY_BACKEND` env var > auto-detect.
 Auto mode prefers MLX on Apple Silicon when available.
 
-**Override via CLI flag (corridorkey_cli.py):**
+**Override via `--backend` flag (on `run-inference`):**
 ```bash
-uv run python corridorkey_cli.py wizard --win_path "/path/to/clips" --backend mlx
-uv run python corridorkey_cli.py run_inference --backend torch
+uv run corridorkey run-inference --backend mlx
+uv run corridorkey run-inference --backend torch
 ```
 
 ### MLX Setup (Apple Silicon)
@@ -356,7 +356,7 @@ uv run python corridorkey_cli.py run_inference --backend torch
    ```
 3. Run with auto-detection or explicit backend:
    ```bash
-   CORRIDORKEY_BACKEND=mlx uv run python clip_manager.py --action run_inference
+   CORRIDORKEY_BACKEND=mlx uv run corridorkey run-inference
    ```
 
 MLX uses img_size=2048 by default (same as Torch).

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import glob
 import logging
 import os
@@ -1146,43 +1145,17 @@ def scan_clips() -> list[ClipEntry]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CorridorKey Clip Manager")
-    parser.add_argument("--action", choices=["generate_alphas", "run_inference", "list", "wizard"], required=True)
-    parser.add_argument("--win_path", help=r"Windows Path (example: V:\...) for Wizard Mode", default=None)
-    parser.add_argument(
-        "--device",
-        choices=["auto", "cuda", "mps", "cpu"],
-        default="auto",
-        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
+    print(
+        "clip_manager.py is no longer a command-line entry point.\n"
+        "The CLI moved to `corridorkey` in PR #67.\n"
+        "\n"
+        "Old -> new:\n"
+        "  python clip_manager.py --action list            -> corridorkey list-clips\n"
+        "  python clip_manager.py --action generate_alphas -> corridorkey generate-alphas\n"
+        "  python clip_manager.py --action run_inference   -> corridorkey run-inference\n"
+        "  python clip_manager.py --action wizard PATH     -> corridorkey wizard PATH\n"
+        "\n"
+        "Run `corridorkey --help` for the full command list.",
+        file=sys.stderr,
     )
-    parser.add_argument(
-        "--backend",
-        choices=["auto", "torch", "mlx"],
-        default="auto",
-        help="Inference backend (default: auto-detect MLX on Apple Silicon, else Torch)",
-    )
-    parser.add_argument(
-        "--max-frames",
-        type=int,
-        default=None,
-        help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
-    )
-
-    args = parser.parse_args()
-
-    device = resolve_device(args.device)
-    logger.info(f"Using device: {device}")
-
-    if args.action == "list":
-        scan_clips()
-    elif args.action == "generate_alphas":
-        clips = scan_clips()
-        generate_alphas(clips, device=device)
-    elif args.action == "run_inference":
-        clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
-    elif args.action == "wizard":
-        if not args.win_path:
-            print("Error: --win_path required for wizard.")
-        else:
-            raise NotImplementedError("interactive_wizard is not yet implemented")
+    sys.exit(2)
