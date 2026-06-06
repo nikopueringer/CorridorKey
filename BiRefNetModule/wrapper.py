@@ -80,11 +80,19 @@ class BiRefNetHandler:
             local_dir_use_symlinks=False,  # Ensures actual files are downloaded, not just symlinks to the cache
         )
 
-        self.birefnet = AutoModelForImageSegmentation.from_pretrained(model_local_dir, trust_remote_code=False)
+        # BiRefNet ships a custom architecture (birefnet.py) in its HF repo, so the
+        # weights cannot be loaded without executing that code. trust_remote_code=True
+        # is required and is the officially documented way to load ZhengPeng7/BiRefNet.
+        # The code is fetched to BiRefNetModule/checkpoints/<repo> by snapshot_download above.
+        self.birefnet = AutoModelForImageSegmentation.from_pretrained(model_local_dir, trust_remote_code=True)
 
         self.birefnet.to(device)
         self.birefnet.eval()
-        if half_precision:
+        # fp16 is unstable on Apple's MPS backend (BiRefNet's swin attention can emit
+        # NaNs); only use half precision on CUDA. Stored on the instance so the model
+        # weights and the input tensor (see process()) always agree on dtype.
+        self.use_half = half_precision and str(device).startswith("cuda")
+        if self.use_half:
             self.birefnet.half()
 
     def cleanup(self):
@@ -169,7 +177,7 @@ class BiRefNetHandler:
                     self.resolution = resolution_div_by_32
             image_preprocessor = ImagePreprocessor(resolution=tuple(self.resolution))
             image_proc = image_preprocessor.proc(pil_image).unsqueeze(0).to(self.device)
-            if half_precision:
+            if self.use_half:
                 image_proc = image_proc.half()
 
             # Inference
