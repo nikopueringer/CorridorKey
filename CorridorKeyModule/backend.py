@@ -44,6 +44,16 @@ HF_CHECKPOINT_FILENAME_BLUE = "CorridorKeyBlue_1.0.pth"  # DEPRECATED: remove af
 # Re-exported alias for callers/tests that import VALID_SCREEN_COLORS from this module.
 VALID_SCREEN_COLORS = SCREEN_COLOR_CHOICES
 BLUE_FILENAME_TOKEN = "blue"  # case-insensitive substring marking a blue checkpoint
+# Both backends use the .safetensors extension, so the MLX-format weights are
+# distinguished by this token in the filename (see MLX_MODEL_FILENAME). Torch
+# discovery must exclude MLX files and vice-versa, otherwise the two coexisting
+# in CHECKPOINT_DIR (as the README's MLX setup instructs) collide as "Multiple
+# checkpoints".
+MLX_FILENAME_TOKEN = "mlx"
+
+
+def _is_mlx_file(path: str) -> bool:
+    return MLX_FILENAME_TOKEN in os.path.basename(path).lower()
 
 
 def resolve_backend(requested: str | None = None) -> str:
@@ -271,7 +281,9 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
         raise ValueError(f"Unknown screen_color '{screen_color}'. Valid: {', '.join(VALID_SCREEN_COLORS)}")
 
     if ext == TORCH_EXT:
-        safetensors_matches = _filter_by_color(_find_single(SAFETENSORS_EXT), screen_color)
+        # Exclude MLX-format .safetensors so it doesn't collide with the Torch weights.
+        torch_safetensors = [p for p in _find_single(SAFETENSORS_EXT) if not _is_mlx_file(p)]
+        safetensors_matches = _filter_by_color(torch_safetensors, screen_color)
         pth_matches = _filter_by_color(_find_single(TORCH_EXT), screen_color)
 
         if safetensors_matches and pth_matches:
@@ -302,14 +314,16 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
             "Use --backend torch with --screen-color blue, or wait for the MLX blue release."
         )
 
-    matches = _filter_by_color(_find_single(ext), screen_color)
+    candidates = _filter_by_color(_find_single(ext), screen_color)
+    # When an MLX-named file is present, use it — this disambiguates the MLX
+    # weights from a Torch .safetensors coexisting in the same dir (the README's
+    # MLX setup puts both there). Otherwise any lone .safetensors is the MLX file.
+    mlx_named = [p for p in candidates if _is_mlx_file(p)]
+    matches = mlx_named or candidates
 
     if len(matches) == 0:
-        other_ext = TORCH_EXT
-        other_files = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{other_ext}"))
-        hint = ""
-        if other_files:
-            hint = f" (Found {other_ext} files — did you mean --backend=torch?)"
+        other_files = glob.glob(os.path.join(CHECKPOINT_DIR, f"*{TORCH_EXT}"))
+        hint = " (Found .pth files — did you mean --backend=torch?)" if other_files else ""
         raise FileNotFoundError(f"No {ext} {screen_color} checkpoint found in {CHECKPOINT_DIR}.{hint}")
 
     if len(matches) > 1:

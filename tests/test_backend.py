@@ -163,6 +163,20 @@ class TestDiscoverCheckpoint:
                 assert result == sft_ckpt
                 mock_dl.assert_not_called()
 
+    def test_torch_and_mlx_safetensors_coexist(self, tmp_path):
+        """The MLX setup puts corridorkey_mlx.safetensors next to the Torch
+        .safetensors. Both backends must resolve to their own weights instead of
+        colliding as "Multiple ... checkpoints"."""
+        torch_ckpt = tmp_path / "CorridorKey_v1.0.safetensors"
+        mlx_ckpt = tmp_path / "corridorkey_mlx.safetensors"
+        torch_ckpt.touch()
+        mlx_ckpt.touch()
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            with mock.patch("huggingface_hub.hf_hub_download") as mock_dl:
+                assert _discover_checkpoint(TORCH_EXT) == torch_ckpt
+                assert _discover_checkpoint(MLX_EXT) == mlx_ckpt
+                mock_dl.assert_not_called()
+
     def test_ensure_torch_checkpoint_falls_back_to_pth_on_entry_not_found(self, tmp_path):
         """When HF does not yet host the .safetensors, _ensure_torch_checkpoint downloads the .pth."""
         from huggingface_hub.utils import EntryNotFoundError
