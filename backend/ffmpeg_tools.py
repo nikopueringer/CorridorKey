@@ -127,6 +127,10 @@ def probe_video(path: str) -> dict:
         "frame_count": frame_count,
         "codec": video_stream.get("codec_name", "unknown"),
         "duration": float(video_stream.get("duration", 0) or data.get("format", {}).get("duration", 0)),
+        # Color tags used by color-space auto-detection (may be absent/"unknown").
+        "color_transfer": video_stream.get("color_transfer"),
+        "color_primaries": video_stream.get("color_primaries"),
+        "color_space": video_stream.get("color_space"),
     }
 
 

@@ -17,6 +17,14 @@ dependencies = [
     "opencv-python",
     "tqdm",
     "setuptools",
+    # Color management: decode camera-native encodings (ARRI LogC, S-Log3, etc.)
+    # to scene-linear before inference. OpenEXR is used only to read color-space
+    # metadata from EXR headers (auto-detect); its import is optional at runtime.
+    # scipy is an optional-but-recommended colour-science backend (and is required
+    # by transformers); pinned in directly so colour's transforms are fully available.
+    "colour-science",
+    "scipy",
+    "OpenEXR",
     # Triton fix for Windows
     # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
     "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",

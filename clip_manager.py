@@ -18,6 +18,13 @@ import numpy as np
 
 from backend.frame_io import EXR_WRITE_FLAGS, read_image_frame
 from CorridorKeyModule.core.color_utils import SCREEN_COLOR_CHOICES_WITH_AUTO as VALID_SCREEN_COLOR_CHOICES
+from CorridorKeyModule.core.colorspace import (
+    DEFAULT_COLOR_SPACE,
+    DEFAULT_EXPOSURE_INDEX,
+    decode_to_linear,
+    requires_decode,
+    validate_color_space,
+)
 from device_utils import resolve_device
 
 if TYPE_CHECKING:
@@ -44,12 +51,26 @@ class InferenceSettings:
     image_size: int = 2048
     tiled_inference: bool = False
     screen_color: str = "auto"  # "auto" (detect from first frame), "green", or "blue"
+    # Input color space. "auto" detects from metadata; "srgb"/"linear" use the
+    # existing fast paths; camera-native encodings (arri-logc3, slog3, …) are
+    # decoded to scene-linear before inference. See CorridorKeyModule.core.colorspace.
+    color_space: str = DEFAULT_COLOR_SPACE
+    exposure_index: int = DEFAULT_EXPOSURE_INDEX  # ARRI LogC3 Exposure Index (ISO); ignored otherwise
 
     def __post_init__(self):
         if self.screen_color not in VALID_SCREEN_COLOR_CHOICES:
             raise ValueError(
                 f"Invalid screen_color '{self.screen_color}'. Valid: {', '.join(VALID_SCREEN_COLOR_CHOICES)}"
             )
+        # Back-compat: callers that set only the legacy input_is_linear bool (and
+        # left color_space at its default) get mapped onto the "linear" space.
+        if self.color_space == DEFAULT_COLOR_SPACE and self.input_is_linear:
+            self.color_space = "linear"
+        validate_color_space(self.color_space, allow_auto=True)
+        # Keep the legacy bool consistent with the resolved space for the srgb/
+        # linear fast paths. Decoded spaces produce linear data, but the pipeline
+        # sets the engine flag itself per-frame after decoding, so this stays False.
+        self.input_is_linear = self.color_space == "linear"
 
 
 # Core Paths
@@ -605,17 +626,22 @@ def run_videomama(
             traceback.print_exc()
 
 
-def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
+def _peek_first_frame_with_alpha(
+    clip, color_space: str = DEFAULT_COLOR_SPACE, exposure_index: int = DEFAULT_EXPOSURE_INDEX
+):
     """Read the first input frame + alpha hint from a clip without consuming streams.
 
     Returns (img_srgb_float [0-1], alpha_float [0-1]) or (None, None) on failure.
     Used by screen-color auto-detection — we only need the first valid frame.
 
-    ``input_is_linear`` mirrors the same setting in run_inference: when reading
-    an EXR plate, we gamma-correct only when the user said the plate is sRGB-encoded.
-    Without this, linear EXR plates would feed the screen-color estimator pixels in
-    a different colorspace than the rest of the pipeline uses.
+    ``color_space``/``exposure_index`` mirror the run_inference settings so the
+    screen-color estimator sees pixels in the same sRGB space the pipeline feeds
+    the model: native encodings are decoded to scene-linear, linear plates are
+    converted to sRGB, and sRGB plates pass through unchanged.
     """
+    from CorridorKeyModule.core.color_utils import linear_to_srgb
+
+    decode_cs = requires_decode(color_space)
     try:
         if clip.input_asset.type == "video":
             cap = cv2.VideoCapture(clip.input_asset.path)
@@ -623,27 +649,34 @@ def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
             cap.release()
             if not ret:
                 return None, None
-            import numpy as np  # local — clip_manager defers numpy import in run_inference
-
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img_srgb = img_rgb.astype(np.float32) / 255.0
+            img = img_rgb.astype(np.float32) / 255.0
         else:
             input_files = sorted([f for f in os.listdir(clip.input_asset.path) if is_image_file(f)])
             if not input_files:
                 return None, None
             fpath = os.path.join(clip.input_asset.path, input_files[0])
             if fpath.lower().endswith(".exr"):
-                img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
-                if img_srgb is None:
+                # Only the srgb space treats an EXR plate as linear-to-be-gamma-corrected;
+                # linear and decoded spaces read the raw float values.
+                img = read_image_frame(fpath, gamma_correct_exr=(color_space == "srgb"))
+                if img is None:
                     return None, None
             else:
                 img_bgr = cv2.imread(fpath)
                 if img_bgr is None:
                     return None, None
-                import numpy as np
-
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                img_srgb = img_rgb.astype(np.float32) / 255.0
+                img = img_rgb.astype(np.float32) / 255.0
+
+        # Bring the sample into sRGB for estimate_screen_color.
+        if decode_cs:
+            img_srgb = linear_to_srgb(decode_to_linear(img, color_space, exposure_index))
+        elif color_space == "linear":
+            img_srgb = linear_to_srgb(img)
+        else:
+            img_srgb = img
+        img_srgb = np.asarray(img_srgb, dtype=np.float32)
 
         if clip.alpha_asset.type == "video":
             cap = cv2.VideoCapture(clip.alpha_asset.path)
@@ -651,8 +684,6 @@ def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
             cap.release()
             if not ret:
                 return None, None
-            import numpy as np
-
             alpha = frame[:, :, 2].astype(np.float32) / 255.0
         else:
             alpha_files = sorted([f for f in os.listdir(clip.alpha_asset.path) if is_image_file(f)])
@@ -662,8 +693,6 @@ def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
             mask_in = cv2.imread(apath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED)
             if mask_in is None:
                 return None, None
-            import numpy as np
-
             if mask_in.ndim == 3:
                 mask_in = mask_in[:, :, 0]
             if mask_in.dtype == np.uint8:
@@ -681,15 +710,17 @@ def _peek_first_frame_with_alpha(clip, input_is_linear: bool = False):
         return None, None
 
 
-def _resolve_screen_color(requested: str, ready_clips, input_is_linear: bool = False) -> str:
+def _resolve_screen_color(
+    requested: str, ready_clips, color_space: str = DEFAULT_COLOR_SPACE, exposure_index: int = DEFAULT_EXPOSURE_INDEX
+) -> str:
     """Map a settings-level screen_color ("auto"/"green"/"blue") to a concrete color.
 
     For "auto", probes the first ready clip's first frame and runs
     estimate_screen_color. Falls back to "green" if no probe is possible.
     The result is logged so users see which checkpoint will be loaded.
 
-    ``input_is_linear`` is forwarded to the EXR reader so the auto-detector sees pixels
-    in the same colorspace the inference pipeline will use for this batch.
+    ``color_space``/``exposure_index`` are forwarded to the frame reader so the
+    auto-detector sees pixels in the same sRGB space the inference pipeline uses.
     """
     if requested != "auto":
         logger.info("Screen color set explicitly to '%s'", requested)
@@ -701,13 +732,48 @@ def _resolve_screen_color(requested: str, ready_clips, input_is_linear: bool = F
 
     from CorridorKeyModule.core.color_utils import estimate_screen_color
 
-    img_srgb, alpha = _peek_first_frame_with_alpha(ready_clips[0], input_is_linear=input_is_linear)
+    img_srgb, alpha = _peek_first_frame_with_alpha(
+        ready_clips[0], color_space=color_space, exposure_index=exposure_index
+    )
     if img_srgb is None or alpha is None:
         logger.warning("Auto screen-color detection: could not read a sample frame, defaulting to 'green'.")
         return "green"
 
     detected = estimate_screen_color(img_srgb, alpha)
     logger.info("Screen color auto-detected from clip '%s': %s", ready_clips[0].name, detected)
+    return detected
+
+
+def _resolve_color_space(requested: str, ready_clips) -> str:
+    """Map a settings-level color_space ("auto"/concrete name) to a concrete space.
+
+    For "auto", probes the first ready clip's input asset metadata (ffprobe for
+    video, EXR header for sequences). Falls back to ``srgb`` with a warning when
+    nothing recognizable is found — camera log encodings are frequently untagged,
+    so users should pass --color-space explicitly for those.
+    """
+    if requested != "auto":
+        logger.info("Color space set explicitly to '%s'", requested)
+        return requested
+
+    if not ready_clips:
+        logger.warning("Auto color-space detection: no ready clips, defaulting to '%s'.", DEFAULT_COLOR_SPACE)
+        return DEFAULT_COLOR_SPACE
+
+    from backend.colorspace_detect import detect_color_space
+
+    asset = ready_clips[0].input_asset
+    detected = detect_color_space(asset.path, asset.type)
+    if detected is None:
+        logger.warning(
+            "Auto color-space detection: could not determine color space from metadata "
+            "(camera log encodings are often untagged) — defaulting to '%s'. "
+            "Pass --color-space explicitly (e.g. arri-logc3) if this is wrong.",
+            DEFAULT_COLOR_SPACE,
+        )
+        return DEFAULT_COLOR_SPACE
+
+    logger.info("Color space auto-detected from clip '%s': %s", ready_clips[0].name, detected)
     return detected
 
 
@@ -745,8 +811,14 @@ def run_inference(
     from CorridorKeyModule.backend import DEFAULT_MLX_TILE_SIZE, create_engine
     from CorridorKeyModule.core.color_utils import screen_channel_for_color
 
+    resolved_color_space = _resolve_color_space(settings.color_space, ready_clips)
+    decode_color_space = requires_decode(resolved_color_space)
+
     resolved_screen_color = _resolve_screen_color(
-        settings.screen_color, ready_clips, input_is_linear=settings.input_is_linear
+        settings.screen_color,
+        ready_clips,
+        color_space=resolved_color_space,
+        exposure_index=settings.exposure_index,
     )
     screen_channel = screen_channel_for_color(resolved_screen_color)
 
@@ -766,7 +838,9 @@ def run_inference(
         # against the wrong checkpoint produces visible spill. The user can
         # always re-run with --screen-color blue/green to force the choice.
         if clip_index > 0 and settings.screen_color == "auto":
-            sample_img, sample_alpha = _peek_first_frame_with_alpha(clip, input_is_linear=settings.input_is_linear)
+            sample_img, sample_alpha = _peek_first_frame_with_alpha(
+                clip, color_space=resolved_color_space, exposure_index=settings.exposure_index
+            )
             if sample_img is not None and sample_alpha is not None:
                 from CorridorKeyModule.core.color_utils import estimate_screen_color
 
@@ -838,19 +912,16 @@ def run_inference(
                     on_frame_complete(i, num_frames)
                 continue
 
-            # 1. Read Input
-            img_srgb = None
+            # 1. Read Input (native-encoded float RGB)
+            img_native = None
             input_stem = f"{i:05d}"
-
-            # Use the settings-defined gamma
-            input_is_linear = settings.input_is_linear
 
             if input_cap:
                 ret, frame = input_cap.read()
                 if not ret:
                     break
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img_srgb = img_rgb.astype(np.float32) / 255.0
+                img_native = img_rgb.astype(np.float32) / 255.0
                 input_stem = f"{i:05d}"
             else:
                 fpath = os.path.join(clip.input_asset.path, input_files[i])
@@ -858,15 +929,27 @@ def run_inference(
 
                 is_exr = fpath.lower().endswith(".exr")
                 if is_exr:
-                    img_srgb = read_image_frame(fpath, gamma_correct_exr=not input_is_linear)
-                    if img_srgb is None:
+                    # Only the srgb space treats an EXR plate as linear data to gamma-
+                    # correct on read; linear and decoded spaces read raw float values.
+                    img_native = read_image_frame(fpath, gamma_correct_exr=(resolved_color_space == "srgb"))
+                    if img_native is None:
                         continue
                 else:
                     img_bgr = cv2.imread(fpath)
                     if img_bgr is None:
                         continue
                     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                    img_srgb = img_rgb.astype(np.float32) / 255.0
+                    img_native = img_rgb.astype(np.float32) / 255.0
+
+            # 1b. Color-space decode. Camera-native encodings decode to scene-linear
+            # (sRGB primaries) and are fed through the engine's linear path; srgb/linear
+            # keep their existing fast paths unchanged.
+            if decode_color_space:
+                img_srgb = decode_to_linear(img_native, resolved_color_space, settings.exposure_index)
+                input_is_linear = True
+            else:
+                img_srgb = img_native
+                input_is_linear = resolved_color_space == "linear" or settings.input_is_linear
 
             # 2. Read Alpha (Mask)
             mask_linear = None
