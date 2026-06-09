@@ -218,8 +218,12 @@ class TestDefect1And2RunInferenceEXRPath:
             mock_clip.alpha_asset.path = alpha_dir
             mock_clip.alpha_asset.frame_count = 1
 
-            # Create mock settings with input_is_linear=False (sRGB selected)
+            # Create mock settings with the sRGB input color space selected.
+            # color_space is the source of truth for the gamma/decode path;
+            # input_is_linear is kept consistent for backward compatibility.
             mock_settings = MagicMock()
+            mock_settings.color_space = "srgb"
+            mock_settings.exposure_index = 800
             mock_settings.input_is_linear = False
             mock_settings.despill_strength = 1.0
             mock_settings.auto_despeckle = False

@@ -57,6 +57,12 @@ from clip_manager import (  # noqa: E402
     scan_clips,
 )
 from CorridorKeyModule.backend import resolve_backend  # noqa: E402
+from CorridorKeyModule.core.colorspace import (  # noqa: E402
+    COLOR_SPACE_CHOICES_WITH_AUTO,
+    DEFAULT_COLOR_SPACE,
+    DEFAULT_EXPOSURE_INDEX,
+    validate_color_space,
+)
 from device_utils import resolve_device  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -147,6 +153,8 @@ def _on_clip_start_log_only(clip_name: str, total_clips: int) -> None:
 def _prompt_inference_settings(
     *,
     default_linear: bool | None = None,
+    default_color_space: str | None = None,
+    default_exposure_index: int | None = None,
     default_despill: int | None = None,
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
@@ -174,15 +182,28 @@ def _prompt_inference_settings(
             default="auto",
         )
 
-    if default_linear is not None:
-        input_is_linear = default_linear
+    # Input color space. The legacy --linear/--srgb flag maps onto the new
+    # color_space setting; arri-logc3 additionally needs an Exposure Index.
+    if default_color_space is not None:
+        color_space = default_color_space
+    elif default_linear is not None:
+        color_space = "linear" if default_linear else "srgb"
     else:
-        gamma_choice = Prompt.ask(
-            "Input colorspace",
-            choices=["linear", "srgb"],
-            default="srgb",
+        color_space = Prompt.ask(
+            "Input color space",
+            choices=list(COLOR_SPACE_CHOICES_WITH_AUTO),
+            default=DEFAULT_COLOR_SPACE,
         )
-        input_is_linear = gamma_choice == "linear"
+
+    if default_exposure_index is not None:
+        exposure_index = default_exposure_index
+    elif color_space == "arri-logc3" and default_color_space is None and default_linear is None:
+        exposure_index = IntPrompt.ask(
+            "ARRI LogC3 Exposure Index (EI/ISO)",
+            default=DEFAULT_EXPOSURE_INDEX,
+        )
+    else:
+        exposure_index = DEFAULT_EXPOSURE_INDEX
 
     if default_despill is not None:
         despill_int = max(0, min(10, default_despill))
@@ -260,7 +281,8 @@ def _prompt_inference_settings(
             )
 
     return InferenceSettings(
-        input_is_linear=input_is_linear,
+        color_space=color_space,
+        exposure_index=exposure_index,
         despill_strength=despill_strength,
         auto_despeckle=auto_despeckle,
         despeckle_size=despeckle_size,
@@ -330,7 +352,19 @@ def run_inference_cmd(
     ] = False,
     linear: Annotated[
         Optional[bool],
-        typer.Option("--linear/--srgb", help="Input colorspace (default: prompt)"),
+        typer.Option("--linear/--srgb", help="[deprecated] Input colorspace; use --color-space (default: prompt)"),
+    ] = None,
+    color_space: Annotated[
+        Optional[str],
+        typer.Option(
+            "--color-space",
+            help="Input color space: auto (detect), srgb, linear, rec709, rec2020, arri-logc3, "
+            "arri-logc4, slog3, redlog3g10, acescct, aces2065-1 (default: prompt)",
+        ),
+    ] = None,
+    exposure_index: Annotated[
+        Optional[int],
+        typer.Option("--exposure-index", "--ei", help="ARRI LogC3 Exposure Index/ISO (default: 800)"),
     ] = None,
     despill: Annotated[
         Optional[int],
@@ -380,28 +414,45 @@ def run_inference_cmd(
     if screen_color is not None and screen_color not in ("auto", "green", "blue"):
         raise typer.BadParameter(f"--screen-color must be one of: auto, green, blue (got '{screen_color}')")
 
+    if color_space is not None:
+        try:
+            validate_color_space(color_space, allow_auto=True)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from None
+        if linear is not None:
+            raise typer.BadParameter("Pass either --color-space or --linear/--srgb, not both.")
+
     clips = scan_clips()
 
+    # The input color space may be set via --color-space or the legacy --linear/--srgb.
+    input_cs_specified = color_space is not None or linear is not None
     # despeckle_size excluded — sensible default even in headless mode
-    required_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
+    required_flags_set = input_cs_specified and all(v is not None for v in [despill, despeckle, refiner])
     if required_flags_set:
-        assert linear is not None and despill is not None and despeckle is not None and refiner is not None
+        assert despill is not None and despeckle is not None and refiner is not None
+        if color_space is not None:
+            resolved_cs = color_space
+        else:
+            resolved_cs = "linear" if linear else "srgb"
         despill_clamped = max(0, min(10, despill))
         settings = InferenceSettings(
-            input_is_linear=linear,
+            color_space=resolved_cs,
+            exposure_index=exposure_index if exposure_index is not None else DEFAULT_EXPOSURE_INDEX,
             despill_strength=despill_clamped / 10.0,
             auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
-            generate_comp=generate_comp,
-            gpu_post_processing=gpu_post,
-            image_size=image_size,
-            tiled_inference=tiled_inference,
+            generate_comp=generate_comp if generate_comp is not None else True,
+            gpu_post_processing=gpu_post if gpu_post is not None else False,
+            image_size=image_size if image_size is not None else 2048,
+            tiled_inference=tiled_inference if tiled_inference is not None else False,
             screen_color=screen_color if screen_color is not None else "auto",
         )
     else:
         settings = _prompt_inference_settings(
             default_linear=linear,
+            default_color_space=color_space,
+            default_exposure_index=exposure_index,
             default_despill=despill,
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,

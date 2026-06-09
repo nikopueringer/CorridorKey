@@ -39,6 +39,12 @@ The biggest challenge in this codebase revolves around **Color Space** and **Gam
 3.  **Inference Resizing (`img_size`):**
     *   The engine is strictly trained on `2048x2048` crops.
     *   In `inference_engine.py`, the `process_frame()` method uses OpenCV (Lanczos4) to upscale/downscale the user's arbitrary input resolution to 2048x2048, feeds the model, and then resizes the predictions *back* to the original resolution.
+4.  **Input Color Space (`CorridorKeyModule/core/colorspace.py`):**
+    *   The model only understands **sRGB display-referred** input. Camera-native plates (ARRI LogC, S-Log3, RED Log3G10, ACES, Rec.2020) are log-encoded and/or wide-gamut.
+    *   `decode_to_linear()` (backed by the `colour-science` library) decodes any supported space to **scene-linear in sRGB/Rec.709 primaries**; the pipeline then runs the existing `input_is_linear=True` path (resize-in-linear → `linear_to_srgb`) into the model. `srgb`/`linear` keep their original fast paths untouched (`requires_decode()` is False).
+    *   The CLI exposes `--color-space` (+ `--ei` for ARRI LogC3's Exposure Index) and `auto`, which reads metadata via `backend/colorspace_detect.py` (ffprobe for video, OpenEXR headers for EXR) and falls back to `srgb` when nothing is tagged.
+    *   This is **input-side only** — output FG stays sRGB and the Processed pass stays linear-premultiplied EXR (decision: keep the existing output contract).
+    *   `InferenceSettings.color_space` is the source of truth; the legacy `input_is_linear` bool is reconciled to it in `__post_init__` for backward compatibility.
 
 ---
 
