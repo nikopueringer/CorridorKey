@@ -592,6 +592,17 @@ class CorridorKeyService:
         job: GPUJob | None,
     ) -> None:
         """Read frames ahead of GPU processing in a background thread."""
+        # Video captures decode sequentially from frame 0, but frame_indices
+        # can start mid-clip (in/out markers). Seek first so the decoded
+        # content matches the labeled frame index — otherwise a range of
+        # 100-200 silently processes frames 0-100 under the wrong stems.
+        first_index = next(iter(frame_indices), 0)
+        if first_index > 0:
+            if input_cap is not None:
+                input_cap.set(cv2.CAP_PROP_POS_FRAMES, first_index)
+            if alpha_cap is not None:
+                alpha_cap.set(cv2.CAP_PROP_POS_FRAMES, first_index)
+
         for i in frame_indices:
             if job and job.is_cancelled:
                 break
