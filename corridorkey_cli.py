@@ -441,7 +441,13 @@ def wizard(
 def web(
     ctx: typer.Context,
     clips_dir: Annotated[str, typer.Argument(help="Clips directory to serve")] = "ClipsForInference",
-    host: Annotated[str, typer.Option(help="Bind host")] = "0.0.0.0",
+    host: Annotated[
+        str,
+        typer.Option(
+            help="Bind host. Default is localhost-only; the API has no "
+            "authentication, so only use 0.0.0.0 on a trusted network."
+        ),
+    ] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Bind port")] = 8420,
 ) -> None:
     """Launch the web UI in your browser."""
