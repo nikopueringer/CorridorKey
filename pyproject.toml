@@ -41,6 +41,11 @@ dependencies = [
     # CLI framework + terminal output
     "typer>=0.12",
     "rich>=13",
+
+    # Web UI
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
