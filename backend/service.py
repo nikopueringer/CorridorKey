@@ -1214,10 +1214,12 @@ class CorridorKeyService:
             # Write chunk frames
             t_chunk = time.monotonic()
             for frame in chunk_output:
-                out_bgr = cv2.cvtColor(
-                    (np.clip(frame, 0.0, 1.0) * 255.0).astype(np.uint8),
-                    cv2.COLOR_RGB2BGR,
-                )
+                # VideoMaMa yields uint8 [0, 255]; clipping those to [0, 1]
+                # would binarize the soft alpha. Only rescale float frames.
+                out = np.asarray(frame)
+                if out.dtype != np.uint8:
+                    out = (np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
+                out_bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
                 if frames_written < len(input_names):
                     stem = os.path.splitext(input_names[frames_written])[0]
                     out_name = f"{stem}.png"
