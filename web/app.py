@@ -321,15 +321,16 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
             if job.clip_name == name and job.status.value in ("queued", "running"):
                 service.job_queue.cancel_job(job)
 
-        # Delete the Output directory (keeps input + alpha intact)
-        output_dir = os.path.join(clip.root_path, "Output")
-        if os.path.isdir(output_dir):
-            shutil.rmtree(output_dir)
+        # Standalone videos have root_path == clips_dir, so Output/.thumbnails
+        # there belong to the whole library, not this clip — never delete them.
+        if not _is_standalone_clip(app, clip):
+            output_dir = os.path.join(clip.root_path, "Output")
+            if os.path.isdir(output_dir):
+                shutil.rmtree(output_dir)
 
-        # Clear thumbnail cache
-        thumb_dir = os.path.join(clip.root_path, ".thumbnails")
-        if os.path.isdir(thumb_dir):
-            shutil.rmtree(thumb_dir)
+            thumb_dir = os.path.join(clip.root_path, ".thumbnails")
+            if os.path.isdir(thumb_dir):
+                shutil.rmtree(thumb_dir)
 
         # Re-scan to refresh state
         clips = service.scan_clips(app.state.clips_dir)
@@ -355,17 +356,20 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
             if job.clip_name == name and job.status.value in ("queued", "running"):
                 service.job_queue.cancel_job(job)
 
-        # Delete entire clip folder
-        if os.path.isdir(clip.root_path):
+        if _is_standalone_clip(app, clip):
+            # Standalone videos have root_path == clips_dir — removing the
+            # folder would wipe every clip. Delete only this clip's video file.
+            if clip.input_asset and os.path.isfile(clip.input_asset.path):
+                os.remove(clip.input_asset.path)
+            else:
+                clips_dir = app.state.clips_dir
+                for ext in (".mp4", ".mov", ".avi", ".mkv", ".mxf", ".webm"):
+                    video_file = os.path.join(clips_dir, name + ext)
+                    if os.path.isfile(video_file):
+                        os.remove(video_file)
+                        break
+        elif os.path.isdir(clip.root_path):
             shutil.rmtree(clip.root_path)
-
-        # Also delete the standalone video file if it exists
-        clips_dir = app.state.clips_dir
-        for ext in (".mp4", ".mov", ".avi", ".mkv", ".mxf", ".webm"):
-            video_file = os.path.join(clips_dir, name + ext)
-            if os.path.isfile(video_file):
-                os.remove(video_file)
-                break
 
         # Re-scan
         clips = service.scan_clips(app.state.clips_dir)
@@ -590,6 +594,12 @@ def _get_clip(app: FastAPI, name: str):
     if clip is None:
         raise HTTPException(404, f"Clip '{name}' not found")
     return clip
+
+
+def _is_standalone_clip(app: FastAPI, clip) -> bool:
+    """True when the clip is a loose video file whose root_path is the
+    clips directory itself rather than a dedicated clip folder."""
+    return os.path.realpath(clip.root_path) == os.path.realpath(app.state.clips_dir)
 
 
 def _serialize_clip(clip) -> dict:
