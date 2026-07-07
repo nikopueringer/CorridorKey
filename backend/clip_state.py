@@ -296,7 +296,12 @@ class ClipEntry:
             elif os.path.isdir(input_dir):
                 raise ClipScanError(f"Clip '{self.name}': Input dir is empty — no image files.")
             else:
-                raise ClipScanError(f"Clip '{self.name}': no Input found.")
+                # Fallback: check if the clip root itself contains image files
+                loose_images = [f for f in os.listdir(self.root_path) if _is_image_file(f)]
+                if loose_images:
+                    self.input_asset = ClipAsset(self.root_path, "sequence")
+                else:
+                    raise ClipScanError(f"Clip '{self.name}': no Input found.")
 
         # Load display name from project.json if available
         from .project import get_display_name

@@ -437,6 +437,34 @@ def wizard(
     interactive_wizard(path, device=ctx.obj["device"])
 
 
+@app.command()
+def web(
+    ctx: typer.Context,
+    clips_dir: Annotated[str, typer.Argument(help="Clips directory to serve")] = "ClipsForInference",
+    host: Annotated[
+        str,
+        typer.Option(
+            help="Bind host. Default is localhost-only; the API has no "
+            "authentication, so only use 0.0.0.0 on a trusted network."
+        ),
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Bind port")] = 8420,
+) -> None:
+    """Launch the web UI in your browser."""
+    import uvicorn
+
+    from web.app import create_app
+
+    abs_clips = os.path.abspath(clips_dir)
+    if not os.path.isdir(abs_clips):
+        os.makedirs(abs_clips, exist_ok=True)
+        console.print(f"[yellow]Created clips directory:[/yellow] {abs_clips}")
+
+    web_app = create_app(clips_dir=abs_clips)
+    console.print(f"[bold cyan]CorridorKey Web UI[/bold cyan] at http://localhost:{port}")
+    uvicorn.run(web_app, host=host, port=port)
+
+
 # ---------------------------------------------------------------------------
 # Wizard (rich-styled)
 # ---------------------------------------------------------------------------

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CorridorKey</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <h1 class="logo">CORRIDOR<span class="logo-accent">KEY</span></h1>
+        </div>
+        <div class="header-right">
+            <div id="device-badge" class="device-badge">
+                <span class="device-icon">&#9679;</span>
+                <span id="device-name">detecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Scan Bar -->
+    <div class="scan-bar">
+        <input type="text" id="path-input" class="path-input" placeholder="Enter path to clips directory...">
+        <button class="btn btn-ghost" onclick="openBrowser()">Browse</button>
+        <button id="scan-btn" class="btn btn-accent" onclick="scanClips()">Scan</button>
+    </div>
+
+    <!-- File Browser Modal -->
+    <div id="browser-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBrowser()">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="browser-title">Locate Clips Folder</h2>
+                <button class="modal-close" onclick="closeBrowser()">&times;</button>
+            </div>
+            <div class="modal-breadcrumb" id="browser-breadcrumb"></div>
+            <div class="modal-body" id="browser-list"></div>
+            <div class="modal-footer">
+                <span id="browser-path" class="browser-path"></span>
+                <button id="browser-select-btn" class="btn btn-accent" onclick="selectBrowserPath()">Select This Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Clip List -->
+        <div class="clip-panel">
+            <div class="panel-header">
+                <h2>Clips</h2>
+                <span id="clip-count" class="badge">0</span>
+            </div>
+            <div id="clip-list" class="clip-list">
+                <div class="empty-state">No clips loaded. Enter a path and click Scan.</div>
+            </div>
+        </div>
+
+        <!-- Preview Panel -->
+        <div class="preview-panel">
+            <div class="panel-header">
+                <h2>Preview</h2>
+                <div id="preview-tabs" class="preview-tabs">
+                    <button class="tab active" data-layer="input" onclick="setLayer('input')">Input</button>
+                    <button class="tab" data-layer="alpha" onclick="setLayer('alpha')">Alpha</button>
+                    <button class="tab" data-layer="comp" onclick="setLayer('comp')">Comp</button>
+                    <button class="tab" data-layer="fg" onclick="setLayer('fg')">FG</button>
+                    <button class="tab" data-layer="matte" onclick="setLayer('matte')">Matte</button>
+                </div>
+            </div>
+            <div id="preview-container" class="preview-container">
+                <div class="empty-state">Select a clip to preview</div>
+            </div>
+            <div id="frame-scrubber" class="frame-scrubber" style="display:none;">
+                <input type="range" id="frame-slider" class="frame-slider" min="0" max="0" value="0" oninput="onFrameSlide(this.value)">
+                <span id="frame-label" class="frame-label">0 / 0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Queue -->
+    <div class="queue-panel">
+        <div class="panel-header">
+            <h2>Jobs</h2>
+            <span id="job-count" class="badge">0</span>
+        </div>
+        <div id="job-list" class="job-list">
+            <div class="empty-state empty-state-small">No active jobs</div>
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <details class="settings-panel" open>
+        <summary class="panel-header clickable">
+            <h2>Settings</h2>
+        </summary>
+        <div class="settings-grid">
+            <div class="setting-group">
+                <label>Colorspace</label>
+                <select id="set-colorspace" class="input-select">
+                    <option value="srgb" selected>sRGB</option>
+                    <option value="linear">Linear</option>
+                </select>
+            </div>
+            <div class="setting-group">
+                <label>Despill <span id="despill-val" class="setting-val">5</span></label>
+                <input type="range" id="set-despill" class="styled-range" min="0" max="10" value="5" step="1"
+                    oninput="document.getElementById('despill-val').textContent=this.value">
+            </div>
+            <div class="setting-group">
+                <label>Despeckle</label>
+                <div class="setting-row">
+                    <input type="checkbox" id="set-despeckle" checked>
+                    <label for="set-despeckle" class="check-label">Enabled</label>
+                    <input type="number" id="set-despeckle-size" class="input-number" value="400" min="0" step="50">
+                    <span class="setting-hint">px</span>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label>Refiner Scale</label>
+                <input type="number" id="set-refiner" class="input-number" value="1.0" min="0" max="5" step="0.1">
+            </div>
+            <div class="setting-group">
+                <label>Outputs</label>
+                <div class="setting-row">
+                    <label class="check-label"><input type="checkbox" id="out-fg" checked> FG</label>
+                    <label class="check-label"><input type="checkbox" id="out-matte" checked> Matte</label>
+                    <label class="check-label"><input type="checkbox" id="out-comp" checked> Comp</label>
+                    <label class="check-label"><input type="checkbox" id="out-processed" checked> Processed</label>
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
