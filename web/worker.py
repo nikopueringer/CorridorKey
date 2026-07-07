@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import time
 
 from backend.errors import JobCancelledError
 from backend.ffmpeg_tools import extract_frames
@@ -71,54 +70,62 @@ class GPUWorker:
             clip = self._clips.get(job.clip_name)
             if clip is None:
                 queue.fail_job(job, f"Clip '{job.clip_name}' not found")
-                self._broadcast_sync({
-                    "type": "job_failed",
-                    "job_id": job.id,
-                    "clip_name": job.clip_name,
-                    "error": f"Clip '{job.clip_name}' not found",
-                })
+                self._broadcast_sync(
+                    {
+                        "type": "job_failed",
+                        "job_id": job.id,
+                        "clip_name": job.clip_name,
+                        "error": f"Clip '{job.clip_name}' not found",
+                    }
+                )
                 continue
 
-            self._broadcast_sync({
-                "type": "job_started",
-                "job_id": job.id,
-                "clip_name": job.clip_name,
-                "job_type": job.job_type.value,
-            })
+            self._broadcast_sync(
+                {
+                    "type": "job_started",
+                    "job_id": job.id,
+                    "clip_name": job.clip_name,
+                    "job_type": job.job_type.value,
+                }
+            )
 
             try:
                 self._dispatch(job, clip)
                 queue.complete_job(job)
-                self._broadcast_sync({
-                    "type": "job_completed",
-                    "job_id": job.id,
-                    "clip_name": job.clip_name,
-                })
+                self._broadcast_sync(
+                    {
+                        "type": "job_completed",
+                        "job_id": job.id,
+                        "clip_name": job.clip_name,
+                    }
+                )
                 # After extraction, rescan so the clip transitions from EXTRACTING → RAW
                 if job.job_type == JobType.VIDEO_EXTRACT and self._rescan_callback:
                     try:
-                        asyncio.run_coroutine_threadsafe(
-                            self._rescan_callback(), self._loop
-                        )
+                        asyncio.run_coroutine_threadsafe(self._rescan_callback(), self._loop)
                     except RuntimeError:
                         pass
                 self._broadcast_sync({"type": "clips_updated"})
             except JobCancelledError:
                 queue.mark_cancelled(job)
-                self._broadcast_sync({
-                    "type": "job_cancelled",
-                    "job_id": job.id,
-                    "clip_name": job.clip_name,
-                })
+                self._broadcast_sync(
+                    {
+                        "type": "job_cancelled",
+                        "job_id": job.id,
+                        "clip_name": job.clip_name,
+                    }
+                )
             except Exception as e:
                 queue.fail_job(job, str(e))
                 logger.exception(f"Job [{job.id}] failed")
-                self._broadcast_sync({
-                    "type": "job_failed",
-                    "job_id": job.id,
-                    "clip_name": job.clip_name,
-                    "error": str(e),
-                })
+                self._broadcast_sync(
+                    {
+                        "type": "job_failed",
+                        "job_id": job.id,
+                        "clip_name": job.clip_name,
+                        "error": str(e),
+                    }
+                )
 
     def _dispatch(self, job: GPUJob, clip) -> None:
         """Route a job to the appropriate service method."""
@@ -126,29 +133,35 @@ class GPUWorker:
         def on_progress(clip_name: str, current: int, total: int) -> None:
             job.current_frame = current
             job.total_frames = total
-            self._broadcast_sync({
-                "type": "progress",
-                "job_id": job.id,
-                "clip_name": clip_name,
-                "current": current,
-                "total": total,
-            })
+            self._broadcast_sync(
+                {
+                    "type": "progress",
+                    "job_id": job.id,
+                    "clip_name": clip_name,
+                    "current": current,
+                    "total": total,
+                }
+            )
 
         def on_warning(msg: str) -> None:
-            self._broadcast_sync({
-                "type": "warning",
-                "job_id": job.id,
-                "clip_name": job.clip_name,
-                "message": msg,
-            })
+            self._broadcast_sync(
+                {
+                    "type": "warning",
+                    "job_id": job.id,
+                    "clip_name": job.clip_name,
+                    "message": msg,
+                }
+            )
 
         def on_status(msg: str) -> None:
-            self._broadcast_sync({
-                "type": "status",
-                "job_id": job.id,
-                "clip_name": job.clip_name,
-                "message": msg,
-            })
+            self._broadcast_sync(
+                {
+                    "type": "status",
+                    "job_id": job.id,
+                    "clip_name": job.clip_name,
+                    "message": msg,
+                }
+            )
 
         if job.job_type == JobType.INFERENCE:
             params = InferenceParams.from_dict(job.params)
@@ -192,13 +205,15 @@ class GPUWorker:
             def on_extract_progress(current: int, total: int) -> None:
                 job.current_frame = current
                 job.total_frames = total
-                self._broadcast_sync({
-                    "type": "progress",
-                    "job_id": job.id,
-                    "clip_name": job.clip_name,
-                    "current": current,
-                    "total": total,
-                })
+                self._broadcast_sync(
+                    {
+                        "type": "progress",
+                        "job_id": job.id,
+                        "clip_name": job.clip_name,
+                        "current": current,
+                        "total": total,
+                    }
+                )
 
             cancel_event = threading.Event()
             # Store cancel_event on job so it can be signalled

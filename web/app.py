@@ -12,13 +12,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.clip_state import ClipState
 from backend.job_queue import GPUJob, JobType
-from backend.service import CorridorKeyService, InferenceParams, OutputConfig
+from backend.service import CorridorKeyService
 
 from .thumbnail import get_frame_preview, get_or_create_thumbnail
 from .worker import GPUWorker
@@ -219,7 +219,7 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
 
     @app.post("/api/clips/{name}/inference")
     async def queue_inference(name: str, req: InferenceRequest):
-        clip = _get_clip(app, name)
+        _get_clip(app, name)  # 404 if unknown
         service: CorridorKeyService = app.state.service
 
         params_dict = {
@@ -248,7 +248,7 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
 
     @app.post("/api/clips/{name}/gvm")
     async def queue_gvm(name: str):
-        clip = _get_clip(app, name)
+        _get_clip(app, name)  # 404 if unknown
         service: CorridorKeyService = app.state.service
 
         job = GPUJob(JobType.GVM_ALPHA, name)
@@ -259,7 +259,7 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
 
     @app.post("/api/clips/{name}/videomama")
     async def queue_videomama(name: str, req: VideoMaMaRequest | None = None):
-        clip = _get_clip(app, name)
+        _get_clip(app, name)  # 404 if unknown
         service: CorridorKeyService = app.state.service
 
         params = {"chunk_size": req.chunk_size if req else 50}
@@ -454,6 +454,7 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
             if ext in _VIDEO_EXTS:
                 # Queue extraction to AlphaHint dir
                 from backend.ffmpeg_tools import extract_frames
+
                 count = extract_frames(alpha_path, alpha_dir)
             else:
                 # Single image — copy it
@@ -539,7 +540,7 @@ def create_app(clips_dir: str = "ClipsForInference") -> FastAPI:
                 elif _is_video_or_image(name):
                     items.append({"name": name, "type": "file", "path": full})
         except PermissionError:
-            raise HTTPException(403, "Permission denied")
+            raise HTTPException(403, "Permission denied") from None
 
         parent = os.path.dirname(expanded)
         return {
