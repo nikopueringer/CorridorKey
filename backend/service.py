@@ -50,7 +50,6 @@ from .frame_io import (
     read_image_frame,
     read_mask_frame,
     read_video_frame_at,
-    read_video_frames,
     read_video_mask_at,
 )
 from .job_queue import GPUJob, GPUJobQueue
@@ -1123,50 +1122,22 @@ class CorridorKeyService:
         # Sending on_progress(0, N) would switch the status bar to frame-counter
         # mode and overwrite the phase text on every tick.
 
-        # ── Phase 2: Load input frames ──
-        _status("Loading frames...")
-        input_frames = self._load_frames_for_videomama(
-            clip.input_asset,
-            clip.name,
-            job=job,
-            on_status=on_status,
-        )
-        _check_cancel("frame load")
-
-        # ── Phase 3: Load + stem-match masks ──
-        _status("Loading masks...")
-        mask_stems: dict[str, np.ndarray] = {}
-        if clip.mask_asset.asset_type == "sequence":
-            mask_files = clip.mask_asset.get_frame_files()
-            for _i, fname in enumerate(mask_files):
-                _check_cancel("mask load")
-                fpath = os.path.join(clip.mask_asset.path, fname)
-                m = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
-                if m is not None:
-                    _, binary = cv2.threshold(m, 10, 255, cv2.THRESH_BINARY)
-                    stem = os.path.splitext(fname)[0]
-                    mask_stems[stem] = binary
-        else:
-            raw_masks = self._load_mask_frames_for_videomama(clip.mask_asset, clip.name)
-            for i, m in enumerate(raw_masks):
-                mask_stems[f"frame_{i:06d}"] = m
-
-        # Build output filenames from input stems
-        if clip.input_asset and clip.input_asset.asset_type == "sequence":
+        # ── Phase 2: Index frames — decoding happens lazily, one chunk at a
+        # time, so peak memory is a single chunk instead of the whole clip ──
+        _status("Indexing frames...")
+        if clip.input_asset.asset_type == "sequence":
             input_names = clip.input_asset.get_frame_files()
         else:
-            input_names = [f"frame_{i:06d}.png" for i in range(len(input_frames))]
+            input_names = [f"frame_{i:06d}.png" for i in range(clip.input_asset.frame_count)]
+        num_frames = len(input_names)
 
-        # Align masks to input frames by stem, defaulting to all-black
-        num_frames = len(input_frames)
-        mask_frames = []
-        for fname in input_names:
-            stem = os.path.splitext(fname)[0]
-            if stem in mask_stems:
-                mask_frames.append(mask_stems[stem])
-            else:
-                h_m, w_m = input_frames[0].shape[:2] if input_frames else (4, 4)
-                mask_frames.append(np.zeros((h_m, w_m), dtype=np.uint8))
+        # ── Phase 3: Index masks. Sequence masks match input frames by stem;
+        # video masks align by frame index. Missing masks default to black ──
+        mask_paths: dict[str, str] = {}
+        if clip.mask_asset.asset_type == "sequence":
+            for fname in clip.mask_asset.get_frame_files():
+                stem = os.path.splitext(fname)[0]
+                mask_paths[stem] = os.path.join(clip.mask_asset.path, fname)
 
         # ── Resume logic ──
         existing_alpha = []
@@ -1190,47 +1161,55 @@ class CorridorKeyService:
                 f"rolling back to chunk {start_chunk} (frame {start_frame})"
             )
 
-        # ── Phase 4: Inference (per-chunk) ──
+        # ── Phase 4: Inference — read, infer, and write one chunk at a time.
+        # Resume starts decoding at start_frame rather than recomputing (and
+        # discarding) every chunk before it ──
         sys.path.insert(0, os.path.join(BASE_DIR, "VideoMaMaInferenceModule"))
         from VideoMaMaInferenceModule.inference import run_inference
 
         total_chunks = (num_frames + chunk_size - 1) // chunk_size
-        _status(f"Running inference (chunk 1/{total_chunks})...")
         frames_written = start_frame
-        for chunk_idx, chunk_output in enumerate(
-            run_inference(pipeline, input_frames, mask_frames, chunk_size=chunk_size)
-        ):
-            _check_cancel("inference")
+        mask_cap = None
+        try:
+            if clip.mask_asset.asset_type == "video":
+                mask_cap = cv2.VideoCapture(clip.mask_asset.path)
+                if start_frame > 0:
+                    mask_cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-            # Skip already-completed chunks (resume)
-            if chunk_idx < start_chunk:
-                frames_written += len(chunk_output)
+            for chunk_start, stems, chunk_frames in self._iter_videomama_chunks(
+                clip, input_names, start_frame, chunk_size, job, on_warning
+            ):
+                _check_cancel("inference")
+                _status(f"Running inference (chunk {chunk_start // chunk_size + 1}/{total_chunks})...")
+
+                chunk_masks = self._load_videomama_mask_chunk(stems, mask_paths, mask_cap, chunk_frames[0].shape[:2])
+                chunk_output = next(
+                    iter(run_inference(pipeline, chunk_frames, chunk_masks, chunk_size=len(chunk_frames))),
+                    [],
+                )
+                _check_cancel("inference")
+
+                t_chunk = time.monotonic()
+                for stem, frame in zip(stems, chunk_output, strict=False):
+                    # VideoMaMa yields uint8 [0, 255]; clipping those to [0, 1]
+                    # would binarize the soft alpha. Only rescale float frames.
+                    out = np.asarray(frame)
+                    if out.dtype != np.uint8:
+                        out = (np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
+                    out_bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(os.path.join(alpha_dir, f"{stem}.png"), out_bgr)
+                    frames_written += 1
+                chunk_elapsed = time.monotonic() - t_chunk
+                logger.debug(
+                    f"Clip '{clip.name}' chunk {chunk_start // chunk_size}: "
+                    f"{len(chunk_output)} frames in {chunk_elapsed:.3f}s"
+                )
+
                 if on_progress:
                     on_progress(clip.name, frames_written, num_frames)
-                continue
-
-            _status(f"Processing chunk {chunk_idx + 1}/{total_chunks}...")
-
-            # Write chunk frames
-            t_chunk = time.monotonic()
-            for frame in chunk_output:
-                out_bgr = cv2.cvtColor(
-                    (np.clip(frame, 0.0, 1.0) * 255.0).astype(np.uint8),
-                    cv2.COLOR_RGB2BGR,
-                )
-                if frames_written < len(input_names):
-                    stem = os.path.splitext(input_names[frames_written])[0]
-                    out_name = f"{stem}.png"
-                else:
-                    out_name = f"frame_{frames_written:06d}.png"
-                out_path = os.path.join(alpha_dir, out_name)
-                cv2.imwrite(out_path, out_bgr)
-                frames_written += 1
-            chunk_elapsed = time.monotonic() - t_chunk
-            logger.debug(f"Clip '{clip.name}' chunk {chunk_idx}: {len(chunk_output)} frames in {chunk_elapsed:.3f}s")
-
-            if on_progress:
-                on_progress(clip.name, frames_written, num_frames)
+        finally:
+            if mask_cap is not None:
+                mask_cap.release()
 
         # Refresh alpha asset
         clip.alpha_asset = ClipAsset(alpha_dir, "sequence")
@@ -1245,57 +1224,103 @@ class CorridorKeyService:
         elapsed = time.monotonic() - t_start
         logger.info(f"VideoMaMa complete for '{clip.name}': {frames_written} alpha frames in {elapsed:.1f}s")
 
-    def _load_frames_for_videomama(
+    def _iter_videomama_chunks(
         self,
-        asset: ClipAsset,
-        clip_name: str,
-        job: GPUJob | None = None,
-        on_status: Callable[[str], None] | None = None,
-    ) -> list[np.ndarray]:
-        """Load input frames for VideoMaMa as uint8 RGB [0, 255].
+        clip: ClipEntry,
+        input_names: list[str],
+        start_frame: int,
+        chunk_size: int,
+        job: GPUJob | None,
+        on_warning: Callable[[str], None] | None,
+    ):
+        """Yield (chunk_start, stems, frames) with at most chunk_size frames.
 
-        The VideoMaMa inference code expects uint8 arrays for PIL conversion.
-        Reports loading progress via on_status and checks cancel via job.
+        Frames are uint8 RGB, decoded lazily so only one chunk is resident at
+        a time. Unreadable sequence frames are replaced with black (with a
+        warning) so output naming stays aligned with input stems; a video
+        that ends before its reported frame_count stops the iteration early.
         """
-        if asset.asset_type == "video":
-            raw = read_video_frames(asset.path)
-            return [(np.clip(f, 0.0, 1.0) * 255.0).astype(np.uint8) for f in raw]
-        frames = []
-        files = asset.get_frame_files()
-        total = len(files)
-        for i, fname in enumerate(files):
+        num_frames = len(input_names)
+
+        def _warn(msg: str) -> None:
+            logger.warning(msg)
+            if on_warning:
+                on_warning(msg)
+
+        def _check_cancel(index: int) -> None:
             if job and job.is_cancelled:
-                from .errors import JobCancelledError
+                raise JobCancelledError(clip.name, index)
 
-                raise JobCancelledError(clip_name, i)
-            fpath = os.path.join(asset.path, fname)
-            img = read_image_frame(fpath, gamma_correct_exr=True)
-            if img is not None:
-                frames.append((np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8))
-            if on_status and i % 20 == 0 and i > 0:
-                on_status(f"Loading frames ({i}/{total})...")
-        return frames
+        if clip.input_asset.asset_type == "video":
+            cap = cv2.VideoCapture(clip.input_asset.path)
+            try:
+                if start_frame > 0:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                for chunk_start in range(start_frame, num_frames, chunk_size):
+                    _check_cancel(chunk_start)
+                    stems, frames = [], []
+                    for i in range(chunk_start, min(chunk_start + chunk_size, num_frames)):
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        stems.append(os.path.splitext(input_names[i])[0])
+                        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    ended_early = len(frames) < min(chunk_size, num_frames - chunk_start)
+                    if frames:
+                        yield chunk_start, stems, frames
+                    if ended_early:
+                        if chunk_start + len(frames) < num_frames:
+                            _warn(
+                                f"Clip '{clip.name}': video ended at frame "
+                                f"{chunk_start + len(frames)} of {num_frames} expected"
+                            )
+                        return
+            finally:
+                cap.release()
+        else:
+            for chunk_start in range(start_frame, num_frames, chunk_size):
+                _check_cancel(chunk_start)
+                stems, frames = [], []
+                for fname in input_names[chunk_start : chunk_start + chunk_size]:
+                    fpath = os.path.join(clip.input_asset.path, fname)
+                    img = read_image_frame(fpath, gamma_correct_exr=True)
+                    stems.append(os.path.splitext(fname)[0])
+                    if img is None:
+                        _warn(f"Clip '{clip.name}': unreadable frame '{fname}', substituting black")
+                        frames.append(None)
+                    else:
+                        frames.append((np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8))
+                shape = next((f.shape for f in frames if f is not None), (4, 4, 3))
+                frames = [f if f is not None else np.zeros(shape, dtype=np.uint8) for f in frames]
+                yield chunk_start, stems, frames
 
-    def _load_mask_frames_for_videomama(self, asset: ClipAsset, clip_name: str) -> list[np.ndarray]:
-        """Load mask frames for VideoMaMa as uint8 grayscale [0, 255].
+    def _load_videomama_mask_chunk(
+        self,
+        stems: list[str],
+        mask_paths: dict[str, str],
+        mask_cap,
+        frame_hw: tuple[int, int],
+    ) -> list[np.ndarray]:
+        """Load binary masks for one chunk of input stems.
 
-        The VideoMaMa inference code expects uint8 arrays for PIL conversion.
         Binary threshold at 10: anything above → 255 (foreground), else → 0.
+        Sequence masks are looked up by stem in mask_paths; a video mask
+        capture is read sequentially (the caller seeks it to the chunk
+        start). Missing/unreadable masks default to all-black.
         """
-
-        def _threshold_mask(bgr_frame: np.ndarray) -> np.ndarray:
-            gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
-            return binary  # uint8
-
-        if asset.asset_type == "video":
-            return read_video_frames(asset.path, processor=_threshold_mask)
         masks = []
-        for fname in asset.get_frame_files():
-            fpath = os.path.join(asset.path, fname)
-            mask = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                continue
-            _, binary = cv2.threshold(mask, 10, 255, cv2.THRESH_BINARY)
-            masks.append(binary)  # uint8
+        for stem in stems:
+            mask = None
+            if mask_cap is not None:
+                ret, frame = mask_cap.read()
+                if ret:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    _, mask = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+            else:
+                fpath = mask_paths.get(stem)
+                if fpath:
+                    m = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
+                    if m is not None:
+                        _, mask = cv2.threshold(m, 10, 255, cv2.THRESH_BINARY)
+            masks.append(mask if mask is not None else np.zeros(frame_hw, dtype=np.uint8))
         return masks
