@@ -18,6 +18,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from CorridorKeyModule.backend import (
+    BLUE_FILENAME_TOKEN,
     HF_CHECKPOINT_FILENAME_SAFETENSORS,
     HF_REPO_ID,
     TORCH_EXT,
@@ -128,12 +129,26 @@ class TestMissingCheckpointTriggersDownload:
 # Strategies for Property 2
 # ---------------------------------------------------------------------------
 
-# Strategy: valid .pth filenames (alphanumeric + underscore/dash, non-empty)
-_pth_basenames = st.text(
+# Strategy: valid .pth filenames (alphanumeric + underscore/dash, non-empty).
+# Names containing the (case-insensitive) blue token are excluded: the backend
+# classifies them as blue checkpoints, so they do NOT satisfy green discovery
+# and would legitimately trigger the auto-download this property forbids.
+_green_pth_basenames = (
+    st.text(
+        alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_-"),
+        min_size=1,
+        max_size=20,
+    )
+    .map(lambda s: f"{s}.pth")
+    .filter(lambda name: BLUE_FILENAME_TOKEN not in name.lower())
+)
+
+# Strategy: .pth filenames carrying the blue token, as the backend detects it
+_blue_pth_basenames = st.text(
     alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_-"),
-    min_size=1,
-    max_size=20,
-).map(lambda s: f"{s}.pth")
+    min_size=0,
+    max_size=14,
+).map(lambda s: f"{BLUE_FILENAME_TOKEN}{s}.pth")
 
 
 # ---------------------------------------------------------------------------
@@ -143,21 +158,17 @@ _pth_basenames = st.text(
 
 class TestExistingCheckpointSkipsDownload:
     """Property 2: For any checkpoint directory that already contains a .pth
-    file, calling _discover_checkpoint(TORCH_EXT) returns the existing file's
-    path without invoking hf_hub_download.
+    file matching the requested screen color (filenames containing 'blue',
+    case-insensitively, are blue; everything else is green), calling
+    _discover_checkpoint(TORCH_EXT) returns the existing file's path without
+    invoking hf_hub_download.
 
     Feature: auto-model-download, Property 2: Existing checkpoint skips download
 
     **Validates: Requirements 1.3**
     """
 
-    @settings(max_examples=100)
-    @given(pth_name=_pth_basenames)
-    def test_existing_pth_skips_download(self, pth_name: str) -> None:
-        """Feature: auto-model-download, Property 2: Existing checkpoint skips download
-
-        **Validates: Requirements 1.3**
-        """
+    def _assert_skips_download(self, pth_name: str, screen_color: str) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ckpt_dir = Path(tmp) / "checkpoints"
             ckpt_dir.mkdir()
@@ -170,15 +181,37 @@ class TestExistingCheckpointSkipsDownload:
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
                     "huggingface_hub.hf_hub_download",
+                    # Fail loudly if called: a bare MagicMock return value
+                    # would be fed to shutil.copy2, which opens it as fd 1
+                    # (MagicMock.__index__() == 1) and closes stdout.
+                    side_effect=AssertionError("hf_hub_download must not be called"),
                 ) as mock_dl,
             ):
-                result = _discover_checkpoint(TORCH_EXT)
+                result = _discover_checkpoint(TORCH_EXT, screen_color=screen_color)
 
                 # hf_hub_download must NOT have been called
                 mock_dl.assert_not_called()
 
                 # The returned path must match the existing file
                 assert result == existing_file, f"Expected {existing_file}, got {result}"
+
+    @settings(max_examples=100)
+    @given(pth_name=_green_pth_basenames)
+    def test_existing_pth_skips_download(self, pth_name: str) -> None:
+        """Feature: auto-model-download, Property 2: Existing checkpoint skips download
+
+        **Validates: Requirements 1.3**
+        """
+        self._assert_skips_download(pth_name, "green")
+
+    @settings(max_examples=100)
+    @given(pth_name=_blue_pth_basenames)
+    def test_existing_blue_pth_skips_download(self, pth_name: str) -> None:
+        """Feature: auto-model-download, Property 2: Existing checkpoint skips download
+
+        **Validates: Requirements 1.3**
+        """
+        self._assert_skips_download(pth_name, "blue")
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +244,7 @@ class TestAutoDownloadIsTorchOnly:
                 mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(ckpt_dir)),
                 mock.patch(
                     "huggingface_hub.hf_hub_download",
+                    side_effect=AssertionError("hf_hub_download must not be called"),
                 ) as mock_dl,
             ):
                 with pytest.raises(FileNotFoundError):
