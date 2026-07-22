@@ -9,9 +9,10 @@ The codebase uses two different methods to convert between linear and sRGB:
    This follows the IEC 61966-2-1 spec: exponent 2.4 with a linear segment
    below the breakpoint.
 
-2. **Gamma 2.2 approximation** — used by ``clip_manager.py:383`` (VideoMaMa
-   frame loading) and ``gvm_core/gvm/utils/inference_utils.py:124`` (GVM
-   frame loading).  This uses a simple ``x ** (1/2.2)`` power curve.
+2. **Gamma 2.2 approximation** — used by ``clip_manager.run_videomama()``
+   (VideoMaMa frame loading) and ``ImageSequenceReader.__getitem__()`` in
+   ``gvm_core/gvm/utils/inference_utils.py`` (GVM frame loading).  This uses
+   a simple ``x ** (1/2.2)`` power curve.
 
 The two methods produce visibly different results, especially in darks.
 At linear 0.01, the difference is ~4.7% — enough to see in a waveform monitor.
