@@ -67,13 +67,14 @@ docs = ["zensical>=0.0.24"]
 
 [project.scripts]
 corridorkey = "corridorkey_cli:main"
+corridorkey-eval = "corridorkey.eval.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["CorridorKeyModule", "gvm_core", "VideoMaMaInferenceModule"]
+packages = ["CorridorKeyModule", "gvm_core", "VideoMaMaInferenceModule", "corridorkey", "backend"]
 
 [tool.ruff]
 target-version = "py311"
@@ -100,7 +101,7 @@ addopts = "--tb=short"
 branch = true
 # "." covers root-level modules (clip_manager.py, corridorkey_cli.py once PR #8 merges).
 # Third-party and non-library code is excluded via omit.
-source = ["CorridorKeyModule", "."]
+source = ["CorridorKeyModule", "corridorkey", "."]
 omit = [
     "gvm_core/*",
     "VideoMaMaInferenceModule/*",

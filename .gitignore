@@ -1,18 +1,46 @@
-# Python
+# Python & Virtual Environments
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.coverage
+*.py[cod]
+*$py.class
+*.so
 .Python
-.pytest_cache/
-.venv/
-.hypothesis
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+.venv/
+
+# Build & Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+eggs/
+.eggs/
+
+# Testing & Static Analysis
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# PyTorch, Compiler & Triton Caches
+.cache/
+.triton/
+
+# Evaluation & Benchmark Outputs
+eval*.json
+eval_output*.json
+*.eval.json
+benchmark_results/
+eval_results/
+tests/eval/fixtures/
+eval_fixtures/
 
 # Project Specific
 ClipsForInference/*
@@ -23,11 +51,6 @@ Ignored*/*
 !Ignored*/.gitkeep
 CorridorKey_remote.bat
 .ipynb_checkpoints/
-.DS_Store
-
-# IDE
-.vscode/
-.idea/
 
 # Models & Checkpoints (Large Files)
 *.pth
@@ -49,4 +72,21 @@ gvm_core/weights/*
 BiRefNetModule/checkpoints/*
 !BiRefNetModule/checkpoints/.gitkeep
 
-site
+# Docs
+site/
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
