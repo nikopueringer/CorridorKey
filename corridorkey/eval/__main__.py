@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -84,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Generate canonical diagnostic fixtures if dataset directory is missing or empty.",
     )
+    parser.add_argument(
+        "--hint-sweep",
+        action="store_true",
+        help="Run parameterized alpha-hint corruption sweep (undersegmentation vs oversegmentation).",
+    )
 
     args = parser.parse_args(argv)
 
@@ -111,6 +117,23 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         print(f"Failed to initialize engine for {model_label}: {e}", file=sys.stderr)
         return 1
+
+    if args.hint_sweep:
+        print("Running parameterized alpha-hint corruption sweep...")
+        from .hint_corruption import run_hint_sweep
+        from .report import print_hint_sweep_report
+
+        sweep_report = run_hint_sweep(engine, samples, model_name=model_label)
+        print_hint_sweep_report(sweep_report)
+
+        if args.output:
+            out_path = Path(args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(sweep_report.to_dict(), f, indent=2)
+                f.write("\n")
+            print(f"Wrote structured hint sweep receipt to {out_path}")
+        return 0
 
     print("Running evaluation suite...")
     report = evaluate_dataset(engine, samples, model_name=model_label)

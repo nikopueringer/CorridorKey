@@ -2,6 +2,16 @@
 
 from .cases import MattingEvalSample, load_dataset, load_sample_from_directory
 from .fixtures import FIXTURE_GENERATORS, create_diagnostic_fixtures
+from .hint_corruption import (
+    CANONICAL_HINT_PROFILES,
+    HintCorruptionSpec,
+    HintProfileResult,
+    HintSweepReport,
+    compute_asymmetric_error,
+    compute_hint_iou,
+    corrupt_alpha,
+    run_hint_sweep,
+)
 from .metrics import (
     compute_alpha_mae,
     compute_boundary_alpha_mae,
@@ -31,4 +41,12 @@ __all__ = [
     "format_text_table",
     "write_json_report",
     "print_report",
+    "HintCorruptionSpec",
+    "corrupt_alpha",
+    "compute_hint_iou",
+    "compute_asymmetric_error",
+    "CANONICAL_HINT_PROFILES",
+    "HintProfileResult",
+    "HintSweepReport",
+    "run_hint_sweep",
 ]

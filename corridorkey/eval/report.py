@@ -7,7 +7,7 @@ model benchmark results.
 from __future__ import annotations
 
 import json
-from typing import TextIO
+from typing import Any, TextIO
 
 from .runner import EvaluationReport
 
@@ -33,7 +33,7 @@ def format_text_table(report: EvaluationReport) -> str:
     """Format an EvaluationReport as a clean ASCII benchmark table."""
     lines: list[str] = []
     lines.append("=" * 84)
-    header_model = f" CorridorKey Evaluation Benchmark — {report.model_name or 'Default'}"
+    header_model = f" CorridorKey Evaluation Benchmark: {report.model_name or 'Default'}"
     lines.append(f"{header_model:<84}")
     lines.append("=" * 84)
 
@@ -114,3 +114,59 @@ def print_report(report: EvaluationReport) -> None:
 
     except ImportError:
         print(format_text_table(report))
+
+
+def format_hint_sweep_text_table(report: Any) -> str:
+    """Format a HintSweepReport as an ASCII table."""
+    lines: list[str] = []
+    lines.append("=" * 86)
+    header = f" CorridorKey Alpha-Hint Asymmetry Sweep: {report.model_name or 'Default'}"
+    lines.append(f"{header:<86}")
+    lines.append("=" * 86)
+    hdr = (
+        f"{'Corruption Profile':<24} {'Hint IoU':>10} {'Alpha MAE':>12} "
+        f"{'Boundary MAE':>14} {'FP Alpha':>12} {'FN Alpha':>12}"
+    )
+    lines.append(hdr)
+    lines.append("-" * 86)
+    for r in report.results:
+        lines.append(
+            f"{r.profile_name:<24} {r.hint_iou:>10.4f} {r.alpha_mae:>12.4f} "
+            f"{r.boundary_alpha_mae:>14.4f} {r.fp_alpha:>12.4f} {r.fn_alpha:>12.4f}"
+        )
+    lines.append("=" * 86)
+    return "\n".join(lines)
+
+
+def print_hint_sweep_report(report: Any) -> None:
+    """Print the hint sweep benchmark to stdout, using rich if available."""
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(
+            title=(
+                f"CorridorKey Alpha-Hint Corruption Sweep: [bold green]{report.model_name or 'Candidate'}[/bold green]"
+            ),
+            header_style="bold cyan",
+        )
+        table.add_column("Corruption Profile", style="bold")
+        table.add_column("Hint IoU", justify="right")
+        table.add_column("Alpha MAE", justify="right")
+        table.add_column("Boundary Alpha MAE", justify="right")
+        table.add_column("FP Alpha", justify="right")
+        table.add_column("FN Alpha", justify="right")
+
+        for r in report.results:
+            table.add_row(
+                r.profile_name,
+                f"{r.hint_iou:.4f}",
+                f"{r.alpha_mae:.4f}",
+                f"{r.boundary_alpha_mae:.4f}",
+                f"{r.fp_alpha:.4f}",
+                f"{r.fn_alpha:.4f}",
+            )
+        console.print(table)
+    except ImportError:
+        print(format_hint_sweep_text_table(report))
