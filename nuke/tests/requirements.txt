@@ -1,0 +1,5 @@
+pytest>=8,<10
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
+OpenEXR>=3.3,<4
+ruff==0.15.4
